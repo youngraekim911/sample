@@ -85,7 +85,11 @@ class RCWAPlaneWaveSimulator:
 
     # -----------------------------------------------------------------
     def _nk_at(self, name, lam):
-        """물질 name 의 (n,k) @ lam(um).  우선순위: materials/ 폴더 -> config dispersion -> 상수."""
+        """물질 name 의 (n,k) @ lam(um).  우선순위: materials/ 폴더(src|name) -> dispersion -> 상수."""
+        mconf = (self.cfg.get("materials", {}) or {}).get(name, {}) or {}
+        src = mconf.get("src", name)                 # 물질별 n,k 파일 지정(src) 우선
+        if self.matlib and self.matlib.has(src):
+            return self.matlib.nk(src, lam)
         if self.matlib and self.matlib.has(name):
             return self.matlib.nk(name, lam)
         disp = self.cfg.get("dispersion", {})

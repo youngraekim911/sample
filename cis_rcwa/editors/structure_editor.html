@@ -257,18 +257,25 @@ const DEFAULT = {
     arl_top:[ {material:"ml_arl",thickness_um:0.10} ]
   }
 };
-// 자동 저장(localStorage) 복원 + ref 파장
+// 자동 저장(localStorage) 복원 + ref 파장 + 폴더 물질 라이브러리(파장별 n,k)
 let refLambda = 0.55;
+let folderLib = {};        // { 물질명: [[lam_um,n,k],...] }  materials 폴더에서 로드
 let S = (function(){ try{ const j=localStorage.getItem("cis_struct_v1");
-    if(j){ const d=JSON.parse(j); if(d.refLambda) refLambda=d.refLambda; if(d.S) return d.S; } }catch(e){}
+    if(j){ const d=JSON.parse(j); if(d.refLambda) refLambda=d.refLambda; if(d.folderLib) folderLib=d.folderLib; if(d.S) return d.S; } }catch(e){}
   return structuredClone(DEFAULT); })();
-function saveState(){ try{ localStorage.setItem("cis_struct_v1", JSON.stringify({S,refLambda})); }catch(e){} }
+function saveState(){ try{ localStorage.setItem("cis_struct_v1", JSON.stringify({S,refLambda,folderLib})); }catch(e){} }
 function interp1(x,xs,ys){ if(x<=xs[0])return ys[0]; const n=xs.length; if(x>=xs[n-1])return ys[n-1];
   for(let i=1;i<n;i++){ if(x<=xs[i]){ const t=(x-xs[i-1])/(xs[i]-xs[i-1]); return ys[i-1]+t*(ys[i]-ys[i-1]); } } return ys[n-1]; }
-// 물질 (n,k) @ refLambda — 파장의존(nk 테이블) 있으면 보간, 없으면 상수
-function matNK(name){ const m=S.materials[name]; if(!m)return{n:1,k:0};
-  if(m.nk&&m.nk.length){ const L=m.nk.map(r=>r[0]); return {n:interp1(refLambda,L,m.nk.map(r=>r[1])), k:interp1(refLambda,L,m.nk.map(r=>r[2]))}; }
-  return {n:+m.n,k:+m.k}; }
+// 물질의 n,k 테이블 소스: src 지정 폴더파일 -> 동일이름 폴더파일 -> inline nk -> 없음
+function matTable(name){ const m=S.materials[name]||{};
+  if(m.src && folderLib[m.src]) return folderLib[m.src];
+  if(folderLib[name]) return folderLib[name];
+  if(m.nk && m.nk.length) return m.nk;
+  return null; }
+// 물질 (n,k) @ refLambda
+function matNK(name){ const m=S.materials[name]||{n:1,k:0}; const tab=matTable(name);
+  if(tab && tab.length){ const L=tab.map(r=>r[0]); return {n:interp1(refLambda,L,tab.map(r=>r[1])), k:interp1(refLambda,L,tab.map(r=>r[2]))}; }
+  return {n:+m.n||0, k:+m.k||0}; }
 function parseNKText(txt){ const rows=[];
   txt.split(/\r?\n/).forEach(l=>{ l=l.trim(); if(!l||l[0]==="#")return; const p=l.replace(/,/g," ").split(/\s+/).map(Number);
     if(p.length>=3&&p.slice(0,3).every(v=>!isNaN(v))) rows.push(p.slice(0,3)); });
@@ -327,12 +334,12 @@ function nearBoundary(coord, w){ const p=P(); const u=((coord%p)+p)%p; const h=w
 // 모델: Si -> 트렌치 식각(center-open 사각형) -> 사이드월 oxide 라이너 -> 안쪽 Si 채움
 function dtiAt(x,y){
   const p=P(), st=S.stack.dti, ol=+st.oxide_liner_um, W=+st.wall_width_um, ox=st.liner||"oxide";
-  // 1) center open 사각 box: 트렌치 안 파임 -> Si. box 표면(트렌치 면)엔 oxide.
+  // 1) center: 안 뚫음(식각 X) -> 순수 Si. 오직 트렌치에만 oxide 형성.
   if(st.center_open){
     const gh=(+st.center_gap_um||0)/2;
     const oddIdx=v=>{ const i=Math.round(v/p); return (i%2!==0)?i:(v>i*p?i+1:i-1); };
-    const cx=oddIdx(x)*p, cy=oddIdx(y)*p, dxc=Math.abs(x-cx), dyc=Math.abs(y-cy);
-    if(dxc<gh && dyc<gh){ const edge=Math.min(gh-dxc,gh-dyc); return edge<ol ? ox : null; }
+    const cx=oddIdx(x)*p, cy=oddIdx(y)*p;
+    if(Math.abs(x-cx)<gh && Math.abs(y-cy)<gh) return null;   // pure Si (center 안 뚫음)
   }
   // 2) 트렌치(모든 pixel 경계, 폭 W): 사이드월 ol 만 oxide, 안쪽은 Si 채움
   const dx=Math.abs(x-Math.round(x/p)*p), dy=Math.abs(y-Math.round(y/p)*p), d=Math.min(dx,dy);
@@ -345,7 +352,7 @@ function totalHeight(){
   const s=S.stack;
   const arlB=s.arl_bottom.reduce((a,l)=>a+ +l.thickness_um,0);
   const arlT=s.arl_top.reduce((a,l)=>a+ +l.thickness_um,0);
-  return +s.si_substrate.thickness_um + +s.dti.depth_um + arlB +
+  return +s.si_substrate.thickness_um + arlB +               // DTI 는 substrate 내 식각(별도 두께 X)
     Math.max(+s.color_filter.thickness_um, stackTotalGrid()) + +s.ml_planar.thickness_um +
     +s.microlens.sag_height_um + arlT + +S.grid.air_margin_um;
 }
@@ -358,7 +365,7 @@ function drawXZ(){
   const arlB=s.arl_bottom.reduce((a,l)=>a+ +l.thickness_um,0);
   const arlTtot=s.arl_top.reduce((a,l)=>a+ +l.thickness_um,0);
   const cfH=Math.max(+s.color_filter.thickness_um, stackTotalGrid());
-  const Htot=+s.si_substrate.thickness_um+ +s.dti.depth_um+arlB+cfH+ +s.ml_planar.thickness_um
+  const Htot=+s.si_substrate.thickness_um+arlB+cfH+ +s.ml_planar.thickness_um
     + +s.microlens.sag_height_um+arlTtot+ +S.grid.air_margin_um;
   const padL=44,padB=26,padT=10,padR=10;
   const sx=(W-padL-padR)/span, sz=(H-padB-padT)/Htot;
@@ -370,14 +377,14 @@ function drawXZ(){
   rect(0,span,0,Htot,matColor("air"));
 
   let z=0;
-  // 1) Si substrate
-  rect(0,span,z,z+ +s.si_substrate.thickness_um, matColor(s.si_substrate.material)); z+=+s.si_substrate.thickness_um;
-  // 2) DTI band — cutY 라인을 x 로 rasterize (개구 사각/코팅 정확 반영)
-  const dth=+s.dti.depth_um; rect(0,span,z,z+dth,matColor(s.dti.fill));   // Si 배경
+  // 1) Si substrate (DTI 는 별도 밴드가 아니라 이 substrate 상단 depth 에 식각됨)
+  const siTh=+s.si_substrate.thickness_um, dth=Math.min(+s.dti.depth_um, siTh);
+  rect(0,span,z,z+siTh, matColor(s.si_substrate.material));   // 전체 Si
+  // DTI: substrate 상단 depth 구간 [siTh-dth, siTh] 에 트렌치(oxide 라이너)만 rasterize
   { const wpx=Math.round((W-padL-padR));
     for(let px=0;px<wpx;px++){ const x=px/sx; const m=dtiAt(x,cutY); if(!m) continue;
-      ctx.fillStyle=matColor(m); ctx.fillRect(padL+px, Z(z+dth), 1, dth*sz); } }
-  z+=dth;
+      ctx.fillStyle=matColor(m); ctx.fillRect(padL+px, Z(siTh), 1, dth*sz); } }
+  z+=siTh;
   // 3) ARL bottom (blanket 다층)
   for(const l of s.arl_bottom){ rect(0,span,z,z+ +l.thickness_um,matColor(l.material)); z+=+l.thickness_um; }
   // 4) CF + grid  (CF 색 배경 위에 grid 를 taper/다층/oxide코팅 rasterize)
@@ -526,21 +533,27 @@ function buildSide(){
     (()=>{const i=h("input",{type:"number",step:"0.01",value:refLambda});
       i.oninput=()=>{refLambda=parseFloat(i.value);buildSide();render();};return i;})()]);
   const loadBtn=h("button",{class:"btn mini",onclick:()=>document.getElementById("matFolder").click()},["📁 Load materials folder (.txt)"]);
-  const mtbl=h("table",{}); mtbl.appendChild(h("tr",{},[h("th",{},["material"]),h("th",{},["n"]),h("th",{},["k"]),h("th",{},["λ"]),h("th",{},[""])]));
+  const folderNames=Object.keys(folderLib);
+  const mtbl=h("table",{}); mtbl.appendChild(h("tr",{},[h("th",{},["구조 물질"]),h("th",{},["n,k 파일 (폴더)"]),h("th",{},["n"]),h("th",{},["k"]),h("th",{},[""])]));
   Object.entries(S.materials).forEach(([name,mk])=>{ const tr=h("tr",{class:"mat"});
     tr.appendChild(h("td",{},[name]));
-    const disp=mk.nk&&mk.nk.length, at=matNK(name);
-    if(disp){ tr.appendChild(h("td",{},[at.n.toFixed(3)])); tr.appendChild(h("td",{},[at.k.toFixed(3)]));
-      tr.appendChild(h("td",{},[h("span",{class:"hint",title:mk.nk.length+" pts"},["λ✓"])])); }
+    // n,k 파일 선택 (폴더 물질)
+    const sel=h("select",{}); sel.style.width="100%";
+    const cur = (mk.src&&folderLib[mk.src])?mk.src : (folderLib[name]?name:"(const)");
+    [["(const)","(상수)"], ...folderNames.map(fn=>[fn,fn])].forEach(([v,t])=>{ const o=h("option",{value:v},[t]); if(cur===v)o.selected=true; sel.appendChild(o); });
+    sel.onchange=()=>{ mk.src = sel.value==="(const)"?undefined:sel.value; buildSide(); render(); };
+    tr.appendChild(h("td",{},[sel]));
+    const at=matNK(name), hasTab=!!matTable(name);
+    if(hasTab){ tr.appendChild(h("td",{},[at.n.toFixed(3)])); tr.appendChild(h("td",{},[at.k.toFixed(3)])); }
     else { const ni=h("input",{type:"number",step:"0.01",value:mk.n}); ni.oninput=()=>{mk.n=parseFloat(ni.value);render();};
       const ki=h("input",{type:"number",step:"0.001",value:mk.k}); ki.oninput=()=>{mk.k=parseFloat(ki.value);render();};
-      tr.appendChild(h("td",{},[ni])); tr.appendChild(h("td",{},[ki])); tr.appendChild(h("td",{},[""])); }
+      tr.appendChild(h("td",{},[ni])); tr.appendChild(h("td",{},[ki])); }
     tr.appendChild(h("td",{},[h("button",{class:"del",onclick:()=>{delete S.materials[name];buildSide();render();}},["✕"])]));
     mtbl.appendChild(tr); });
   const addMat=h("div",{class:"row"},[ (()=>{const i=h("input",{type:"text",placeholder:"new material name",id:"newmat"});i.style.flex="1";return i;})(),
     h("button",{class:"btn mini",onclick:()=>{const nm=document.getElementById("newmat").value.trim(); if(nm&&!S.materials[nm]){S.materials[nm]={n:1.5,k:0};buildSide();render();}}},["+ add"]) ]);
-  side.appendChild(card("Materials (n, k · λ-dependent)", false,[refRow,loadBtn,mtbl,addMat,
-    h("p",{class:"hint"},["📁 폴더의 <name>.txt (열: 파장 n k) 자동 로드 → 물질별 파장의존 n,k (λ✓). 구조에서 물질 select 시 그 값 물려짐. 편집상태 자동 저장(localStorage)."]) ]));
+  side.appendChild(card("Materials (구조물질 ↔ 폴더 n,k)", false,[refRow,loadBtn,mtbl,addMat,
+    h("p",{class:"hint"},["각 구조 물질에 폴더의 n,k 파일을 지정(예: Si→si.txt). ref λ 에서의 n,k 표시. 📁 로 폴더 로드 후 이름 같으면 자동 매핑. 자동 저장(localStorage)."]) ]));
 
   // Si substrate
   const ss=S.stack.si_substrate;
@@ -615,14 +628,16 @@ const matFolderInput=document.getElementById("matFolder");
 matFolderInput.onchange=async(e)=>{ const files=[...e.target.files]; let n=0;
   for(const f of files){ if(!/\.txt$/i.test(f.name))continue; let txt; try{txt=await f.text();}catch(_){continue;}
     const nk=parseNKText(txt); if(!nk)continue; const name=f.name.replace(/\.txt$/i,"");
-    const L=nk.map(r=>r[0]); S.materials[name]={nk, n:interp1(refLambda,L,nk.map(r=>r[1])), k:interp1(refLambda,L,nk.map(r=>r[2]))}; n++; }
-  buildSide(); render(); e.target.value=""; alert(n+" material(s) 로드됨 (파장별 n,k)."); };
+    folderLib[name]=nk; n++; }
+  // 구조 물질 이름이 폴더 파일과 같으면 자동 매핑(src)
+  for(const role in S.materials){ if(!S.materials[role].src && folderLib[role]) S.materials[role].src=role; }
+  buildSide(); render(); e.target.value=""; alert(n+" 개 물질 n,k 파일 로드됨 (파장별)."); };
 
 document.getElementById("exportBtn").onclick=()=>{
   // 파장별 n,k 테이블은 materials/ 폴더가 소스 -> YAML 에는 ref λ 상수값만
   const exp=structuredClone(S);
-  for(const m in exp.materials){ if(exp.materials[m].nk){ const at=matNK(m);
-    exp.materials[m]={n:+at.n.toFixed(4),k:+at.k.toFixed(4)}; } }
+  for(const m in exp.materials){ const at=matNK(m), src=exp.materials[m].src;
+    exp.materials[m]={n:+at.n.toFixed(4),k:+at.k.toFixed(4)}; if(src) exp.materials[m].src=src; }
   const pname=(S.product||"structure").trim().replace(/[^\w\-.]/g,"_")||"structure";
   const text=`# CIS structure · product: ${S.product||""}\n# 파장별 n,k 는 materials/ 폴더 txt 사용 (아래 n,k 는 λ=${refLambda}µm 상수 fallback)\n`+YAML.emit(exp);
   document.getElementById("dlgTitle").textContent=`Save · ${pname}.yaml`;
