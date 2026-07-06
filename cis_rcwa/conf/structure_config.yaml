@@ -39,14 +39,14 @@ stack:
     thickness_um: 2.0
     material: si
 
-  dti:                      # Si backside deep trench isolation
+  dti:                      # Si DTI: 식각 -> oxide 라이너 -> Si 채움
     depth_um: 0.50
-    wall_width_um: 0.15
-    oxide_liner_um: 0.02    # DTI 표면 균일 oxide
-    metal: dti_metal
-    fill: si                # 트렌치 내부(라이너 안쪽) 채움
-    center_open: true       # 2x2 중앙 '사각' 개구 -> Si 중앙 연결
-    center_gap_um: 0.20     # 개구 사각 크기 (표면은 oxide_liner 로 코팅, 안쪽 Si)
+    wall_width_um: 0.15     # 트렌치 폭
+    oxide_liner_um: 0.02    # 트렌치 사이드월 oxide 라이너
+    liner: oxide            # 라이너 물질
+    fill: si                # 라이너 안쪽 채움 (Si)
+    center_open: true       # 2x2 중앙 '사각' 개구(식각 안함) -> Si 중앙 연결
+    center_gap_um: 0.20     # 개구 사각 크기 (개구 표면도 oxide 코팅)
 
   arl_bottom:               # 전면(blanket) 다층 AR (grid 분리 없음)
     - { material: arl_hi, thickness_um: 0.02 }

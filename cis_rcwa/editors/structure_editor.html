@@ -244,7 +244,7 @@ const DEFAULT = {
   bayer:[["R","G","R","G"],["G","B","G","B"],["R","G","R","G"],["G","B","G","B"]],
   stack:{
     si_substrate:{ thickness_um:2.0, material:"si" },
-    dti:{ depth_um:0.50, wall_width_um:0.15, oxide_liner_um:0.02, metal:"dti_metal", fill:"si", center_open:true, center_gap_um:0.20 },
+    dti:{ depth_um:0.50, wall_width_um:0.15, oxide_liner_um:0.02, liner:"oxide", fill:"si", center_open:true, center_gap_um:0.20 },
     arl_bottom:[ {material:"arl_hi",thickness_um:0.02}, {material:"arl_lo",thickness_um:0.05} ],
     color_filter:{ thickness_um:0.60,
       grid:{ width_um:0.15, shape:"rect", oxide_wrap_um:0.02,
@@ -308,27 +308,22 @@ function mlSag(x,y){
 }
 // 경계 위치 판정
 function nearBoundary(coord, w){ const p=P(); const u=((coord%p)+p)%p; const h=w/2; return u<h||u>p-h; }
-// DTI 물질 판정: 'metal' | 'oxide' | null(Si)
+// DTI 물질 판정 -> 물질명 | null(Si)
+// 모델: Si -> 트렌치 식각(center-open 사각형) -> 사이드월 oxide 라이너 -> 안쪽 Si 채움
 function dtiAt(x,y){
-  const p=P(), st=S.stack.dti, ol=+st.oxide_liner_um, wm=+st.wall_width_um;
-  // 1) center open: quad 중앙(odd*p) 의 '사각' window — 가장자리 oxide 코팅, 안쪽 Si
+  const p=P(), st=S.stack.dti, ol=+st.oxide_liner_um, W=+st.wall_width_um, ox=st.liner||"oxide";
+  // 1) center open 사각 box: 트렌치 안 파임 -> Si. box 표면(트렌치 면)엔 oxide.
   if(st.center_open){
     const gh=(+st.center_gap_um||0)/2;
     const oddIdx=v=>{ const i=Math.round(v/p); return (i%2!==0)?i:(v>i*p?i+1:i-1); };
-    const cx=oddIdx(x)*p, cy=oddIdx(y)*p;
-    const dxc=Math.abs(x-cx), dyc=Math.abs(y-cy);
-    if(dxc<gh && dyc<gh){                       // 개구 사각 안
-      const edge=Math.min(gh-dxc, gh-dyc);
-      return edge<ol ? 'oxide' : null;          // 표면 oxide 코팅 / 안쪽 Si
-    }
+    const cx=oddIdx(x)*p, cy=oddIdx(y)*p, dxc=Math.abs(x-cx), dyc=Math.abs(y-cy);
+    if(dxc<gh && dyc<gh){ const edge=Math.min(gh-dxc,gh-dyc); return edge<ol ? ox : null; }
   }
-  // 2) 일반 DTI 벽 (모든 pixel 경계): oxide 라이너 + metal 코어
-  const bx=Math.round(x/p), by=Math.round(y/p);
-  const dx=Math.abs(x-bx*p), dy=Math.abs(y-by*p);
-  if(!(dx<wm/2+ol || dy<wm/2+ol)) return null;  // Si 내부
-  return (dx<wm/2 || dy<wm/2) ? 'metal' : 'oxide';
+  // 2) 트렌치(모든 pixel 경계, 폭 W): 사이드월 ol 만 oxide, 안쪽은 Si 채움
+  const dx=Math.abs(x-Math.round(x/p)*p), dy=Math.abs(y-Math.round(y/p)*p), d=Math.min(dx,dy);
+  if(d>=W/2) return null;                       // Si 기판
+  return (d > W/2 - ol) ? ox : null;            // 사이드월 oxide 라이너 / Si 채움
 }
-function dtiColor(m){ return m==='metal' ? matColor(S.stack.dti.metal) : matColor('oxide'); }
 
 // ============================ 렌더: XZ 단면 ============================
 function totalHeight(){
@@ -366,7 +361,7 @@ function drawXZ(){
   const dth=+s.dti.depth_um; rect(0,span,z,z+dth,matColor(s.dti.fill));   // Si 배경
   { const wpx=Math.round((W-padL-padR));
     for(let px=0;px<wpx;px++){ const x=px/sx; const m=dtiAt(x,cutY); if(!m) continue;
-      ctx.fillStyle=dtiColor(m); ctx.fillRect(padL+px, Z(z+dth), 1, dth*sz); } }
+      ctx.fillStyle=matColor(m); ctx.fillRect(padL+px, Z(z+dth), 1, dth*sz); } }
   z+=dth;
   // 3) ARL bottom (blanket 다층)
   for(const l of s.arl_bottom){ rect(0,span,z,z+ +l.thickness_um,matColor(l.material)); z+=+l.thickness_um; }
@@ -426,7 +421,7 @@ function renderTops(){
     const x0=g.X(0), y0=g.Y(g.span), side=g.span*g.sc, N=Math.round(side);
     for(let py=0;py<N;py++)for(let px=0;px<N;px++){
       const xu=px/g.sc, yu=(N-1-py)/g.sc; const m=dtiAt(xu,yu); if(!m) continue;
-      ctx.fillStyle=dtiColor(m); ctx.fillRect(x0+px, y0+py, 1, 1); }
+      ctx.fillStyle=matColor(m); ctx.fillRect(x0+px, y0+py, 1, 1); }
   });
   // CF + grid (per-pixel)
   drawTop("tvCf",(ctx,g)=>{
@@ -450,7 +445,7 @@ function renderTops(){
 
 function renderLegend(){
   const used=new Set(["air","si","oxide"]);
-  used.add(S.stack.dti.metal); used.add(S.stack.dti.fill);
+  used.add(S.stack.dti.liner||"oxide"); used.add(S.stack.dti.fill);
   S.stack.arl_bottom.forEach(l=>used.add(l.material));
   ["cf_red","cf_green","cf_blue"].forEach(c=>used.add(c));
   S.stack.color_filter.grid.stack.forEach(l=>used.add(l.material));
@@ -543,13 +538,13 @@ function buildSide(){
   const dti=S.stack.dti;
   const coCk=h("input",{type:"checkbox"}); coCk.checked=dti.center_open; coCk.onchange=()=>{dti.center_open=coCk.checked;render();};
   side.appendChild(card("② Si DTI (isolation)", true,[
-    numRow("depth (µm)",dti,"depth_um"), numRow("wall width (µm)",dti,"wall_width_um"),
+    numRow("depth (µm)",dti,"depth_um"), numRow("trench width (µm)",dti,"wall_width_um"),
     numRow("oxide liner (µm)",dti,"oxide_liner_um"),
-    h("div",{class:"row"},[h("label",{},["metal"]),matSelect(dti,"metal")]),
+    h("div",{class:"row"},[h("label",{},["oxide liner mat"]),matSelect(dti,"liner")]),
     h("div",{class:"row"},[h("label",{},["trench fill"]),matSelect(dti,"fill")]),
     h("div",{class:"row"},[h("label",{},["center open (2×2 Si 연결)"]),coCk]),
     numRow("center gap (µm)",dti,"center_gap_um"),
-    h("p",{class:"hint"},["+ 교차 중앙의 이만큼만 제거 → 4픽셀 Si 중앙 연결"]),
+    h("p",{class:"hint"},["모델: 식각(center-open 사각) → 사이드월 oxide 라이너 → 안쪽 Si 채움. 개구 box 표면도 oxide."]),
   ]));
 
   // ARL bottom
