@@ -76,14 +76,15 @@
   </aside>
   <div class="stage">
     <div class="viewtabs">
-      <span class="vtab on" data-v="iso">3D</span>
-      <span class="vtab" data-v="front">Front (XZ)</span>
-      <span class="vtab" data-v="side">Side (YZ)</span>
-      <span class="vtab" data-v="top">Top</span>
+      <span class="hint">3D: 드래그=회전 · 휠=줌</span>
+      <button class="btn ghost mini" id="resetView">reset view</button>
       <div class="spacer"></div>
       <label class="hint" style="display:flex;gap:6px;align-items:center">cut <input type="number" id="cutY" step="0.05" value="0.5" style="width:70px"></label>
     </div>
-    <div class="viewwrap" id="viewWrap"></div>
+    <div class="viewwrap" id="viewWrap" style="position:relative;padding:0;overflow:hidden">
+      <canvas id="iso3d" style="position:absolute;inset:0;width:100%;height:100%;border:none;border-radius:0"></canvas>
+      <div id="mini" style="position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:space-between;padding:10px;pointer-events:none;gap:10px"></div>
+    </div>
     <div class="statusbar" id="status"></div>
   </div>
 </div>
@@ -140,7 +141,8 @@ function bandH(){ return Math.max(cfMaxH(), gridTotalH()); }
 // DTI: 물질명|null(Si)  (center 안 뚫음=Si, 트렌치=oxide 라이너 + fill). ol <= W/2
 function dtiAt(x,y){ const p=P(),st=S.stack.dti,W=+st.width_um,ol=Math.min(+st.oxide_liner_um,W/2),ox=st.liner||"oxide",fl=st.fill||"si";
   if(st.center_open){ const gh=(+st.center_gap_um||0)/2; const od=v=>{const i=Math.round(v/p);return(i%2!==0)?i:(v>i*p?i+1:i-1);};
-    if(Math.abs(x-od(x)*p)<gh && Math.abs(y-od(y)*p)<gh) return null; }
+    const dxc=Math.abs(x-od(x)*p), dyc=Math.abs(y-od(y)*p);
+    if(dxc<gh && dyc<gh){ const edge=Math.min(gh-dxc,gh-dyc); return edge<ol ? ox : null; } }  // 개구 표면(트렌치 면) oxide 라이너 + Si
   const d=Math.min(Math.abs(x-Math.round(x/p)*p),Math.abs(y-Math.round(y/p)*p));
   if(d>=W/2) return null; return (d>W/2-ol)?ox:fl; }   // 사이드월 라이너 / 나머지 fill
 // Grid: (x, zabs[um 0..gridTotalH]) -> 물질명|null(CF). 코팅=옆면+윗면 표면
@@ -196,16 +198,32 @@ function npyU8(arr,shape){ const hdr=`{'descr': '|u1', 'fortran_order': False, '
 // ============================ 렌더 ============================
 function el(id){return document.getElementById(id);}
 let _raf=null;
-function renderViews(){ if(_raf)cancelAnimationFrame(_raf); _raf=requestAnimationFrame(_renderViews); }  // 디바운스(타이핑 렉 방지)
+const v3={yaw:-0.7, pitch:0.55, zoom:1};
+function renderViews(){ if(_raf)cancelAnimationFrame(_raf); _raf=requestAnimationFrame(_renderViews); }
 function _renderViews(){ _raf=null;
-  const w=el("viewWrap"); w.innerHTML=""; w.style.flexDirection="column"; w.style.flexWrap="nowrap";
-  if(viewMode==="front"||viewMode==="side"){ const c=mkCanvas(760,460); w.appendChild(c.wrap); drawSection(c.cv, viewMode==="front"?"x":"y");
-    const lg=document.createElement("div"); lg.className="legend"; usedMats().forEach(n=>{const s=document.createElement("span"); s.innerHTML=`<i style="background:${matColor(n)}"></i>${n}`; lg.appendChild(s);}); w.appendChild(lg); }
-  else if(viewMode==="iso"){ const c=mkCanvas(760,520); w.appendChild(c.wrap); drawISO(c.cv); }
-  else { w.style.flexDirection="row"; w.style.flexWrap="wrap"; ["DTI","CF+Grid","ML"].forEach((t,i)=>{ const box=document.createElement("div"); const cap=document.createElement("div"); cap.className="hint"; cap.textContent=t; const c=mkCanvas(240,240); box.appendChild(cap); box.appendChild(c.wrap); w.appendChild(box); drawTop(c.cv,i); }); }
+  const cv=el("iso3d"), r=cv.parentElement.getBoundingClientRect(); cv.width=Math.max(50,r.width); cv.height=Math.max(50,r.height);
+  drawISO3D(cv);
+  // 미니 2D 패널: Front(좌하) · Top(중앙하) · Side(우하)
+  const m=el("mini"); m.innerHTML="";
+  [["front","Front (XZ)"],["top","Top-down"],["side","Side (YZ)"]].forEach(([mode,lbl])=>{
+    const box=document.createElement("div"); box.style.cssText="pointer-events:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px";
+    const cap=document.createElement("div"); cap.className="hint"; cap.style.fontSize="10px"; cap.textContent=lbl;
+    const c=document.createElement("canvas"); c.width=220; c.height=150;
+    box.appendChild(cap); box.appendChild(c); m.appendChild(box);
+    if(mode==="top") drawTopDown(c); else drawSection(c, mode==="front"?"x":"y");
+  });
   const nx=Math.round(P()*NP()/S.grid.dxy_um);
   el("status").innerHTML=`step ${curStep+1}/8 · pitch ${P()}µm · ${NP()}×${NP()} · total ${totalH().toFixed(2)}µm · npy ${nx}×${nx}×${Math.round(totalH()/S.grid.dz_um)}`;
   save();
+}
+// top-down: 위에서 본 최상단 non-air 물질
+function drawTopDown(cv){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height,p=P(),span=p*NP(),pad=6; ctx.clearRect(0,0,W,H);
+  const sc=Math.min(W-2*pad,H-2*pad)/span,ox=(W-span*sc)/2,oy=(H-span*sc)/2,Ht=totalH(),B=2;
+  const N=Math.round(span*sc);
+  for(let px=0;px<N;px+=B)for(let py=0;py<N;py+=B){ const x=(px+B/2)/sc,y=span-(py+B/2)/sc;
+    let col=null; for(let zc=Ht-0.01; zc>0; zc-=Math.max(0.02,Ht/60)){ const mm=matAt(x,y,zc,curStep); if(mm!=="air"){col=matColor(mm);break;} }
+    if(col){ctx.fillStyle=col; ctx.fillRect(ox+px,oy+py,B,B);} }
+  ctx.strokeStyle=css("--line"); ctx.strokeRect(ox,oy,span*sc,span*sc);
 }
 function mkCanvas(w,h){ const wrap=document.createElement("div"); const cv=document.createElement("canvas"); cv.width=w; cv.height=h; wrap.appendChild(cv); return {wrap,cv}; }
 function usedMats(){ const u=new Set(["air",S.stack.si.material,S.stack.dti.liner,S.stack.dti.fill]); S.stack.barl.forEach(l=>u.add(l.material)); u.add(S.stack.grid.coat_material); S.stack.grid.stack.forEach(l=>u.add(l.material)); ["R","G","B"].forEach(c=>u.add(S.stack.cf[c].material)); u.add(S.stack.ml.material); u.add(S.stack.arl_top.material); return [...u]; }
@@ -222,49 +240,58 @@ function drawSection(cv, axis){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.he
   ctx.fillStyle=css("--ink-faint"); ctx.font="10px "+css("--mono"); for(let t=0;t<=span+1e-6;t+=p)ctx.fillText(t.toFixed(0),padL+t*sx-3,H-8);
   ctx.fillText((axis==="x"?"x":"y")+" [µm] · z↑ · cut "+(axis==="x"?"y":"x")+"="+cut.toFixed(2),W-150,16);
 }
-function drawTop(cv,which){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height,p=P(),np=NP(),span=p*np,pad=8; ctx.clearRect(0,0,W,H);
-  const sc=Math.min(W-2*pad,H-2*pad)/span,ox=(W-span*sc)/2,oy=(H-span*sc)/2; const X=x=>ox+x*sc,Y=y=>H-oy-y*sc;
-  const need=[2,4,6][which]; if(curStep<need){ ctx.fillStyle=css("--ink-faint"); ctx.font="11px "+css("--mono"); ctx.fillText("(step "+(need+1)+"+)",ox+8,oy+18); ctx.strokeStyle=css("--line"); ctx.strokeRect(ox,oy,span*sc,span*sc); return; }
-  if(which===0){ ctx.fillStyle=matColor(S.stack.si.material); ctx.fillRect(ox,oy,span*sc,span*sc); const N=Math.round(span*sc);
-    for(let py=0;py<N;py++)for(let px=0;px<N;px++){ const m=dtiAt(px/sc,(N-1-py)/sc); if(!m)continue; ctx.fillStyle=matColor(m); ctx.fillRect(ox+px,oy+py,1,1);} }
-  else if(which===1){ for(let r=0;r<np;r++)for(let c=0;c<np;c++){ctx.fillStyle=matColor(colorRole(S.bayer[r][c])); ctx.fillRect(X(c*p)+1,Y((r+1)*p)+1,p*sc-2,p*sc-2);}
-    const g=S.stack.grid,per=(g.pitch||1)*p,wm=+g.width_um,cw=gridCoat(),w=wm+2*cw,gm=g.stack[0]?g.stack[0].material:"grid_metal";
-    for(let cc=0;cc<=span+1e-6;cc+=per){ if(cw>0){ctx.fillStyle=matColor(g.coat_material||"oxide"); ctx.fillRect(X(cc-w/2),oy,w*sc,span*sc); ctx.fillRect(ox,Y(cc+w/2),span*sc,w*sc);} ctx.fillStyle=matColor(gm); ctx.fillRect(X(cc-wm/2),oy,wm*sc,span*sc); ctx.fillRect(ox,Y(cc+wm/2),span*sc,wm*sc);} }
-  else { const N=90,h=+S.stack.ml.sag_height_um; for(let i=0;i<N;i++)for(let j=0;j<N;j++){ const sg=mlSag(span*(i+.5)/N,span*(j+.5)/N); if(sg<=0)continue; ctx.fillStyle=`rgba(242,193,78,${0.15+0.85*sg/h})`; ctx.fillRect(X(span*i/N),Y(span*(j+1)/N),span/N*sc+1,span/N*sc+1);} }
+function drawTop(cv,which){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height,p=P(),np=NP(),span=p*np,pad=6; ctx.clearRect(0,0,W,H);
+  const sc=Math.min(W-2*pad,H-2*pad)/span,ox=(W-span*sc)/2,oy=(H-span*sc)/2;
+  const need=[2,4,6][which]; if(curStep<need){ ctx.fillStyle=css("--ink-faint"); ctx.font="10px "+css("--mono"); ctx.fillText("step "+(need+1)+"+",ox+6,oy+16); ctx.strokeStyle=css("--line"); ctx.strokeRect(ox,oy,span*sc,span*sc); return; }
+  const s=S.stack, zSi=+s.si.thickness_um, barlH=s.barl.reduce((a,l)=>a+ +l.thickness_um,0);
+  // 대표 z: DTI=Si 중앙, CF+grid=band 중앙, ML=heightmap
+  const N=Math.round(span*sc), B=2;
+  if(which===2){ const h=+s.ml.sag_height_um; for(let px=0;px<N;px+=B)for(let py=0;py<N;py+=B){ const sg=mlSag((px+B/2)/sc,(span-(py+B/2)/sc)); if(sg<=0)continue; ctx.fillStyle=`rgba(242,193,78,${0.15+0.85*sg/h})`; ctx.fillRect(ox+px,oy+py,B,B);} }
+  else { const zAt = which===0? zSi*0.5 : zSi+barlH+bandH()*0.5;
+    for(let px=0;px<N;px+=B)for(let py=0;py<N;py+=B){ const m=matAt((px+B/2)/sc,(span-(py+B/2)/sc),zAt,curStep); if(m==="air")continue; ctx.fillStyle=matColor(m); ctx.fillRect(ox+px,oy+py,B,B);} }
   ctx.strokeStyle=css("--line"); ctx.strokeRect(ox,oy,span*sc,span*sc);
 }
-// 간단 isometric: 층을 3D 박스로 (top 면에 패턴)
-function drawISO(cv){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height; ctx.clearRect(0,0,W,H); ctx.fillStyle=css("--panel"); ctx.fillRect(0,0,W,H);
-  const p=P(),np=NP(),span=p*np,s=S.stack; const Ht=totalH();
-  const sc=Math.min((W*0.5)/span,(H*0.42)/span), ez=Math.min((H*0.44)/Ht, sc*1.4); // xy scale, z scale
-  const ax=0.55, ay=0.30;   // iso axes
-  const cx=W*0.36, cy=H*0.62;
-  function proj(x,y,z){ return [cx + (x-y)*sc*ax + 0, cy + (x+y)*sc*ay - z*ez]; }
-  // 층 리스트 (아래->위) — 현재 step 까지만
-  const layers=[];
-  if(curStep>=1) layers.push([0,+s.si.thickness_um,"dti",matColor(s.si.material)]);
-  let z=+s.si.thickness_um; if(curStep>=3) s.barl.forEach(l=>{layers.push([z,z+ +l.thickness_um,matColor(l.material),matColor(l.material)]); z+=+l.thickness_um;}); else z+=s.barl.reduce((a,l)=>a+ +l.thickness_um,0);
-  const band=bandH(); if(curStep>=4){ layers.push([z,z+band,"cf",matColor("cf_green")]); } z+=band;
-  if(curStep>=6){ layers.push([z,z+ +s.ml.planar_um,matColor(s.ml.material),matColor(s.ml.material)]); z+=+s.ml.planar_um;
-    layers.push([z,z+ +s.ml.sag_height_um,"ml",matColor(s.ml.material)]); }
-  function box(z0,z1,topFn,side){ const c=[[0,0],[span,0],[span,span],[0,span]];
-    // 옆면 2개
-    function quad(pa,pb,shade){ ctx.beginPath(); ctx.moveTo(...proj(pa[0],pa[1],z0)); ctx.lineTo(...proj(pb[0],pb[1],z0)); ctx.lineTo(...proj(pb[0],pb[1],z1)); ctx.lineTo(...proj(pa[0],pa[1],z1)); ctx.closePath(); ctx.fillStyle=shade; ctx.fill(); ctx.strokeStyle="rgba(0,0,0,.25)"; ctx.stroke(); }
-    quad(c[1],c[2],shade(side,-24)); quad(c[2],c[3],shade(side,-42));
-    // top 면
-    ctx.beginPath(); c.forEach((pp,i)=>{const q=proj(pp[0],pp[1],z1); i?ctx.lineTo(...q):ctx.moveTo(...q);}); ctx.closePath();
-    if(typeof topFn==="string"){ ctx.fillStyle=topFn; ctx.fill(); }
-    else { ctx.save(); ctx.clip(); // 패턴 샘플
-      const M=46; for(let i=0;i<M;i++)for(let j=0;j<M;j++){ const x=span*(i+.5)/M,y=span*(j+.5)/M; let col=null;
-        if(topFn==="dti"){const m=dtiAt(x,y); col=m?matColor(m):matColor(s.si.material);} else if(topFn==="cf"){ col=matColor(colorRole(S.bayer[Math.min(np-1,Math.floor(y/p))][Math.min(np-1,Math.floor(x/p))])); } else if(topFn==="ml"){ const sg=mlSag(x,y); col=sg>0?`rgba(242,193,78,${.35+.65*sg/ +s.ml.sag_height_um})`:"rgba(233,241,251,.15)"; }
-        if(!col)continue; const q0=proj(span*i/M,span*j/M,z1),q1=proj(span*(i+1)/M,span*j/M,z1),q2=proj(span*(i+1)/M,span*(j+1)/M,z1),q3=proj(span*i/M,span*(j+1)/M,z1);
-        ctx.beginPath(); ctx.moveTo(...q0); ctx.lineTo(...q1); ctx.lineTo(...q2); ctx.lineTo(...q3); ctx.closePath(); ctx.fillStyle=col; ctx.fill(); }
+function shadeHex(hex,d){ hex=(hex||"#888").replace('#',''); if(hex.length===3)hex=hex.split('').map(c=>c+c).join(''); const n=parseInt(hex,16); const r=Math.max(0,Math.min(255,((n>>16)&255)+d)),g=Math.max(0,Math.min(255,((n>>8)&255)+d)),bl=Math.max(0,Math.min(255,(n&255)+d)); return `rgb(${r},${g},${bl})`; }
+// 인터랙티브 3D: 회전(yaw/pitch)+줌, 면 depth 정렬, 최상단 top 면 패턴
+function drawISO3D(cv){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height; ctx.clearRect(0,0,W,H); ctx.fillStyle=css("--bg"); ctx.fillRect(0,0,W,H);
+  const p=P(),np=NP(),span=p*np,s=S.stack,Ht=totalH();
+  const base=Math.min(W,H)/(Math.max(span,Ht)*1.7)*v3.zoom, cx=span/2, cz=Ht/2;
+  const cyaw=Math.cos(v3.yaw),syaw=Math.sin(v3.yaw),cpit=Math.cos(v3.pitch),spit=Math.sin(v3.pitch);
+  function pr(x,y,z){ let X=x-cx,Y=y-cx,Z=z-cz; let x1=X*cyaw-Y*syaw, y1=X*syaw+Y*cyaw; let y2=y1*cpit-Z*spit, z2=y1*spit+Z*cpit;
+    return [W/2+x1*base, H/2-z2*base, y2]; }   // [px,py,depth(Y)]
+  // 층 리스트 (현재 step 까지)
+  const layers=[]; let z=0;
+  if(curStep>=1) layers.push({z0:0,z1:+s.si.thickness_um,col:matColor(s.si.material)}); z=+s.si.thickness_um;
+  if(curStep>=3) s.barl.forEach(l=>{layers.push({z0:z,z1:z+ +l.thickness_um,col:matColor(l.material)}); z+=+l.thickness_um;}); else z+=s.barl.reduce((a,l)=>a+ +l.thickness_um,0);
+  if(curStep>=4){ layers.push({z0:z,z1:z+bandH(),col:matColor("cf_green")}); } z+=bandH();
+  if(curStep>=6){ layers.push({z0:z,z1:z+ +s.ml.planar_um,col:matColor(s.ml.material)}); z+=+s.ml.planar_um; layers.push({z0:z,z1:z+ +s.ml.sag_height_um,col:matColor(s.ml.material)}); }
+  if(!layers.length){ ctx.fillStyle=css("--ink-faint"); ctx.font="12px "+css("--mono"); ctx.fillText("(step 2+ 부터 표시)",20,30); return; }
+  const topZ = layers[layers.length-1].z1;
+  // 면 수집: 각 박스의 6면 (side 4 + top + bottom)
+  const faces=[];
+  layers.forEach((L,li)=>{ const isTop=(li===layers.length-1);
+    const c=[[0,0],[span,0],[span,span],[0,span]];
+    // sides
+    for(let i=0;i<4;i++){ const a=c[i],b=c[(i+1)%4]; faces.push({pts:[[a[0],a[1],L.z0],[b[0],b[1],L.z0],[b[0],b[1],L.z1],[a[0],a[1],L.z1]],col:L.col,kind:"side"}); }
+    faces.push({pts:c.map(q=>[q[0],q[1],L.z1]),col:L.col,kind:"top",top:isTop,ztop:L.z1});
+    faces.push({pts:c.map(q=>[q[0],q[1],L.z0]),col:L.col,kind:"bot"});
+  });
+  // depth 정렬 (뒤->앞)
+  faces.forEach(f=>{ f.proj=f.pts.map(q=>pr(q[0],q[1],q[2])); f.depth=f.proj.reduce((a,q)=>a+q[2],0)/f.proj.length; });
+  faces.sort((a,b)=>b.depth-a.depth);
+  faces.forEach(f=>{
+    const path=()=>{ ctx.beginPath(); f.proj.forEach((q,i)=> i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath(); };
+    // 음영: side 어둡게
+    let col=f.kind==="side"?shadeHex(f.col,-30):(f.kind==="bot"?shadeHex(f.col,-55):f.col);
+    path(); ctx.fillStyle=col; ctx.fill(); ctx.strokeStyle="rgba(0,0,0,.28)"; ctx.lineWidth=1; ctx.stroke();
+    // 최상단 top 면 패턴 (matAt)
+    if(f.top){ ctx.save(); path(); ctx.clip(); const M=34;
+      for(let i=0;i<M;i++)for(let j=0;j<M;j++){ const x=span*(i+.5)/M,y=span*(j+.5)/M; const m=matAt(x,y,f.ztop-1e-4,curStep); if(m==="air")continue;
+        const P0=pr(span*i/M,span*j/M,f.ztop),P1=pr(span*(i+1)/M,span*j/M,f.ztop),P2=pr(span*(i+1)/M,span*(j+1)/M,f.ztop),P3=pr(span*i/M,span*(j+1)/M,f.ztop);
+        ctx.beginPath(); ctx.moveTo(P0[0],P0[1]); ctx.lineTo(P1[0],P1[1]); ctx.lineTo(P2[0],P2[1]); ctx.lineTo(P3[0],P3[1]); ctx.closePath(); ctx.fillStyle=matColor(m); ctx.fill(); }
       ctx.restore(); }
-    ctx.strokeStyle="rgba(0,0,0,.3)"; ctx.stroke();
-  }
-  function shade(hex,d){ hex=hex.replace('#',''); if(hex.length===3)hex=hex.split('').map(c=>c+c).join(''); let n=parseInt(hex,16); let r=Math.max(0,Math.min(255,((n>>16)&255)+d)),g=Math.max(0,Math.min(255,((n>>8)&255)+d)),bl=Math.max(0,Math.min(255,(n&255)+d)); return `rgb(${r},${g},${bl})`; }
-  layers.forEach(L=>box(L[0],L[1],L[2],L[3]));
-  ctx.fillStyle=css("--ink-faint"); ctx.font="11px "+css("--mono"); ctx.fillText("isometric · 아래→위 층 적층 (top 면 패턴)",12,18);
+  });
+  ctx.fillStyle=css("--ink-faint"); ctx.font="11px "+css("--mono"); ctx.fillText("3D · drag=rotate · wheel=zoom",12,18);
 }
 
 // ============================ 위저드 스텝 ============================
@@ -315,7 +342,15 @@ function renderStep(){ buildSteps(); const b=el("stepBody"); b.innerHTML=""; con
 // ============================ 이벤트 ============================
 el("backBtn").onclick=()=>{ if(curStep>0){curStep--; renderStep();} };
 el("nextBtn").onclick=()=>{ if(curStep<STEPS.length-1){curStep++; renderStep();} };
-document.querySelectorAll(".vtab").forEach(t=>t.onclick=()=>{ document.querySelectorAll(".vtab").forEach(x=>x.classList.remove("on")); t.classList.add("on"); viewMode=t.dataset.v; renderViews(); });
+// 3D 인터랙션
+(function(){ const cv=el("iso3d"); let drag=null;
+  cv.addEventListener("pointerdown",e=>{ drag={x:e.clientX,y:e.clientY}; cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener("pointermove",e=>{ if(!drag)return; v3.yaw+=(e.clientX-drag.x)*0.01; v3.pitch+=(e.clientY-drag.y)*0.01;
+    v3.pitch=Math.max(-1.4,Math.min(1.4,v3.pitch)); drag={x:e.clientX,y:e.clientY}; renderViews(); });
+  cv.addEventListener("pointerup",()=>drag=null);
+  cv.addEventListener("wheel",e=>{ e.preventDefault(); v3.zoom*=Math.exp(-e.deltaY*0.001); v3.zoom=Math.max(0.3,Math.min(4,v3.zoom)); renderViews(); },{passive:false});
+})();
+el("resetView").onclick=()=>{ v3.yaw=-0.7; v3.pitch=0.55; v3.zoom=1; renderViews(); };
 el("cutY").oninput=()=>renderViews();
 el("themeBtn").onclick=()=>{ const r=document.documentElement,cur=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); r.setAttribute("data-theme",cur==="dark"?"light":"dark"); renderViews(); };
 el("matBtn").onclick=()=>el("matFolder").click();
@@ -327,7 +362,10 @@ function openMLeditor(){ try{ mlWin=window.open("ml_shape_editor.html","ml_edito
     if(!mlWin) alert("팝업이 차단되었습니다. 팝업 허용 후 다시 시도하세요.");
   }catch(e){ alert("ML editor 열기 실패: "+e.message); } }
 function applyMLshapes(d){ if(!d)return; if(d.quads)S.stack.ml.quads=d.quads; if(d.deformations)S.stack.ml.deformations=d.deformations||{}; if(d.sag_height_um)S.stack.ml.sag_height_um=d.sag_height_um; if(curStep===6)renderStep(); else renderViews(); }
-window.addEventListener("message",e=>{ const d=e.data; if(d&&d.schema==="cis_ml_shapes/1"){ applyMLshapes(d); } });
+function currentMLexport(){ return {schema:"cis_ml_shapes/1", quads:S.stack.ml.quads, deformations:S.stack.ml.deformations||{}, sag_height_um:S.stack.ml.sag_height_um}; }
+window.addEventListener("message",e=>{ const d=e.data;
+  if(d&&d.type==="ml_request"){ try{ (e.source||mlWin).postMessage(currentMLexport(),"*"); }catch(_){} }
+  else if(d&&d.schema==="cis_ml_shapes/1"){ applyMLshapes(d); } });
 
 const prod=el("prodName"); prod.value=S.product||""; prod.oninput=()=>{S.product=prod.value; save();};
 const dlg=el("dlg");

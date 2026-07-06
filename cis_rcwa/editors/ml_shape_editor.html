@@ -135,7 +135,8 @@
   <div class="spacer"></div>
   <button class="btn ghost" id="themeBtn" title="Toggle theme">◐ Theme</button>
   <button class="btn ghost" id="exportYaml">Copy YAML</button>
-  <button class="btn primary" id="exportJson">Export ml_shapes.json</button>
+  <button class="btn ghost" id="exportJson">Export .json</button>
+  <button class="btn primary" id="applyBtn" title="구조 위저드로 반영">✓ 반영 (Apply)</button>
 </div>
 
 <div class="layout">
@@ -667,5 +668,17 @@ function boot(){
   fitView(); draw(); syncPanelLight();
 }
 window.addEventListener("resize", ()=>{ fitView(); draw(); });
+
+// ---- 구조 위저드 연동 (opener) ----
+function ptsFromBtheta(b){ const pts=[]; for(let k=0;k<NCTRL;k++){ const a=2*Math.PI*k/NCTRL; const idx=Math.round(a/(2*Math.PI)*b.length)%b.length; const r=b[idx]||1; pts.push({x:r*Math.cos(a),y:r*Math.sin(a)}); } return pts; }
+function loadFromExport(d){ if(!d)return; if(d.quads)state.quads=d.quads; rebuildLenses();
+  const def=d.deformations||{}; for(const id in def){ if(state.lenses[id]&&def[id].b_theta) state.lenses[id].pts=ptsFromBtheta(def[id].b_theta); }
+  buildQuadGrid(); buildLensList(); syncPanel(); draw(); }
+function applyToWizard(){ try{ if(window.opener && !window.opener.closed){ window.opener.postMessage(buildExport(),"*"); return true; } }catch(e){} return false; }
+document.getElementById("applyBtn").addEventListener("click",()=>{ if(applyToWizard()){ const b=document.getElementById("applyBtn"); const t=b.textContent; b.textContent="✓ 반영됨"; setTimeout(()=>b.textContent=t,1200);} else alert("위저드에서 열지 않았습니다. (구조 위저드의 'Open ML shape editor' 로 여세요)"); });
+window.addEventListener("message",e=>{ const d=e.data; if(d&&d.schema==="cis_ml_shapes/1"){ loadFromExport(d); } });
+
 boot();
+// 위저드로부터 열렸으면 기존 형상 요청
+try{ if(window.opener && !window.opener.closed) window.opener.postMessage({type:"ml_request"},"*"); }catch(e){}
 </script>
