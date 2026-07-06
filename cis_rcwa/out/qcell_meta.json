@@ -1,0 +1,109 @@
+{
+  "shape_zyx": [
+    200,
+    200,
+    200
+  ],
+  "voxel_um": {
+    "dz": 0.02,
+    "dy": 0.02,
+    "dx": 0.02
+  },
+  "lateral_span_um": 4.0,
+  "pixel_pitch_um": 1.0,
+  "n_pixels": 4,
+  "materials": {
+    "air": {
+      "id": 0,
+      "n": 1.0,
+      "k": 0.0
+    },
+    "si": {
+      "id": 1,
+      "n": 4.05,
+      "k": 0.028
+    },
+    "metal": {
+      "id": 2,
+      "n": 0.4,
+      "k": 3.4
+    },
+    "oxide": {
+      "id": 3,
+      "n": 1.46,
+      "k": 0.0
+    },
+    "cf_red": {
+      "id": 4,
+      "n": 1.65,
+      "k": 0.02
+    },
+    "cf_green": {
+      "id": 5,
+      "n": 1.65,
+      "k": 0.02
+    },
+    "cf_blue": {
+      "id": 6,
+      "n": 1.65,
+      "k": 0.02
+    },
+    "ml": {
+      "id": 7,
+      "n": 1.6,
+      "k": 0.0
+    }
+  },
+  "layer_bounds_vox": [
+    {
+      "name": "substrate_si",
+      "z0": 0,
+      "z1": 100,
+      "z0_um": 0.0,
+      "z1_um": 2.0
+    },
+    {
+      "name": "metal_grid",
+      "z0": 100,
+      "z1": 115,
+      "z0_um": 2.0,
+      "z1_um": 2.3
+    },
+    {
+      "name": "arc",
+      "z0": 115,
+      "z1": 117,
+      "z0_um": 2.3,
+      "z1_um": 2.34
+    },
+    {
+      "name": "color_filter",
+      "z0": 117,
+      "z1": 147,
+      "z0_um": 2.34,
+      "z1_um": 2.94
+    },
+    {
+      "name": "ml_spacer",
+      "z0": 147,
+      "z1": 162,
+      "z0_um": 2.94,
+      "z1_um": 3.24
+    },
+    {
+      "name": "microlens",
+      "z0": 162,
+      "z1": 190,
+      "z0_um": 3.24,
+      "z1_um": 3.8
+    },
+    {
+      "name": "air_margin",
+      "z0": 190,
+      "z1": 200,
+      "z0_um": 3.8,
+      "z1_um": 4.0
+    }
+  ],
+  "axis_note": "matid[z,y,x]; z=0 bottom(Si), light incident from top(+z)"
+}

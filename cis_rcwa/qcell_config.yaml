@@ -1,0 +1,85 @@
+# =============================================================================
+# CIS qcell 구조 정의
+#   - 단위: micron (um)
+#   - qcell = (2x2 pixel) quad 4개  ==> 4x4 pixel array
+#   - 층 순서 (아래 -> 위): Si(PD) -> Metal grid(DTI) -> ARC -> Color Filter
+#                            -> ML spacer(평탄화) -> Microlens
+# =============================================================================
+
+grid:
+  pixel_pitch_um: 1.0     # 픽셀 1개 pitch
+  n_pixels: 4             # 4x4 (=(2x2)x4) 픽셀 배열
+  dxy_um: 0.02            # 가로/세로 voxel 크기
+  dz_um: 0.02             # 세로(z) voxel 크기
+  air_margin_um: 0.20     # ML 꼭대기 위 air 여유
+
+# 물질 테이블: id 는 npy 에 저장되는 정수, n/k 는 참고 파장에서의 복소굴절률
+# (RCWA 용 파장 의존 n,k 는 나중에 dispersion 파일로 확장 가능)
+materials:
+  air:       { id: 0, n: 1.00, k: 0.00 }
+  si:        { id: 1, n: 4.05, k: 0.028 }   # Photodiode (Si) @~550nm
+  metal:     { id: 2, n: 0.40, k: 3.40 }    # DTI / grid 격벽 (W/텅스텐 근사)
+  oxide:     { id: 3, n: 1.46, k: 0.00 }    # grid 내부 채움 / ARC 저굴절
+  cf_red:    { id: 4, n: 1.65, k: 0.02 }
+  cf_green:  { id: 5, n: 1.65, k: 0.02 }
+  cf_blue:   { id: 6, n: 1.65, k: 0.02 }
+  ml:        { id: 7, n: 1.60, k: 0.00 }    # Microlens + spacer(평탄화) 동일물질
+
+# 층 정의 (아래 -> 위 순서)
+layers:
+  substrate_si:
+    thickness_um: 2.0
+    fill: si
+
+  metal_grid:              # DTI / backside metal grid
+    thickness_um: 0.30
+    fill: oxide            # 벽 사이(픽셀 내부) 채움
+    wall: metal            # 격벽 물질
+    wall_width_um: 0.15    # 격벽 두께
+    walls: true
+
+  arc:                     # planarization / anti-reflection (균일층)
+    thickness_um: 0.05
+    fill: oxide
+
+  color_filter:
+    thickness_um: 0.60
+    wall: metal            # CF 사이 grid 격벽 (metal grid 연장)
+    wall_width_um: 0.15
+    walls: true            # 격벽 있음, 사이를 CF 가 채움
+
+  ml_spacer:               # ML 동일물질 평탄화 (focus 거리 확보)
+    thickness_um: 0.30
+    fill: ml
+
+  microlens:
+    material: ml
+    sag_height_um: 0.55    # 렌즈 dome 높이(중앙)
+    fill_gap: air          # dome 바깥 여백
+
+# 4x4 픽셀 색 배치 (Bayer). 위(row0)->아래
+bayer:
+  pattern:
+    - [R, G, R, G]
+    - [G, B, G, B]
+    - [R, G, R, G]
+    - [G, B, G, B]
+
+# ML 레이아웃: 2x2 quad 4개, 각 quad 마다 렌즈 형태 선택
+#   지원 형태: "1x1"  -> pixel 마다 원형 렌즈 4개
+#             "2x1"  -> 2픽셀 덮는 타원 렌즈 2개 (orientation 으로 방향)
+#             "2x2"  -> quad 중앙 초점 원형 렌즈 1개
+#   quads[qy][qx], qy/qx in {0,1}  (row0 = 위쪽)
+microlens_layout:
+  quads:
+    - - { shape: "2x2" }                    # 좌상 quad: 2x2 렌즈 1개
+      - { shape: "2x1", orient: "h" }       # 우상 quad: 가로 타원 2개
+    - - { shape: "2x1", orient: "v" }       # 좌하 quad: 세로 타원 2개
+      - { shape: "1x1" }                     # 우하 quad: 1x1 렌즈 4개
+
+# 출력
+export:
+  matid_npy: "qcell_matid.npy"     # 물질 id 3D 배열 [nz, ny, nx]
+  meta_json: "qcell_meta.json"     # 범례 / 좌표 / 층경계
+  index_npy: "qcell_index.npy"     # (옵션) 복소굴절률 3D (complex64)
+  write_index: true
