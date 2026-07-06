@@ -628,10 +628,13 @@ function openDlg(title,hint,text){
   dlg.showModal();
 }
 document.getElementById("exportJson").addEventListener("click",()=>{
-  const text=JSON.stringify(buildExport(),null,2);
+  const exp=buildExport();
+  // 구조 위저드에서 열었으면 부모창으로 형상 전달 (파일 없이 자동 반영)
+  try{ if(window.opener && !window.opener.closed) window.opener.postMessage(exp,"*"); }catch(e){}
+  const text=JSON.stringify(exp,null,2);
   download("ml_shapes.json", text);
   openDlg("Export · ml_shapes.json",
-    "저장된 파일을 cis_rcwa/ 에 두고, qcell_config.yaml 의 microlens_layout.deform_file: \"ml_shapes.json\" 로 참조하세요.",
+    (window.opener?"구조 위저드로 형상 전달됨. ":"")+"저장된 파일은 deform_file 로도 사용 가능.",
     text);
 });
 document.getElementById("exportYaml").addEventListener("click",()=>{
