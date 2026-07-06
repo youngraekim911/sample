@@ -26,6 +26,40 @@ qcell = 2×2 quad. **각 quad 마다** 렌즈 형태를 선택:
 `qcell_config.yaml` 의 `microlens_layout.quads[qy][qx]` 로 지정.
 (주의: 배열 origin 은 아래(y=0)가 `qy=0`. top-view 이미지 기준 아래줄이 `quads[0]`)
 
+## Microlens 변형 (thermal reflow)
+
+이상적 원/타원 base 에서 **응집(reflow)** 으로 변형된 형상을 렌즈별로 지정 가능.
+
+- 표현: 정규화 경계반경 **B(θ)** (이상형=1.0). `θ` 는 렌즈 local 정규화 좌표
+  `u=(x-cx)/ax, v=(y-cy)/ay` 기준 `atan2(v,u)`.
+- Dome: `sag = h·√(1-(ρ/B(θ))²)`, `ρ=√(u²+v²)`.
+- **Volume 보존**: 이상 반타원체 부피 `V0 = h0·(2/3)π·ax·ay` 를 유지하도록 `h` 자동 재계산.
+  → footprint 가 넓어지면 높이가 낮아짐 (재료량 일정).
+
+### 렌즈 id 규칙
+`q{qy}{qx}_{shape}_{k}` — 예: `q00_2x2_0`, `q11_1x1_0..3` (`k=dyp*2+dxp`), `q10_2x1_0..1`
+
+### 지정 방법 (둘 다 지원)
+1. **YAML inline** — `microlens_layout.deformations`:
+   ```yaml
+   deformations:
+     q00_2x2_0:
+       ctrl: [[0,1.18],[90,0.86],[180,1.18],[270,0.86]]   # [angle_deg, radius_mult]
+     q11_1x1_0:
+       b_theta: [ ...128 values... ]                       # 직접 B(θ) 배열
+   ```
+2. **HTML 에디터 export** — `microlens_layout.deform_file: "ml_shapes.json"`
+   (파일에 `quads` 포함 시 그 레이아웃이 우선 적용)
+
+## UI 에디터 — `ml_shape_editor.html`
+
+브라우저에서 열어 **드래그로 base 2D 형상을 변형**하고 dome/height 실시간 확인:
+
+- 4개 quad 렌즈 형태(1×1/2×1/2×2) 선택
+- 렌즈별 control point 드래그 또는 preset(가로/세로 응집, 각짐, 3-lobe, pear) + strength
+- volume 보존 height, dome 단면 실시간 표시
+- **Export ml_shapes.json** (→ `deform_file` 로 사용) / **Copy YAML** (→ `microlens_layout` 붙여넣기)
+
 ## 사용법
 
 ```bash

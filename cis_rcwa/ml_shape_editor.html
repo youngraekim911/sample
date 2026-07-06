@@ -1,0 +1,672 @@
+<title>ML Reflow Shape Editor — CIS qcell</title>
+<style>
+  :root{
+    --bg:#0e1318; --panel:#161d24; --panel-2:#1b232b; --line:#26313b;
+    --ink:#dbe6ee; --ink-dim:#8ea1af; --ink-faint:#5b6d7a;
+    --accent:#35d1c4; --accent-dim:#1f7a72; --amber:#f2c14e;
+    --r:#e24a4a; --g:#3fb34f; --b:#3f6fd0;
+    --shadow:0 1px 0 rgba(255,255,255,.03), 0 8px 24px rgba(0,0,0,.35);
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --ui:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#eef2f4; --panel:#ffffff; --panel-2:#f4f7f8; --line:#dbe3e8;
+      --ink:#16222b; --ink-dim:#54646f; --ink-faint:#8a9aa5;
+      --accent:#118a80; --accent-dim:#8fded7; --amber:#c9902a;
+      --shadow:0 1px 2px rgba(16,32,40,.06), 0 6px 18px rgba(16,32,40,.08);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0e1318; --panel:#161d24; --panel-2:#1b232b; --line:#26313b;
+    --ink:#dbe6ee; --ink-dim:#8ea1af; --ink-faint:#5b6d7a;
+    --accent:#35d1c4; --accent-dim:#1f7a72; --amber:#f2c14e;
+    --shadow:0 1px 0 rgba(255,255,255,.03), 0 8px 24px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --bg:#eef2f4; --panel:#ffffff; --panel-2:#f4f7f8; --line:#dbe3e8;
+    --ink:#16222b; --ink-dim:#54646f; --ink-faint:#8a9aa5;
+    --accent:#118a80; --accent-dim:#8fded7; --amber:#c9902a;
+    --shadow:0 1px 2px rgba(16,32,40,.06), 0 6px 18px rgba(16,32,40,.08);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--ui);
+    font-size:14px; line-height:1.45;
+    display:flex; flex-direction:column; min-height:100vh;
+  }
+  .topbar{
+    display:flex; align-items:center; gap:16px; padding:12px 18px;
+    border-bottom:1px solid var(--line); background:var(--panel);
+  }
+  .brand{display:flex; align-items:baseline; gap:10px}
+  .brand h1{font-size:15px; font-weight:650; margin:0; letter-spacing:.2px}
+  .brand .sub{font-family:var(--mono); font-size:11px; color:var(--ink-faint); letter-spacing:.3px}
+  .spacer{flex:1}
+  .btn{
+    font-family:var(--ui); font-size:12.5px; color:var(--ink);
+    background:var(--panel-2); border:1px solid var(--line); border-radius:7px;
+    padding:7px 12px; cursor:pointer; display:inline-flex; align-items:center; gap:7px;
+    transition:border-color .12s, background .12s;
+  }
+  .btn:hover{border-color:var(--accent-dim)}
+  .btn:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .btn.primary{background:var(--accent); color:#04211f; border-color:transparent; font-weight:600}
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.ghost{background:transparent}
+  .layout{display:flex; flex:1; min-height:0}
+  .side{
+    width:312px; flex-shrink:0; border-right:1px solid var(--line); background:var(--panel);
+    overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:20px;
+  }
+  .stage{flex:1; min-width:0; display:flex; flex-direction:column; background:var(--bg)}
+  .viewport{flex:1; position:relative; min-height:0}
+  canvas{display:block; width:100%; height:100%; touch-action:none}
+  .statusbar{
+    border-top:1px solid var(--line); background:var(--panel);
+    display:flex; align-items:stretch; gap:0; font-family:var(--mono); font-size:12px;
+  }
+  .stat{padding:9px 14px; border-right:1px solid var(--line); display:flex; flex-direction:column; gap:2px}
+  .stat .k{color:var(--ink-faint); font-size:10px; letter-spacing:.6px; text-transform:uppercase; font-family:var(--ui)}
+  .stat .v{color:var(--ink); font-variant-numeric:tabular-nums}
+  .stat .v.accent{color:var(--accent)}
+  .stat .v.amber{color:var(--amber)}
+  h2.sec{
+    font-size:10.5px; text-transform:uppercase; letter-spacing:1.1px; color:var(--ink-dim);
+    margin:0 0 10px; font-weight:600;
+  }
+  .quadgrid{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  .quadcell{border:1px solid var(--line); border-radius:8px; padding:8px; background:var(--panel-2)}
+  .quadcell .lbl{font-family:var(--mono); font-size:10px; color:var(--ink-faint); margin-bottom:6px; letter-spacing:.4px}
+  select{
+    width:100%; font-family:var(--ui); font-size:12px; color:var(--ink);
+    background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:5px 6px; cursor:pointer;
+  }
+  select:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+  .lenslist{display:flex; flex-direction:column; gap:4px}
+  .lensrow{
+    display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px;
+    cursor:pointer; border:1px solid transparent; font-family:var(--mono); font-size:11.5px;
+  }
+  .lensrow:hover{background:var(--panel-2)}
+  .lensrow.sel{border-color:var(--accent-dim); background:var(--panel-2)}
+  .lensrow .dot{width:8px; height:8px; border-radius:50%; background:var(--ink-faint); flex-shrink:0}
+  .lensrow.def .dot{background:var(--amber)}
+  .lensrow .id{flex:1; color:var(--ink)}
+  .lensrow .h{color:var(--ink-dim); font-variant-numeric:tabular-nums}
+  .field{display:flex; flex-direction:column; gap:6px}
+  .field label{font-size:11px; color:var(--ink-dim); display:flex; justify-content:space-between}
+  .field label .val{font-family:var(--mono); color:var(--ink); font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%; accent-color:var(--accent)}
+  .rowbtns{display:flex; gap:8px}
+  .rowbtns .btn{flex:1; justify-content:center; font-size:11.5px; padding:6px 8px}
+  .hint{font-size:11px; color:var(--ink-faint); line-height:1.5}
+  .cross{height:120px; border-top:1px solid var(--line); background:var(--panel); position:relative}
+  .cross canvas{width:100%; height:100%}
+  .cross .cap{
+    position:absolute; top:6px; left:12px; font-family:var(--mono); font-size:10px;
+    color:var(--ink-faint); letter-spacing:.4px;
+  }
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-family:var(--mono); font-size:10.5px; color:var(--ink-dim)}
+  .legend i{display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px}
+  dialog{
+    border:1px solid var(--line); border-radius:12px; background:var(--panel); color:var(--ink);
+    padding:0; max-width:min(680px,92vw); box-shadow:var(--shadow);
+  }
+  dialog::backdrop{background:rgba(4,8,11,.55)}
+  .dlg-h{display:flex; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line)}
+  .dlg-h h3{margin:0; font-size:13px; letter-spacing:.3px}
+  .dlg-b{padding:14px 16px}
+  textarea{
+    width:100%; height:300px; resize:vertical; font-family:var(--mono); font-size:11.5px; line-height:1.5;
+    background:var(--panel-2); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:10px;
+  }
+  .tabs{display:flex; gap:4px; margin-bottom:10px}
+  .tab{font-size:12px; padding:6px 11px; border-radius:6px; cursor:pointer; border:1px solid var(--line); background:var(--panel-2); color:var(--ink-dim)}
+  .tab.on{color:var(--ink); border-color:var(--accent-dim)}
+</style>
+
+<div class="topbar">
+  <div class="brand">
+    <h1>ML Reflow Shape Editor</h1>
+    <span class="sub">CIS qcell · base 2D → dome (volume-conserved)</span>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn ghost" id="themeBtn" title="Toggle theme">◐ Theme</button>
+  <button class="btn ghost" id="exportYaml">Copy YAML</button>
+  <button class="btn primary" id="exportJson">Export ml_shapes.json</button>
+</div>
+
+<div class="layout">
+  <aside class="side">
+    <section>
+      <h2 class="sec">Quad layout · ML shape</h2>
+      <div class="quadgrid" id="quadGrid"></div>
+      <p class="hint" style="margin-top:8px">4개 quad(=2×2 pixel) 각각 렌즈 형태 선택. 위치는 뷰포트와 동일(위=상단행).</p>
+    </section>
+
+    <section>
+      <h2 class="sec">Lenses</h2>
+      <div class="lenslist" id="lensList"></div>
+    </section>
+
+    <section>
+      <h2 class="sec">Selected lens</h2>
+      <div class="field">
+        <label>Reflow strength <span class="val" id="strVal">0%</span></label>
+        <input type="range" id="strength" min="0" max="40" value="0" step="1">
+        <p class="hint">전체 base를 프리셋 방향으로 응집시키는 빠른 컨트롤. 개별 핸들을 드래그하면 미세 조정됩니다.</p>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>Preset</label>
+        <select id="preset">
+          <option value="none">— none —</option>
+          <option value="ellipse_x">가로 응집 (x-elongate)</option>
+          <option value="ellipse_y">세로 응집 (y-elongate)</option>
+          <option value="square">각짐 (rounded-square)</option>
+          <option value="tri">3-lobe 비대칭</option>
+          <option value="pear">한쪽 쏠림 (pear)</option>
+        </select>
+      </div>
+      <div class="rowbtns" style="margin-top:12px">
+        <button class="btn" id="resetLens">Reset lens</button>
+        <button class="btn" id="resetAll">Reset all</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="legend">
+        <span><i style="background:var(--amber)"></i>ML dome</span>
+        <span><i style="background:var(--r)"></i>R</span>
+        <span><i style="background:var(--g)"></i>G</span>
+        <span><i style="background:var(--b)"></i>B</span>
+        <span><i style="background:var(--accent)"></i>handle</span>
+      </div>
+    </section>
+  </aside>
+
+  <div class="stage">
+    <div class="viewport"><canvas id="view"></canvas></div>
+    <div class="cross">
+      <span class="cap" id="crossCap">cross-section</span>
+      <canvas id="cross"></canvas>
+    </div>
+    <div class="statusbar">
+      <div class="stat"><span class="k">Lens</span><span class="v accent" id="stLens">—</span></div>
+      <div class="stat"><span class="k">Base a×b</span><span class="v" id="stAxes">—</span></div>
+      <div class="stat"><span class="k">Height h</span><span class="v amber" id="stH">—</span></div>
+      <div class="stat"><span class="k">Δh vs ideal</span><span class="v" id="stDh">—</span></div>
+      <div class="stat"><span class="k">Volume</span><span class="v" id="stVol">conserved</span></div>
+    </div>
+  </div>
+</div>
+
+<dialog id="exportDlg">
+  <div class="dlg-h"><h3 id="dlgTitle">Export</h3><div class="spacer" style="flex:1"></div>
+    <button class="btn ghost" id="dlgCopy">Copy</button>
+    <button class="btn ghost" id="dlgClose">Close</button></div>
+  <div class="dlg-b">
+    <p class="hint" id="dlgHint" style="margin:0 0 10px"></p>
+    <textarea id="dlgText" spellcheck="false"></textarea>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------------------
+// 설정 / 상수  (build_qcell.py 와 동일한 규약)
+// ---------------------------------------------------------------------------
+const PITCH = 1.0;          // µm, pixel pitch (display scale only)
+const NCTRL = 12;           // control points per lens
+const NTHETA = 128;         // exported b_theta resolution
+const H0 = 0.55;            // ideal sag height (µm) — build_qcell layers.microlens.sag_height_um
+const SPAN = PITCH * 4;     // qcell lateral (µm)
+const MIN_M = 0.45, MAX_M = 1.75;
+
+const CF = [  // Bayer 4x4 (row0 = 아래, y=0) — build_qcell 와 동일
+  ["R","G","R","G"],
+  ["G","B","G","B"],
+  ["R","G","R","G"],
+  ["G","B","G","B"],
+];
+const CF_COL = {R:"--r", G:"--g", B:"--b"};
+
+// ---------------------------------------------------------------------------
+// 상태
+// ---------------------------------------------------------------------------
+const state = {
+  quads: [                 // [qy][qx], qy=0 아래
+    [ {shape:"2x2"},            {shape:"2x1",orient:"h"} ],
+    [ {shape:"2x1",orient:"v"}, {shape:"1x1"} ],
+  ],
+  lenses: {},              // id -> {cx,cy,ax,ay,m:[NCTRL]}
+  selected: null,
+};
+
+function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+// --- 렌즈 열거 (build_qcell._lens_list 와 동일 규약) ---
+function enumerateLenses(quads){
+  const p = PITCH, out = [];
+  for(let qy=0; qy<2; qy++) for(let qx=0; qx<2; qx++){
+    const s = quads[qy][qx], shape = s.shape, orient = s.orient||"h";
+    const x0 = qx*2*p, y0 = qy*2*p, cx0=x0+p, cy0=y0+p;
+    if(shape==="2x2") out.push([`q${qy}${qx}_2x2_0`, cx0, cy0, p, p]);
+    else if(shape==="1x1"){
+      for(let dyp=0;dyp<2;dyp++) for(let dxp=0;dxp<2;dxp++){
+        const k=dyp*2+dxp;
+        out.push([`q${qy}${qx}_1x1_${k}`, x0+(dxp+.5)*p, y0+(dyp+.5)*p, p/2, p/2]);
+      }
+    } else if(shape==="2x1"){
+      if(orient==="h") for(let dyp=0;dyp<2;dyp++) out.push([`q${qy}${qx}_2x1_${dyp}`, cx0, y0+(dyp+.5)*p, p, p/2]);
+      else for(let dxp=0;dxp<2;dxp++) out.push([`q${qy}${qx}_2x1_${dxp}`, x0+(dxp+.5)*p, cy0, p/2, p]);
+    }
+  }
+  return out;
+}
+
+function rebuildLenses(){
+  const prev = state.lenses, next = {};
+  for(const [id,cx,cy,ax,ay] of enumerateLenses(state.quads)){
+    const m = (prev[id] && prev[id].m) ? prev[id].m.slice() : new Array(NCTRL).fill(1);
+    next[id] = {cx,cy,ax,ay,m};
+  }
+  state.lenses = next;
+  if(!state.selected || !next[state.selected]) state.selected = Object.keys(next)[0]||null;
+}
+
+// --- m(NCTRL) -> B(theta) periodic linear interp ---
+function interpM(m, ang){                 // ang in [0,2pi)
+  const step = 2*Math.PI/NCTRL;
+  let f = ang/step, i0 = Math.floor(f)%NCTRL, t = f-Math.floor(f);
+  const i1 = (i0+1)%NCTRL;
+  return m[i0]*(1-t) + m[i1]*t;
+}
+function mToBtheta(m){
+  const b = new Array(NTHETA);
+  for(let k=0;k<NTHETA;k++){ b[k] = interpM(m, 2*Math.PI*k/NTHETA); }
+  return b;
+}
+
+// --- dome height (volume 보존) : h = V0 / unitVol ---
+function computeHeight(L){
+  const {ax,ay,m} = L;
+  const N = 64;                            // 적분 격자 (normalized bbox)
+  const d = 2*MAX_M/N, dA = (d*ax)*(d*ay); // µm^2
+  let unit = 0;
+  for(let i=0;i<N;i++){
+    const u = -MAX_M + (i+0.5)*d;
+    for(let j=0;j<N;j++){
+      const v = -MAX_M + (j+0.5)*d;
+      const rho = Math.hypot(u,v); if(rho<1e-9){ unit += 1*dA; continue; }
+      let ang = Math.atan2(v,u); if(ang<0) ang+=2*Math.PI;
+      const B = interpM(m, ang);
+      if(rho<=B){ const r=rho/B; unit += Math.sqrt(Math.max(0,1-r*r))*dA; }
+    }
+  }
+  const V0 = H0*(2/3)*Math.PI*ax*ay;
+  return unit>0 ? V0/unit : H0;
+}
+function isDeformed(L){ return L.m.some(v=>Math.abs(v-1)>1e-3); }
+
+// --- presets: 방향성 변형을 m 에 적용 (strength 0..1) ---
+function applyShape(L, kind, s){
+  const m = new Array(NCTRL).fill(1);
+  for(let k=0;k<NCTRL;k++){
+    const a = 2*Math.PI*k/NCTRL;
+    let d=0;
+    switch(kind){
+      case "ellipse_x": d =  Math.cos(2*a); break;         // x 방향 팽창
+      case "ellipse_y": d = -Math.cos(2*a); break;
+      case "square":    d =  0.32*Math.cos(4*a); break;    // 각짐
+      case "tri":       d =  Math.cos(3*a); break;         // 3-lobe
+      case "pear":      d =  Math.cos(a) - 0.35*Math.cos(2*a); break;
+      default: d=0;
+    }
+    m[k] = 1 + s*d;
+    m[k] = Math.min(MAX_M, Math.max(MIN_M, m[k]));
+  }
+  L.m = m;
+}
+
+// ---------------------------------------------------------------------------
+// 캔버스 뷰포트
+// ---------------------------------------------------------------------------
+const view = document.getElementById("view");
+const vctx = view.getContext("2d");
+let VW=0, VH=0, VS=1, VOX=0, VOY=0;   // scale + origin (µm->px)
+
+function fitView(){
+  const dpr = Math.min(2, window.devicePixelRatio||1);
+  const r = view.parentElement.getBoundingClientRect();
+  VW=r.width; VH=r.height;
+  view.width = Math.round(VW*dpr); view.height=Math.round(VH*dpr);
+  vctx.setTransform(dpr,0,0,dpr,0,0);
+  const pad = 34;
+  VS = Math.min((VW-2*pad)/SPAN, (VH-2*pad)/SPAN);
+  VOX = (VW - SPAN*VS)/2; VOY = (VH - SPAN*VS)/2;
+}
+// µm -> px (y 뒤집기: y 위로 증가)
+function X(x){ return VOX + x*VS; }
+function Y(y){ return VOY + (SPAN-y)*VS; }
+
+function draw(){
+  vctx.clearRect(0,0,VW,VH);
+  // 배경 판
+  vctx.fillStyle = css("--bg"); vctx.fillRect(0,0,VW,VH);
+
+  // CF 픽셀 (은은하게)
+  for(let r=0;r<4;r++) for(let c=0;c<4;c++){
+    const col = css(CF_COL[CF[r][c]]);
+    vctx.fillStyle = hexA(col, 0.10);
+    vctx.fillRect(X(c*PITCH)+1, Y((r+1)*PITCH)+1, PITCH*VS-2, PITCH*VS-2);
+  }
+  // 픽셀 그리드
+  vctx.strokeStyle = hexA(css("--line"),1); vctx.lineWidth=1;
+  for(let i=0;i<=4;i++){
+    line(X(i*PITCH),Y(0),X(i*PITCH),Y(SPAN));
+    line(X(0),Y(i*PITCH),X(SPAN),Y(i*PITCH));
+  }
+  // quad 경계 (굵게)
+  vctx.strokeStyle = hexA(css("--ink-faint"),.9); vctx.lineWidth=2;
+  for(let i=0;i<=4;i+=2){
+    line(X(i*PITCH),Y(0),X(i*PITCH),Y(SPAN));
+    line(X(0),Y(i*PITCH),X(SPAN),Y(i*PITCH));
+  }
+
+  // 렌즈
+  for(const id in state.lenses) drawLens(id, id===state.selected);
+  drawCross();
+  updateStatus();
+}
+function line(a,b,c,d){ vctx.beginPath(); vctx.moveTo(a,b); vctx.lineTo(c,d); vctx.stroke(); }
+function hexA(hex, a){
+  hex=hex.replace('#',''); if(hex.length===3) hex=hex.split('').map(x=>x+x).join('');
+  const n=parseInt(hex,16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+
+function lensBoundaryPts(L, n){
+  const pts=[];
+  for(let k=0;k<n;k++){
+    const a=2*Math.PI*k/n, B=interpM(L.m,a);
+    pts.push([L.cx + L.ax*B*Math.cos(a), L.cy + L.ay*B*Math.sin(a)]);
+  }
+  return pts;
+}
+function drawLens(id, sel){
+  const L=state.lenses[id];
+  const pts=lensBoundaryPts(L, 96);
+  vctx.beginPath();
+  pts.forEach((p,i)=> i? vctx.lineTo(X(p[0]),Y(p[1])) : vctx.moveTo(X(p[0]),Y(p[1])));
+  vctx.closePath();
+
+  // dome 음영 (중앙 peak -> 가장자리) radial gradient 근사
+  const cxp=X(L.cx), cyp=Y(L.cy), rp=Math.max(L.ax,L.ay)*MAX_M*VS;
+  const g=vctx.createRadialGradient(cxp,cyp,1,cxp,cyp,rp*0.9);
+  const amber=css("--amber");
+  g.addColorStop(0, hexA(amber, sel?0.95:0.62));
+  g.addColorStop(0.6, hexA(amber, sel?0.45:0.28));
+  g.addColorStop(1, hexA(amber, 0.05));
+  vctx.fillStyle=g; vctx.fill();
+  vctx.lineWidth = sel?2:1.2;
+  vctx.strokeStyle = sel? css("--accent") : hexA(amber,.75);
+  vctx.stroke();
+
+  // 이상형 윤곽 (점선) 참고
+  if(sel){
+    vctx.beginPath();
+    for(let k=0;k<=64;k++){ const a=2*Math.PI*k/64; const x=L.cx+L.ax*Math.cos(a), y=L.cy+L.ay*Math.sin(a);
+      k?vctx.lineTo(X(x),Y(y)):vctx.moveTo(X(x),Y(y)); }
+    vctx.setLineDash([4,4]); vctx.strokeStyle=hexA(css("--ink-dim"),.7); vctx.lineWidth=1; vctx.stroke();
+    vctx.setLineDash([]);
+    // control 핸들
+    for(let k=0;k<NCTRL;k++){
+      const a=2*Math.PI*k/NCTRL, B=L.m[k];
+      const x=L.cx+L.ax*B*Math.cos(a), y=L.cy+L.ay*B*Math.sin(a);
+      vctx.beginPath(); vctx.arc(X(x),Y(y),5,0,2*Math.PI);
+      vctx.fillStyle=css("--accent"); vctx.fill();
+      vctx.lineWidth=1.5; vctx.strokeStyle=css("--bg"); vctx.stroke();
+    }
+    // 중심
+    vctx.beginPath(); vctx.arc(cxp,cyp,2.5,0,2*Math.PI); vctx.fillStyle=css("--ink"); vctx.fill();
+  }
+}
+
+// --- dome 단면 (선택 렌즈, 중심 수평 라인 v=0) ---
+const cross=document.getElementById("cross"), cctx=cross.getContext("2d");
+function drawCross(){
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  const r=cross.parentElement.getBoundingClientRect();
+  cross.width=Math.round(r.width*dpr); cross.height=Math.round(r.height*dpr);
+  cctx.setTransform(dpr,0,0,dpr,0,0);
+  const W=r.width, Hh=r.height; cctx.clearRect(0,0,W,Hh);
+  const L = state.selected && state.lenses[state.selected];
+  if(!L) return;
+  const h=computeHeight(L);
+  const padX=40, padB=18, padT=26;
+  const xspan=L.ax*MAX_M*2*1.05;
+  const sx = (W-2*padX)/xspan, x0=W/2;
+  const sy = (Hh-padB-padT)/(H0*1.6), y0=Hh-padB;
+  // 축
+  cctx.strokeStyle=hexA(css("--line"),1); cctx.lineWidth=1;
+  cctx.beginPath(); cctx.moveTo(padX,y0); cctx.lineTo(W-padX,y0); cctx.stroke();
+  // 이상형 (점선)
+  function profile(mArr, off){
+    cctx.beginPath(); let started=false;
+    for(let px=-xspan/2; px<=xspan/2; px+=xspan/240){
+      const u=px/L.ax; let ang = u>=0?0:Math.PI; const B=interpM(mArr,ang);
+      const rho=Math.abs(u); let s=0;
+      if(rho<=B){ const rr=rho/B; s=Math.sqrt(Math.max(0,1-rr*rr)); }
+      const hh = mArr===L.m ? h : H0;
+      const X=x0+px*sx, Yv=y0 - s*hh*sy;
+      if(s>0||started){ started?cctx.lineTo(X,Yv):cctx.moveTo(X,Yv); started=true; }
+    }
+    cctx.stroke();
+  }
+  cctx.setLineDash([4,4]); cctx.strokeStyle=hexA(css("--ink-dim"),.8); cctx.lineWidth=1.2;
+  profile(new Array(NCTRL).fill(1));
+  cctx.setLineDash([]); cctx.strokeStyle=css("--amber"); cctx.lineWidth=2;
+  profile(L.m);
+  document.getElementById("crossCap").textContent =
+    `cross-section · ${state.selected} · h=${h.toFixed(3)}µm  (ideal ${H0}µm dashed)`;
+}
+
+// ---------------------------------------------------------------------------
+// 상호작용
+// ---------------------------------------------------------------------------
+let drag=null;   // {id,k}
+function ptUM(ev){
+  const r=view.getBoundingClientRect();
+  const px=ev.clientX-r.left, py=ev.clientY-r.top;
+  return [ (px-VOX)/VS, SPAN-(py-VOY)/VS ];
+}
+view.addEventListener("pointerdown", ev=>{
+  const [ux,uy]=ptUM(ev);
+  // 선택 렌즈 핸들 먼저
+  const sel=state.selected && state.lenses[state.selected];
+  if(sel){
+    for(let k=0;k<NCTRL;k++){
+      const a=2*Math.PI*k/NCTRL, B=sel.m[k];
+      const hx=sel.cx+sel.ax*B*Math.cos(a), hy=sel.cy+sel.ay*B*Math.sin(a);
+      if(Math.hypot(X(hx)-X(ux),Y(hy)-Y(uy))<9){ drag={id:state.selected,k}; view.setPointerCapture(ev.pointerId); return; }
+    }
+  }
+  // 렌즈 선택 (내부 클릭)
+  let pick=null;
+  for(const id in state.lenses){ const L=state.lenses[id];
+    const u=(ux-L.cx)/L.ax, v=(uy-L.cy)/L.ay, rho=Math.hypot(u,v);
+    let ang=Math.atan2(v,u); if(ang<0)ang+=2*Math.PI;
+    if(rho<=interpM(L.m,ang)) pick=id;
+  }
+  if(pick){ state.selected=pick; syncPanel(); draw(); }
+});
+view.addEventListener("pointermove", ev=>{
+  if(!drag) return;
+  const [ux,uy]=ptUM(ev);
+  const L=state.lenses[drag.id];
+  const u=(ux-L.cx)/L.ax, v=(uy-L.cy)/L.ay;
+  let m=Math.hypot(u,v);
+  m=Math.min(MAX_M,Math.max(MIN_M,m));
+  L.m[drag.k]=m;
+  draw(); syncPanelLight();
+});
+view.addEventListener("pointerup", ev=>{ if(drag){ drag=null; syncPanel(); } });
+
+// ---------------------------------------------------------------------------
+// 사이드바 UI
+// ---------------------------------------------------------------------------
+const SHAPE_OPTS=[["2x2","2×2 (1 lens)"],["2x1h","2×1 가로 (2)"],["2x1v","2×1 세로 (2)"],["1x1","1×1 (4 lens)"]];
+const QUAD_POS=[["1","0","TL"],["1","1","TR"],["0","0","BL"],["0","1","BR"]]; // 화면 배치순(위=qy1)
+function specToOpt(s){ if(s.shape==="2x1") return s.orient==="v"?"2x1v":"2x1h"; return s.shape; }
+function optToSpec(v){ if(v==="2x1h")return{shape:"2x1",orient:"h"}; if(v==="2x1v")return{shape:"2x1",orient:"v"}; return {shape:v}; }
+
+function buildQuadGrid(){
+  const g=document.getElementById("quadGrid"); g.innerHTML="";
+  for(const [qy,qx,pos] of QUAD_POS){
+    const cell=document.createElement("div"); cell.className="quadcell";
+    const lbl=document.createElement("div"); lbl.className="lbl"; lbl.textContent=`${pos} · q${qy}${qx}`;
+    const sel=document.createElement("select");
+    for(const [v,t] of SHAPE_OPTS){ const o=document.createElement("option"); o.value=v; o.textContent=t; sel.appendChild(o); }
+    sel.value=specToOpt(state.quads[qy][qx]);
+    sel.addEventListener("change",()=>{ state.quads[qy][qx]=optToSpec(sel.value); rebuildLenses(); buildLensList(); syncPanel(); draw(); });
+    cell.appendChild(lbl); cell.appendChild(sel); g.appendChild(cell);
+  }
+}
+function buildLensList(){
+  const el=document.getElementById("lensList"); el.innerHTML="";
+  for(const id in state.lenses){
+    const L=state.lenses[id], def=isDeformed(L), h=computeHeight(L);
+    const row=document.createElement("div");
+    row.className="lensrow"+(id===state.selected?" sel":"")+(def?" def":"");
+    row.innerHTML=`<span class="dot"></span><span class="id">${id}</span><span class="h">${h.toFixed(3)}µm</span>`;
+    row.addEventListener("click",()=>{ state.selected=id; syncPanel(); draw(); });
+    el.appendChild(row);
+  }
+}
+function syncPanel(){ buildQuadGrid_sel(); buildLensList(); syncPanelLight(); }
+function buildQuadGrid_sel(){ /* selects already reflect state */ }
+function syncPanelLight(){
+  const L=state.selected&&state.lenses[state.selected];
+  const str=document.getElementById("strength");
+  // strength 슬라이더는 preset 적용시만 의미 → 표시만 유지
+  document.getElementById("strVal").textContent = str.value+"%";
+  updateStatus();
+}
+function updateStatus(){
+  const id=state.selected, L=id&&state.lenses[id];
+  const set=(k,v)=>document.getElementById(k).textContent=v;
+  if(!L){ ["stLens","stAxes","stH","stDh"].forEach(k=>set(k,"—")); return; }
+  const h=computeHeight(L);
+  set("stLens", id);
+  set("stAxes", `${L.ax.toFixed(2)} × ${L.ay.toFixed(2)} µm`);
+  set("stH", h.toFixed(3)+" µm");
+  const dh=(h-H0)/H0*100;
+  set("stDh", (dh>=0?"+":"")+dh.toFixed(1)+"%");
+}
+
+// preset / strength
+document.getElementById("preset").addEventListener("change", applyPreset);
+document.getElementById("strength").addEventListener("input", applyPreset);
+function applyPreset(){
+  const L=state.selected&&state.lenses[state.selected]; if(!L) return;
+  const kind=document.getElementById("preset").value;
+  const s=parseFloat(document.getElementById("strength").value)/100;
+  if(kind==="none"){ /* 슬라이더만으론 무변형 */ } else applyShape(L,kind,s);
+  draw(); buildLensList(); syncPanelLight();
+}
+document.getElementById("resetLens").addEventListener("click",()=>{
+  const L=state.selected&&state.lenses[state.selected]; if(!L)return;
+  L.m=new Array(NCTRL).fill(1);
+  document.getElementById("preset").value="none"; document.getElementById("strength").value=0;
+  draw(); buildLensList(); syncPanelLight();
+});
+document.getElementById("resetAll").addEventListener("click",()=>{
+  for(const id in state.lenses) state.lenses[id].m=new Array(NCTRL).fill(1);
+  document.getElementById("preset").value="none"; document.getElementById("strength").value=0;
+  draw(); buildLensList(); syncPanelLight();
+});
+
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+function buildExport(){
+  const deformations={};
+  for(const id in state.lenses){
+    const L=state.lenses[id];
+    if(isDeformed(L)) deformations[id]={b_theta: mToBtheta(L.m).map(v=>+v.toFixed(4))};
+  }
+  return {schema:"cis_ml_shapes/1", n_theta:NTHETA, pitch_um:PITCH,
+          sag_height_um:H0, quads:state.quads, deformations};
+}
+function toYaml(){
+  const e=buildExport(); const L=[];
+  L.push("microlens_layout:");
+  L.push("  quads:");
+  for(let qy=0;qy<2;qy++){
+    const row=e.quads[qy].map(s=> s.shape==="2x1"?`{ shape: "2x1", orient: "${s.orient}" }`:`{ shape: "${s.shape}" }`);
+    L.push(`    - - ${row[0]}`); L.push(`      - ${row[1]}`);
+  }
+  const ids=Object.keys(e.deformations);
+  if(ids.length){
+    L.push("  deformations:");
+    for(const id of ids){
+      L.push(`    ${id}:`);
+      const b=e.deformations[id].b_theta;
+      // 줄바꿈으로 감싼 b_theta
+      L.push(`      b_theta: [${b.join(", ")}]`);
+    }
+  }
+  return L.join("\n")+"\n";
+}
+function download(name, text){
+  const blob=new Blob([text],{type:"application/octet-stream"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+}
+const dlg=document.getElementById("exportDlg");
+function openDlg(title,hint,text){
+  document.getElementById("dlgTitle").textContent=title;
+  document.getElementById("dlgHint").textContent=hint;
+  document.getElementById("dlgText").value=text;
+  dlg.showModal();
+}
+document.getElementById("exportJson").addEventListener("click",()=>{
+  const text=JSON.stringify(buildExport(),null,2);
+  download("ml_shapes.json", text);
+  openDlg("Export · ml_shapes.json",
+    "저장된 파일을 cis_rcwa/ 에 두고, qcell_config.yaml 의 microlens_layout.deform_file: \"ml_shapes.json\" 로 참조하세요.",
+    text);
+});
+document.getElementById("exportYaml").addEventListener("click",()=>{
+  openDlg("Copy · YAML (microlens_layout)",
+    "아래 블록을 qcell_config.yaml 의 microlens_layout 에 붙여넣으면 됩니다 (기존 블록 대체).",
+    toYaml());
+});
+document.getElementById("dlgCopy").addEventListener("click",async()=>{
+  const t=document.getElementById("dlgText"); t.select();
+  try{ await navigator.clipboard.writeText(t.value); }catch(e){ document.execCommand("copy"); }
+});
+document.getElementById("dlgClose").addEventListener("click",()=>dlg.close());
+
+// theme
+document.getElementById("themeBtn").addEventListener("click",()=>{
+  const root=document.documentElement;
+  const cur=root.getAttribute("data-theme")|| (matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+  root.setAttribute("data-theme", cur==="dark"?"light":"dark");
+  draw();
+});
+
+// ---------------------------------------------------------------------------
+// init
+// ---------------------------------------------------------------------------
+function boot(){
+  rebuildLenses();
+  // 데모: 좌하단 2x2 렌즈에 가로 응집 변형 씨앗
+  if(state.lenses["q00_2x2_0"]) applyShape(state.lenses["q00_2x2_0"],"ellipse_x",0.18);
+  buildQuadGrid(); buildLensList();
+  fitView(); draw(); syncPanelLight();
+}
+window.addEventListener("resize", ()=>{ fitView(); draw(); });
+boot();
+</script>

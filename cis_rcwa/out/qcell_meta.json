@@ -1,6 +1,6 @@
 {
   "shape_zyx": [
-    200,
+    199,
     200,
     200
   ],
@@ -93,16 +93,99 @@
     {
       "name": "microlens",
       "z0": 162,
-      "z1": 190,
+      "z1": 189,
       "z0_um": 3.24,
-      "z1_um": 3.8
+      "z1_um": 3.78
     },
     {
       "name": "air_margin",
-      "z0": 190,
-      "z1": 200,
-      "z0_um": 3.8,
-      "z1_um": 4.0
+      "z0": 189,
+      "z1": 199,
+      "z0_um": 3.78,
+      "z1_um": 3.98
+    }
+  ],
+  "microlenses": [
+    {
+      "id": "q00_2x2_0",
+      "cx": 1.0,
+      "cy": 1.0,
+      "ax": 1.0,
+      "ay": 1.0,
+      "height_um": 0.5314,
+      "deformed": true
+    },
+    {
+      "id": "q01_2x1_0",
+      "cx": 3.0,
+      "cy": 0.5,
+      "ax": 1.0,
+      "ay": 0.5,
+      "height_um": 0.5499,
+      "deformed": false
+    },
+    {
+      "id": "q01_2x1_1",
+      "cx": 3.0,
+      "cy": 1.5,
+      "ax": 1.0,
+      "ay": 0.5,
+      "height_um": 0.5499,
+      "deformed": false
+    },
+    {
+      "id": "q10_2x1_0",
+      "cx": 0.5,
+      "cy": 3.0,
+      "ax": 0.5,
+      "ay": 1.0,
+      "height_um": 0.5499,
+      "deformed": false
+    },
+    {
+      "id": "q10_2x1_1",
+      "cx": 1.5,
+      "cy": 3.0,
+      "ax": 0.5,
+      "ay": 1.0,
+      "height_um": 0.5499,
+      "deformed": false
+    },
+    {
+      "id": "q11_1x1_0",
+      "cx": 2.5,
+      "cy": 2.5,
+      "ax": 0.5,
+      "ay": 0.5,
+      "height_um": 0.5496,
+      "deformed": false
+    },
+    {
+      "id": "q11_1x1_1",
+      "cx": 3.5,
+      "cy": 2.5,
+      "ax": 0.5,
+      "ay": 0.5,
+      "height_um": 0.5496,
+      "deformed": false
+    },
+    {
+      "id": "q11_1x1_2",
+      "cx": 2.5,
+      "cy": 3.5,
+      "ax": 0.5,
+      "ay": 0.5,
+      "height_um": 0.5496,
+      "deformed": false
+    },
+    {
+      "id": "q11_1x1_3",
+      "cx": 3.5,
+      "cy": 3.5,
+      "ax": 0.5,
+      "ay": 0.5,
+      "height_um": 0.5496,
+      "deformed": false
     }
   ],
   "axis_note": "matid[z,y,x]; z=0 bottom(Si), light incident from top(+z)"

@@ -36,8 +36,9 @@ def load_config(path):
 # 빌더
 # ----------------------------------------------------------------------------
 class QcellBuilder:
-    def __init__(self, cfg):
+    def __init__(self, cfg, base_dir="."):
         self.cfg = cfg
+        self.base_dir = base_dir
         g = cfg["grid"]
         self.pitch = float(g["pixel_pitch_um"])
         self.n_pix = int(g["n_pixels"])
@@ -93,50 +94,119 @@ class QcellBuilder:
                 cmap[sel] = self.id_of[matname]
         return cmap
 
-    # --- 각 quad ML dome 표면(sag) 계산 -> [ny,nx] sag(um), <=0 는 렌즈 없음 ---
-    def _microlens_sag(self):
-        h = float(self.cfg["layers"]["microlens"]["sag_height_um"])
-        quads = self.cfg["microlens_layout"]["quads"]
-        sag = np.zeros((self.ny, self.nx), dtype=np.float64)
+    # --- B(theta): 정규화 경계 반경 (이상형=1.0), reflow 변형 프로파일 ---
+    @staticmethod
+    def _eval_btheta(theta, b_samples):
+        """theta[-pi..pi] 에서 주기적 선형보간으로 B(theta) 평가."""
+        b = np.asarray(b_samples, dtype=float)
+        n = len(b)
+        ang = np.linspace(0.0, 2 * np.pi, n, endpoint=False)
+        xp = np.concatenate([ang, [2 * np.pi]])
+        fp = np.concatenate([b, [b[0]]])
+        return np.interp(np.mod(theta, 2 * np.pi), xp, fp)
+
+    @staticmethod
+    def _ctrl_to_btheta(ctrl, n=128):
+        """control point [[angle_deg, radius_mult], ...] -> B(theta) n-samples."""
+        c = sorted(((float(np.deg2rad(a)) % (2 * np.pi)), float(r)) for a, r in ctrl)
+        angs = np.array([a for a, _ in c])
+        rs = np.array([r for _, r in c])
+        # 주기 확장 후 보간
+        xp = np.concatenate([angs - 2 * np.pi, angs, angs + 2 * np.pi])
+        fp = np.concatenate([rs, rs, rs])
+        out = np.linspace(0.0, 2 * np.pi, n, endpoint=False)
+        return np.interp(out, xp, fp)
+
+    def _load_deformations(self):
+        """quads 레이아웃 + 렌즈별 B(theta) 변형 로드 (YAML inline + 외부 JSON)."""
+        ml = self.cfg["microlens_layout"]
+        quads = ml["quads"]
+        deform_raw = dict(ml.get("deformations", {}) or {})
+
+        # 외부 파일 (HTML 에디터 export). quads 도 포함하면 우선 적용.
+        f = ml.get("deform_file")
+        if f:
+            path = f if os.path.isabs(f) else os.path.join(self.base_dir, f)
+            with open(path) as fh:
+                data = json.load(fh)
+            if data.get("quads"):
+                quads = data["quads"]
+            deform_raw.update(data.get("deformations", {}) or {})
+
+        # 각 항목을 B(theta) 배열로 정규화
+        deform = {}
+        for lid, spec in deform_raw.items():
+            if not spec:
+                continue
+            if "b_theta" in spec:
+                deform[lid] = np.asarray(spec["b_theta"], dtype=float)
+            elif "ctrl" in spec:
+                deform[lid] = self._ctrl_to_btheta(spec["ctrl"])
+        return quads, deform
+
+    # --- 렌즈 목록 열거: (id, cx, cy, ax, ay) / 이상형 반축 ---
+    def _lens_list(self, quads):
         p = self.pitch
-
-        def add_dome(cx, cy, ax, ay):
-            rho2 = ((self.XX - cx) / ax) ** 2 + ((self.YY - cy) / ay) ** 2
-            inside = rho2 <= 1.0
-            s = np.zeros_like(sag)
-            s[inside] = h * np.sqrt(np.clip(1.0 - rho2[inside], 0.0, 1.0))
-            np.maximum(sag, s, out=sag)
-
+        lenses = []
         for qy in range(2):
             for qx in range(2):
                 spec = quads[qy][qx]
                 shape = spec["shape"]
                 orient = spec.get("orient", "h")
-                # quad 좌하단 픽셀 origin, quad 는 2x2 pixel = 2p x 2p
-                x0 = qx * 2 * p
-                y0 = qy * 2 * p
-                cx0, cy0 = x0 + p, y0 + p   # quad 중심
-
+                x0, y0 = qx * 2 * p, qy * 2 * p
+                cx0, cy0 = x0 + p, y0 + p
                 if shape == "2x2":
-                    add_dome(cx0, cy0, p, p)                       # 원형 R=p
+                    lenses.append((f"q{qy}{qx}_2x2_0", cx0, cy0, p, p))
                 elif shape == "1x1":
                     for dyp in (0, 1):
                         for dxp in (0, 1):
-                            cx = x0 + (dxp + 0.5) * p
-                            cy = y0 + (dyp + 0.5) * p
-                            add_dome(cx, cy, p / 2, p / 2)         # 원형 R=p/2
+                            k = dyp * 2 + dxp
+                            lenses.append((f"q{qy}{qx}_1x1_{k}",
+                                           x0 + (dxp + 0.5) * p,
+                                           y0 + (dyp + 0.5) * p, p / 2, p / 2))
                 elif shape == "2x1":
-                    if orient == "h":   # 가로 타원 2p x p, 위/아래 2개
+                    if orient == "h":     # 가로 타원 2p x p, 위/아래 2개
                         for dyp in (0, 1):
-                            cy = y0 + (dyp + 0.5) * p
-                            add_dome(cx0, cy, p, p / 2)
-                    else:               # 세로 타원 p x 2p, 좌/우 2개
+                            lenses.append((f"q{qy}{qx}_2x1_{dyp}",
+                                           cx0, y0 + (dyp + 0.5) * p, p, p / 2))
+                    else:                 # 세로 타원 p x 2p, 좌/우 2개
                         for dxp in (0, 1):
-                            cx = x0 + (dxp + 0.5) * p
-                            add_dome(cx, cy0, p / 2, p)
+                            lenses.append((f"q{qy}{qx}_2x1_{dxp}",
+                                           x0 + (dxp + 0.5) * p, cy0, p / 2, p))
                 else:
                     raise ValueError(f"unknown ML shape: {shape}")
-        return sag, h
+        return lenses
+
+    # --- ML dome 표면(sag) 계산: 변형 base + volume 보존 ---
+    def _build_microlens(self):
+        h0 = float(self.cfg["layers"]["microlens"]["sag_height_um"])
+        quads, deform = self._load_deformations()
+        lenses = self._lens_list(quads)
+        sag = np.zeros((self.ny, self.nx), dtype=np.float64)
+        dA = self.dxy * self.dxy
+        info = []
+        for (lid, cx, cy, ax, ay) in lenses:
+            U = (self.XX - cx) / ax
+            V = (self.YY - cy) / ay
+            rho = np.sqrt(U * U + V * V)
+            theta = np.arctan2(V, U)
+            if lid in deform:
+                B = self._eval_btheta(theta, deform[lid])
+            else:
+                B = np.ones_like(rho)
+            inside = rho <= B
+            prof = np.zeros_like(rho)
+            ratio = rho[inside] / B[inside]
+            prof[inside] = np.sqrt(np.clip(1.0 - ratio * ratio, 0.0, 1.0))
+            # volume 보존: 이상 반타원체 부피 V0 = h0 * (2/3)*pi*ax*ay
+            unit_vol = prof.sum() * dA           # 단위높이(h=1) footprint 부피
+            V0 = h0 * (2.0 / 3.0) * np.pi * ax * ay
+            h = (V0 / unit_vol) if unit_vol > 0 else h0
+            np.maximum(sag, prof * h, out=sag)
+            info.append({"id": lid, "cx": round(float(cx), 4), "cy": round(float(cy), 4),
+                         "ax": ax, "ay": ay, "height_um": round(float(h), 4),
+                         "deformed": lid in deform})
+        return sag, float(sag.max()), info
 
     # ------------------------------------------------------------------
     def build(self):
@@ -148,8 +218,8 @@ class QcellBuilder:
         nz_arc    = _um2vox(L["arc"]["thickness_um"], self.dz)
         nz_cf     = _um2vox(L["color_filter"]["thickness_um"], self.dz)
         nz_spacer = _um2vox(L["ml_spacer"]["thickness_um"], self.dz)
-        sag, h    = self._microlens_sag()
-        nz_ml     = _um2vox(h, self.dz)
+        sag, h_max, self.ml_info = self._build_microlens()
+        nz_ml     = _um2vox(h_max, self.dz)
         nz_air    = _um2vox(self.air_margin, self.dz)
         nz = nz_si + nz_grid + nz_arc + nz_cf + nz_spacer + nz_ml + nz_air
 
@@ -230,6 +300,7 @@ class QcellBuilder:
                 {"name": n, "z0": int(a), "z1": int(b),
                  "z0_um": round(a*self.dz, 4), "z1_um": round(b*self.dz, 4)}
                 for (n, a, b) in self.layer_bounds],
+            "microlenses": getattr(self, "ml_info", []),
             "axis_note": "matid[z,y,x]; z=0 bottom(Si), light incident from top(+z)",
         }
 
@@ -242,7 +313,7 @@ def main():
     args = ap.parse_args()
 
     cfg = load_config(args.config)
-    b = QcellBuilder(cfg)
+    b = QcellBuilder(cfg, base_dir=os.path.dirname(os.path.abspath(args.config)))
     matid = b.build()
     ex = cfg["export"]
     os.makedirs(args.outdir, exist_ok=True)

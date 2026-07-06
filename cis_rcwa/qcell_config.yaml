@@ -77,6 +77,18 @@ microlens_layout:
     - - { shape: "2x1", orient: "v" }       # 좌하 quad: 세로 타원 2개
       - { shape: "1x1" }                     # 우하 quad: 1x1 렌즈 4개
 
+  # (옵션) HTML 에디터 export JSON 참조. 있으면 quads/deformations 우선 적용
+  # deform_file: "ml_shapes.json"
+
+  # (옵션) 렌즈별 base 형상 변형 (thermal reflow).
+  #   B(theta) = 정규화 경계반경, 이상형=1.0. volume 보존으로 높이 자동 조정.
+  #   렌즈 id 규칙: q{qy}{qx}_{shape}_{k}
+  #     2x2 -> _0 / 1x1 -> _0.._3 (dyp*2+dxp) / 2x1 -> _0,_1
+  #   지정 방법:  ctrl: [[angle_deg, radius_mult], ...]  또는  b_theta: [ ...N... ]
+  deformations:
+    q00_2x2_0:                              # 좌상 2x2 렌즈: 가로로 응집된 변형 예시
+      ctrl: [[0, 1.18], [90, 0.86], [180, 1.18], [270, 0.86]]
+
 # 출력
 export:
   matid_npy: "qcell_matid.npy"     # 물질 id 3D 배열 [nz, ny, nx]
