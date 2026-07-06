@@ -79,10 +79,51 @@ python3 view_qcell.py -o out
 - `qcell_index.npy` — `complex64` 복소굴절률 `n+ik` 배열 (동일 shape, RCWA 입력)
 - `qcell_meta.json` — voxel 크기, 층 z-경계, 물질 범례, 축 규약
 
-## RCWA 로 잇기 (다음 단계)
+## RCWA 해석 (PyTorch, GPU 지원)
 
-RCWA 는 층별 2D 주기 패턴 + 파장 의존 n,k 를 요구.
-- `qcell_index.npy` 를 z 방향으로 층 슬랩(slab)화 하거나, `meta` 의 `layer_bounds`
-  구간별로 대표 2D 패턴을 뽑아 solver 에 전달.
-- 엔진 후보: `S4`, `grcwa`, `torcwa`, `RETICOLO`.
-- 파장별 QE / crosstalk / angular response 계산으로 확장.
+grcwa 기반 FMM + 강화 S-matrix 를 PyTorch 로 포팅. `device='cuda'` 자동 감지.
+
+```
+config(YAML) → build_qcell(구조) → RCWAPlaneWaveSimulator → RCWASolver
+             → R / QE(Si) / A_stack → runner(파장 sweep) → QE 스펙트럼
+```
+
+### 모듈 (`rcwa/`)
+| 파일 | 역할 |
+|------|------|
+| `rcwa.py` | `RCWASolver` — 역격자·입사 K → 층 eps FFT 컨볼루션 → 고유모드(eig) → S-matrix → R/T/QE |
+| `fft_funs.py` | eps(x,y) 격자 → Fourier 컨볼루션 행렬 (FFT) |
+| `kbloch.py` | 역격자 / G-order truncation(원형·사각형) / 입사파 K |
+| `torch_eig.py` | 복소 고유값 분해 + 분기(branch) 함수 |
+
+특징: 원형/사각형 truncation · 복소굴절률(흡수) · 비수직 입사(θ,φ) · GPU 가속.
+
+### 실행
+```bash
+pip install torch pyyaml numpy matplotlib
+
+# 검증 (Fresnel / thin-film TMM / 에너지 보존 — 해석해 일치)
+python3 rcwa/tests/validate.py
+
+# QE 파장 sweep  (금속 grid 고대비 -> nG>=101 권장)
+python3 runner.py -c qcell_config.yaml --lam0 0.45 --lam1 0.65 --n 5 --nG 101 --downsample 2
+# 출력: out/qe_spectrum.csv, out/qe_spectrum.png
+```
+
+### QE 정의
+투과매질 = Si 반무한 → **T = Si 로 결합되는 광량 = 광학 QE** (검증됨).
+반사 R + 스택 흡수 A_stack(metal/CF) + QE = 1.
+
+### 검증 (`rcwa/tests/validate.py`)
+- 단일 계면 Fresnel (수직/사입사) = 해석해 정확 일치
+- 단일 박막 = 1D transfer-matrix 정확 일치
+- 무손실 패턴층 에너지 보존 R+T=1
+- 흡수층 물리적 R/T/A
+
+### 파장 의존 n,k
+`qcell_config.yaml` 의 `dispersion:` 에 `[lambda_um, n, k]` 테이블 지정
+(Si·CF 예시 포함 — 실측 값으로 교체 권장).
+
+### 진행중(WIP)
+- 픽셀별 QE / 3D |E|² 볼륨(Si 내부 필드): `RCWASolver` 필드복원 메서드
+  (`absorption_profile`, `layer_internal_fields`) 확장 — flux 매핑 보정 필요.

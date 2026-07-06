@@ -1,2 +1,6 @@
 # 대용량·재생성 가능한 구조 배열 (build_qcell.py 로 언제든 재생성)
 *.npy
+
+# python
+__pycache__/
+*.pyc
