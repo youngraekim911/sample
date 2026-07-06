@@ -1,0 +1,48 @@
+# CIS structure · wizard v3 schema (structure_wizard.html 과 동일)
+# 파장별 n,k 는 data/materials/ 폴더 txt 사용 (아래 n,k 는 상수 fallback)
+product: wizard_demo
+grid: { pixel_pitch_um: 1.0, n_pixels: 4, dxy_um: 0.02, dz_um: 0.02, air_margin_um: 0.2 }
+bayer:
+  - [R, G, R, G]
+  - [G, B, G, B]
+  - [R, G, R, G]
+  - [G, B, G, B]
+materials:
+  air:        { n: 1.00, k: 0.00 }
+  si:         { n: 4.08, k: 0.028 }
+  oxide:      { n: 1.46, k: 0.00 }
+  arl_hi:     { n: 2.20, k: 0.00 }
+  arl_lo:     { n: 1.46, k: 0.00 }
+  grid_metal: { n: 0.40, k: 3.40 }
+  cf_red:     { n: 1.65, k: 0.02 }
+  cf_green:   { n: 1.65, k: 0.02 }
+  cf_blue:    { n: 1.65, k: 0.02 }
+  ml:         { n: 1.60, k: 0.00 }
+  ml_arl:     { n: 1.25, k: 0.00 }
+stack:
+  si:  { material: si, thickness_um: 2.0 }
+  dti:                       # 식각(클로버) -> 표면 oxide 라이너 -> 채움. depth = si 두께
+    { width_um: 0.15, oxide_liner_um: 0.02, liner: oxide, fill: si,
+      center_open: true, center_gap_um: 0.20 }
+  barl:                      # 전면(blanket) 다층
+    - { material: arl_hi, thickness_um: 0.02 }
+    - { material: arl_lo, thickness_um: 0.05 }
+  grid:                      # 울타리(fence) — stack 후 표면 oxide 코팅 옵션
+    { pitch: 1, width_um: 0.15, coat_on: true, coat_material: oxide, coat_um: 0.02,
+      stack: [ { material: grid_metal, height_um: 0.30 },
+               { material: grid_metal, height_um: 0.30 } ] }
+  cf:                        # 울타리 셀 채움. curvature: +볼록/-오목 (셀 중앙 offset)
+    R: { material: cf_red,   thickness_um: 0.60, curvature_um: -0.05 }
+    G: { material: cf_green, thickness_um: 0.60, curvature_um: -0.05 }
+    B: { material: cf_blue,  thickness_um: 0.60, curvature_um: -0.05 }
+  ml:
+    material: ml
+    planar_um: 0.30          # 최저 CF top 기준 평탄층 두께
+    sag_height_um: 0.55
+    quads:
+      - - { shape: "2x2" }
+        - { shape: "2x1", orient: h }
+      - - { shape: "2x1", orient: v }
+        - { shape: "1x1" }
+    deformations: {}
+  arl_top: { material: ml_arl, thickness_um: 0.10 }   # ML 표면 conformal (ALD)

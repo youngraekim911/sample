@@ -16,6 +16,7 @@ import numpy as np
 import torch
 
 from ..structure.builder import QcellBuilder
+from ..structure.wizard_builder import WizardBuilder
 from ..config.loader import load_config
 from ..rcwa import RCWASolver
 from ..materials.library import MaterialLibrary
@@ -44,14 +45,20 @@ class RCWAPlaneWaveSimulator:
         self.trunc = trunc
         self.ds = max(1, int(downsample))
 
-        # 구조 생성
-        b = QcellBuilder(self.cfg, base_dir=self.base_dir)
+        # 구조 생성 — 스키마 자동 인식: wizard v3(stack.si/cf) vs 구버전 qcell
+        stack = self.cfg.get("stack") or {}
+        if "si" in stack and "cf" in stack:
+            b = WizardBuilder(self.cfg, base_dir=self.base_dir)
+            print("[builder] wizard v3 schema")
+        else:
+            b = QcellBuilder(self.cfg, base_dir=self.base_dir)
         self.matid = b.build()                      # [nz,ny,nx] uint8
         self.meta = b.meta()
         self.dz = b.dz
         self.dxy = b.dxy
         self.span = b.span                          # 단위셀 주기 (um)
-        self.id2name = {int(m["id"]): n for n, m in self.cfg["materials"].items()}
+        self.id2name = {int(m["id"]): n for n, m in self.meta["materials"].items()}
+        self.substrate = self.meta.get("substrate_material", "si")
 
         # 층 스택(z-slice 병합) 준비
         self._prepare_layers()
@@ -121,7 +128,8 @@ class RCWAPlaneWaveSimulator:
         lam = float(wavelength)
         eps_lut = self._eps_lut(lam)
         eps_inc = 1.0                                    # air (위)
-        eps_trn = eps_lut[self.cfg["materials"]["si"]["id"]]   # Si 반무한 (아래)
+        n_s, k_s = self._nk_at(self.substrate, lam)      # 기판(반무한 투과 매질)
+        eps_trn = complex(n_s, k_s) ** 2
 
         solver = RCWASolver(lam, self.span, self.span, nG=self.nG,
                             theta=theta, phi=phi, trunc=self.trunc,

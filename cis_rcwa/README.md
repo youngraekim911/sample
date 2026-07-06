@@ -51,6 +51,23 @@ qcell = 2×2 quad. **각 quad 마다** 렌즈 형태를 선택:
 2. **HTML 에디터 export** — `microlens_layout.deform_file: "ml_shapes.json"`
    (파일에 `quads` 포함 시 그 레이아웃이 우선 적용)
 
+## 위저드 스키마 v3 → RCWA (Python)
+
+위저드가 저장한 `<product>.yaml` 을 **그대로 RCWA 파이프라인에 사용** 가능:
+```bash
+# 구조 npy (위저드와 동일 지오메트리, src/structure/wizard_builder.py)
+PYTHONPATH=. python3 -m src.structure.wizard_builder -c conf/wizard_config.yaml -o out
+# QE sweep — simulator 가 스키마 자동 인식 (wizard v3 / 구버전 qcell)
+python3 run_qe.py -c conf/wizard_config.yaml --nG 101
+```
+구조 모델 (경계/표면 RCWA 정합):
+- **DTI**: Si 식각(1×1 분리 | 2×2 center-open **클로버**) → 판 표면(사이드월+팔 끝벽)
+  oxide 라이너 → 채움. 클로버는 4픽셀 Si 가 중앙에서 연결.
+- **BARL**: 4×4 전면 blanket 다층.
+- **Grid**: 울타리(fence) 1×1/2×2, 다층 stack(동일물질 연결) → 병합 표면(옆+위) oxide 코팅 옵션.
+- **CF**: 울타리 셀 채움, 컬러별 두께 + **상부 곡률(meniscus, +볼록/−오목)** — RCWA 반영.
+- **ML**: 평탄층(최저 CF top 기준) → dome(quads + b_theta 변형). **ARL**: ML 표면 conformal(ALD).
+
 ## 구조 위저드 — `editors/structure_wizard.html`
 
 브라우저에서 **step-by-step**(1~8)으로 구조 설정 → 3D/단면 확인 → **npy 생성**:

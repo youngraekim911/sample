@@ -108,7 +108,7 @@ const DEFAULT = {
     dti:{ width_um:0.15, oxide_liner_um:0.02, liner:"oxide", fill:"si", center_open:true, center_gap_um:0.20 },  // depth = si.thickness
     barl:[ {material:"arl_hi",thickness_um:0.02}, {material:"arl_lo",thickness_um:0.05} ],
     grid:{ pitch:1, width_um:0.15, coat_on:true, coat_material:"oxide", coat_um:0.02, stack:[ {material:"grid_metal",height_um:0.30}, {material:"grid_metal",height_um:0.30} ] },
-    cf:{ R:{material:"cf_red",thickness_um:0.60}, G:{material:"cf_green",thickness_um:0.60}, B:{material:"cf_blue",thickness_um:0.60} },
+    cf:{ R:{material:"cf_red",thickness_um:0.60,curvature_um:0}, G:{material:"cf_green",thickness_um:0.60,curvature_um:0}, B:{material:"cf_blue",thickness_um:0.60,curvature_um:0} },
     ml:{ material:"ml", planar_um:0.30, sag_height_um:0.55,
          quads:[[{shape:"2x2"},{shape:"2x1",orient:"h"}],[{shape:"2x1",orient:"v"},{shape:"1x1"}]], deformations:{} },
     arl_top:{ material:"ml_arl", thickness_um:0.10 },
@@ -140,16 +140,20 @@ function colorRole(c){ return {R:"cf_red",G:"cf_green",B:"cf_blue"}[c]; }
 function bandH(){ return Math.max(cfMaxH(), gridTotalH()); }
 // DTI: 물질명|null(Si)  (center 안 뚫음=Si, 트렌치=oxide 라이너 + fill). ol <= W/2
 function dtiAt(x,y){ const p=P(),st=S.stack.dti,W=+st.width_um,ol=Math.min(+st.oxide_liner_um,W/2),ox=st.liner||"oxide",fl=st.fill||"si";
+  let nearBox=false;
   if(st.center_open){ const gh=(+st.center_gap_um||0)/2; const od=v=>{const i=Math.round(v/p);return(i%2!==0)?i:(v>i*p?i+1:i-1);};
     const dxc=Math.abs(x-od(x)*p), dyc=Math.abs(y-od(y)*p);
-    if(dxc<gh && dyc<gh){ const edge=Math.min(gh-dxc,gh-dyc); return edge<ol ? ox : null; } }  // 개구 표면(트렌치 면) oxide 라이너 + Si
+    if(dxc<gh && dyc<gh) return null;                       // center box: 식각 안 됨 -> 순수 Si (4픽셀 연결)
+    nearBox=(dxc<gh+ol && dyc<gh+ol); }                     // 팔 '끝벽'(식각면) -> 라이너
   const d=Math.min(Math.abs(x-Math.round(x/p)*p),Math.abs(y-Math.round(y/p)*p));
-  if(d>=W/2) return null; return (d>W/2-ol)?ox:fl; }   // 사이드월 라이너 / 나머지 fill
-// Grid: (x, zabs[um 0..gridTotalH]) -> 물질명|null(CF). 코팅=옆면+윗면 표면
-function gridAt(x,zabs){ const g=S.stack.grid,p=P(),per=(g.pitch||1)*p,W=+g.width_um,cw=gridCoat(),H=gridStackH();
-  const d=Math.abs(x-Math.round(x/per)*per);
+  if(d>=W/2) return null;
+  return (d>W/2-ol || nearBox)?ox:fl; }                     // 사이드월/끝벽 라이너, 안쪽 fill
+// Grid 울타리(fence): (x,y,zabs[um]) -> 물질명|null(셀 내부). 코팅=병합된 fence 표면(옆+위)
+function gridAt(x,y,zabs){ const g=S.stack.grid,p=P(),per=(g.pitch||1)*p,W=+g.width_um,cw=gridCoat(),H=gridStackH();
+  const d=Math.min(Math.abs(x-Math.round(x/per)*per), Math.abs(y-Math.round(y/per)*per));
   if(d>W/2+cw || zabs>H+cw) return null;
-  if(cw>0 && (d>W/2 || zabs>H)) return g.coat_material||"oxide";   // 표면 코팅 (옆+위)
+  if(cw>0 && (d>W/2 || zabs>H)) return g.coat_material||"oxide";   // 표면 코팅 (옆+위, 병합 후)
+  if(d>W/2) return null;
   let acc=0; for(const s of g.stack){acc+=+s.height_um; if(zabs<=acc+1e-9)return s.material;} return g.stack.length?g.stack[g.stack.length-1].material:"grid_metal"; }
 // ML sag(x,y)
 function mlSag(x,y){ const p=P(),h=+S.stack.ml.sag_height_um,q=S.stack.ml.quads,def=S.stack.ml.deformations||{}; let sag=0;
@@ -165,7 +169,9 @@ function totalH(){ const s=S.stack; return +s.si.thickness_um + s.barl.reduce((a
 // ============================ npy voxel 빌드 ============================
 // planar band 높이: 평탄층 두께는 '최저 CF top' 기준. (tall CF/grid 는 덮도록 max)
 function cfMinH(){ return Math.min(S.stack.cf.R.thickness_um,S.stack.cf.G.thickness_um,S.stack.cf.B.thickness_um); }
-function planarSpan(){ return Math.max(cfMinH()+ +S.stack.ml.planar_um, cfMaxH(), gridTotalH()); }
+function cfTopMax(){ return Math.max(...["R","G","B"].map(c=>{const f=S.stack.cf[c];return +f.thickness_um+Math.max(0,+(f.curvature_um||0));})); }
+function cfTopMin(){ return Math.min(...["R","G","B"].map(c=>{const f=S.stack.cf[c];return +f.thickness_um+Math.min(0,+(f.curvature_um||0));})); }
+function planarSpan(){ return Math.max(cfTopMin()+ +S.stack.ml.planar_um, cfTopMax(), gridTotalH()); }
 // 임의 점 (x,y,zc[um]) 의 물질 — upto: 표시할 최대 단계(=curStep, 99=전체)
 function matAt(x,y,zc,upto){ if(upto==null)upto=99; const s=S.stack,p=P(),np=NP();
   const zSi=+s.si.thickness_um, barlH=s.barl.reduce((a,l)=>a+ +l.thickness_um,0);
@@ -175,7 +181,11 @@ function matAt(x,y,zc,upto){ if(upto==null)upto=99; const s=S.stack,p=P(),np=NP(
   if(zc<planarTop){ const zabs=zc-barlTop;
     const gm=(upto>=4)?gridAt(x,y,zabs):null; if(gm)return gm;            // grid 울타리
     if(upto>=5){ const pr=Math.min(np-1,Math.floor(y/p)),pc=Math.min(np-1,Math.floor(x/p)),col=colorRole(S.bayer[pr][pc]);
-      const cth=s.cf[{cf_red:"R",cf_green:"G",cf_blue:"B"}[col]].thickness_um; if(zabs<=cth)return col; }  // 울타리 안 CF
+      const cfc=s.cf[{cf_red:"R",cf_green:"G",cf_blue:"B"}[col]];
+      // 액체 메니스커스: fence 셀 기준, 벽에서 thickness 고정, 중앙 ±curvature (+볼록/-오목)
+      const per=(s.grid.pitch||1)*p, u=(x-(Math.floor(x/per)+0.5)*per)/(per/2), v=(y-(Math.floor(y/per)+0.5)*per)/(per/2);
+      const zTop=+cfc.thickness_um + (+(cfc.curvature_um||0))*(1-Math.max(u*u,v*v));
+      if(zabs<=zTop)return col; }  // 울타리 안 CF (곡면 top)
     if(upto>=6)return s.ml.material;    // 평탄화 fill
     return "air"; }
   if(upto<6)return "air"; const surf=planarTop+mlSag(x,y); if(zc<=surf)return s.ml.material;  // ML dome
@@ -309,9 +319,15 @@ const STEPS=[
  {t:"1 · Pixel array", d:"pitch 와 n×n 배열", body:()=>[ numRow("pixel pitch (µm)",S.grid,"pixel_pitch_um"), numRow("n × n",S.grid,"n_pixels","1"),
     h("div",{class:"seclbl"},["voxel 해상도"]), numRow("dxy (µm)",S.grid,"dxy_um"), numRow("dz (µm)",S.grid,"dz_um"), numRow("air margin (µm)",S.grid,"air_margin_um") ]},
  {t:"2 · Si substrate", d:"물질(n,k 폴더 연동) 과 두께. DTI depth = 이 두께", body:()=>[ matRow("Si 물질",S.stack.si,"material"), numRow("thickness (µm)",S.stack.si,"thickness_um") ]},
- {t:"3 · DTI", d:"depth = Si 두께. width, oxide 라이너 두께(나머지 fill)", body:()=>{ const d=S.stack.dti; const co=h("input",{type:"checkbox"}); co.checked=d.center_open; co.onchange=()=>{d.center_open=co.checked; renderViews();};
-    return [ numRow("width (µm)",d,"width_um"), numRow("oxide 라이너 (µm)",d,"oxide_liner_um"), matRow("라이너 물질",d,"liner"), matRow("나머지 fill",d,"fill"),
-      h("div",{class:"row"},[h("label",{},["center open (Si 연결)"]),co]), numRow("center gap (µm)",d,"center_gap_um"), h("p",{class:"hint"},["depth 는 Si 두께와 동일(전체 관통)."]) ]; }},
+ {t:"3 · DTI", d:"Si 식각 → 판 표면 oxide 라이너 → 채움. depth = Si 두께", body:()=>{ const d=S.stack.dti;
+    const md=h("select",{}); [["full","1×1 분리 (전체 격자)"],["clover","2×2 center open (클로버)"]].forEach(([v,tx])=>{const o=h("option",{value:v},[tx]); if((d.center_open?"clover":"full")===v)o.selected=true; md.appendChild(o);});
+    md.onchange=()=>{ d.center_open=(md.value==="clover"); renderStep(); };
+    const rows=[ h("div",{class:"row"},[h("label",{},["DTI 형태"]),md]),
+      numRow("width (µm)",d,"width_um"), numRow("oxide 라이너 (µm)",d,"oxide_liner_um"),
+      matRow("라이너 물질",d,"liner"), matRow("채움 물질",d,"fill") ];
+    if(d.center_open) rows.push(numRow("center gap (µm)",d,"center_gap_um"));
+    rows.push(h("p",{class:"hint"},["공정: 모양대로 식각(클로버=2×2 중앙 안 팜, + 팔 유지) → 판 곳 표면 라이너 → 나머지 채움 → 4픽셀 Si 중앙 연결(네잎클로버). 라이너 ≤ width/2."]));
+    return rows; }},
  {t:"4 · BARL stack", d:"전면 다층 AR (개수·물질·두께)", body:()=>[ h("p",{class:"hint"},["아래→위 순서. 각 층 물질(폴더 연동)·두께."]), subEditor(S.stack.barl,[["material","material","mat"],["thickness","thickness_um","num"]]) ]},
  {t:"5 · Grid", d:"n×n 배열·width·물질 stack(각 height)·표면 코팅", body:()=>{ const g=S.stack.grid; const pt=h("select",{}); [["1","1×1 (pixel)"],["2","2×2 (quad)"]].forEach(([v,tx])=>{const o=h("option",{value:v},[tx]); if(String(g.pitch||1)===v)o.selected=true; pt.appendChild(o);}); pt.onchange=()=>{g.pitch=parseInt(pt.value); renderViews();};
     const cc=h("input",{type:"checkbox"}); cc.checked=g.coat_on!==false; cc.onchange=()=>{g.coat_on=cc.checked; renderStep();};
@@ -320,9 +336,11 @@ const STEPS=[
       h("div",{class:"seclbl"},["표면 코팅 (옆면+윗면)"]), h("div",{class:"row"},[h("label",{},["코팅 사용"]),cc]) ];
     if(g.coat_on!==false){ rows.push(matRow("코팅 물질",g,"coat_material")); rows.push(numRow("코팅 두께 (µm)",g,"coat_um")); }
     return rows; }},
- {t:"6 · Color Filter", d:"각 컬러별 물질·두께", body:()=>[ h("div",{class:"seclbl"},["Red"]), matRow("R 물질",S.stack.cf.R,"material"), numRow("R 두께 (µm)",S.stack.cf.R,"thickness_um"),
-    h("div",{class:"seclbl"},["Green"]), matRow("G 물질",S.stack.cf.G,"material"), numRow("G 두께 (µm)",S.stack.cf.G,"thickness_um"),
-    h("div",{class:"seclbl"},["Blue"]), matRow("B 물질",S.stack.cf.B,"material"), numRow("B 두께 (µm)",S.stack.cf.B,"thickness_um") ]},
+ {t:"6 · Color Filter", d:"grid 울타리 셀 안에 채움. 컬러별 물질·두께·상부 곡률", body:()=>[
+    h("p",{class:"hint"},["두께=벽(울타리)에서의 높이. 곡률=셀 중앙 offset (+볼록 / −오목 메니스커스) — RCWA 에 반영됨."]),
+    h("div",{class:"seclbl"},["Red"]), matRow("R 물질",S.stack.cf.R,"material"), numRow("R 두께 (µm)",S.stack.cf.R,"thickness_um"), numRow("R 곡률 (µm)",S.stack.cf.R,"curvature_um"),
+    h("div",{class:"seclbl"},["Green"]), matRow("G 물질",S.stack.cf.G,"material"), numRow("G 두께 (µm)",S.stack.cf.G,"thickness_um"), numRow("G 곡률 (µm)",S.stack.cf.G,"curvature_um"),
+    h("div",{class:"seclbl"},["Blue"]), matRow("B 물질",S.stack.cf.B,"material"), numRow("B 두께 (µm)",S.stack.cf.B,"thickness_um"), numRow("B 곡률 (µm)",S.stack.cf.B,"curvature_um") ]},
  {t:"7 · Microlens", d:"물질·평탄층 두께·ML 형상(shape editor 연동)", body:()=>{ const m=S.stack.ml;
     const open=h("button",{class:"btn mini",onclick:openMLeditor},["🔷 Open ML shape editor"]);
     const nd=Object.keys(m.deformations||{}).length;
