@@ -21,9 +21,10 @@ materials:
   ml_arl:     { n: 1.25, k: 0.00 }
 stack:
   si:  { material: si, thickness_um: 2.0 }
-  dti:                       # 식각(클로버) -> 표면 oxide 라이너 -> 채움. depth = si 두께
-    { width_um: 0.15, oxide_liner_um: 0.02, liner: oxide, fill: si,
-      center_open: true, center_gap_um: 0.20 }
+  dti:                       # 식각 -> 식각면 oxide 라이너 -> 채움. depth = si 두께
+    # mode: 1x1(전체 격자) | 2x2(quad 경계만) | 2x2_open(클로버: 팔이 중앙 못미쳐 끊김)
+    { mode: 2x2_open, width_um: 0.15, oxide_liner_um: 0.02, liner: oxide, fill: si,
+      center_gap_x_um: 0.20, center_gap_y_um: 0.20 }
   barl:                      # 전면(blanket) 다층
     - { material: arl_hi, thickness_um: 0.02 }
     - { material: arl_lo, thickness_um: 0.05 }

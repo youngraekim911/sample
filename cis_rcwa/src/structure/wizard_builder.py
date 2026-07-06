@@ -39,31 +39,49 @@ class WizardBuilder:
 
     # ------------------------------------------------------------- DTI
     def _si_map(self):
-        """Si 밴드 2D 물질 id 맵: 식각(모양) -> 표면 라이너 -> 채움."""
+        """Si 밴드 2D 물질 id 맵: 식각(1x1|2x2|클로버) -> 식각면 라이너 -> 채움.
+
+        mode "2x2_open": intra-quad 트렌치 팔이 중앙 못미쳐 끊김(가로/세로 open
+        길이 별도) -> 4픽셀 Si 직각 클로버 연결. 라이너=사이드월+팔 끝벽.
+        """
         st = self.s["dti"]
         p = self.p
         W = float(st["width_um"])
         ol = min(float(st["oxide_liner_um"]), W / 2)
-        d = np.minimum(np.abs(self.X - np.round(self.X / p) * p),
-                       np.abs(self.Y - np.round(self.Y / p) * p))
-        trench = d < W / 2
-        liner = trench & (d > W / 2 - ol)
+        mode = st.get("mode") or ("2x2_open" if st.get("center_open") else "1x1")
+        per = 2 * p if mode == "2x2" else p
+        dx = np.abs(self.X - np.round(self.X / per) * per)
+        dy = np.abs(self.Y - np.round(self.Y / per) * per)
+        vAct = dx < W / 2                      # 수직 트렌치
+        hAct = dy < W / 2                      # 수평 트렌치
+        vEnd = np.zeros_like(vAct)
+        hEnd = np.zeros_like(hAct)
+        if mode == "2x2_open":
+            gx = float(st.get("center_gap_x_um", st.get("center_gap_um", 0)) or 0) / 2
+            gy = float(st.get("center_gap_y_um", st.get("center_gap_um", 0)) or 0) / 2
+            bi = np.round(self.X / p)
+            bj = np.round(self.Y / p)
+            odd = lambda V: (lambda i: np.where(i % 2 != 0, i,
+                             np.where(V > i * p, i + 1, i - 1)))(np.round(V / p)) * p
+            dyc = np.abs(self.Y - odd(self.Y))
+            dxc = np.abs(self.X - odd(self.X))
+            oddX = (bi % 2 != 0)               # intra-quad 수직 경계
+            oddY = (bj % 2 != 0)
+            gapV = vAct & oddX & (dyc < gy)    # 팔 끊김(안 파임) -> Si
+            vEnd = vAct & oddX & (dyc >= gy) & (dyc < gy + ol)   # 팔 끝벽 라이너
+            gapH = hAct & oddY & (dxc < gx)
+            hEnd = hAct & oddY & (dxc >= gx) & (dxc < gx + ol)
+            vAct = vAct & ~gapV
+            hAct = hAct & ~gapH
         si_id = self._id(self.s["si"]["material"])
         li_id = self._id(st.get("liner", "oxide"))
         fi_id = self._id(st.get("fill", "si"))
-        if st.get("center_open"):
-            gh = float(st.get("center_gap_um", 0)) / 2
-            i = np.round(self.X / p)
-            ix = np.where(i % 2 != 0, i, np.where(self.X > i * p, i + 1, i - 1)) * p
-            j = np.round(self.Y / p)
-            jy = np.where(j % 2 != 0, j, np.where(self.Y > j * p, j + 1, j - 1)) * p
-            dxc, dyc = np.abs(self.X - ix), np.abs(self.Y - jy)
-            inbox = (dxc < gh) & (dyc < gh)                 # center box: 식각 안 됨 -> 순수 Si
-            near_box = (dxc < gh + ol) & (dyc < gh + ol) & ~inbox   # 팔 '끝벽'(식각면) 라이너
-            liner = liner | (trench & near_box)
-            trench = trench & ~inbox
-            liner = liner & ~inbox
-        out = np.where(liner, li_id, np.where(trench, fi_id, si_id))
+        endwall = (vEnd & vAct) | (hEnd & hAct)
+        core = (vAct & (dx <= W / 2 - ol)) | (hAct & (dy <= W / 2 - ol))
+        any_t = vAct | hAct
+        out = np.where(endwall, li_id,
+              np.where(core, fi_id,
+              np.where(any_t, li_id, si_id)))
         return out.astype(np.uint8)
 
     # ------------------------------------------------------------- ML sag

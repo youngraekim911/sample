@@ -105,7 +105,7 @@ const DEFAULT = {
     grid_metal:{n:0.4,k:3.4}, cf_red:{n:1.65,k:0.02}, cf_green:{n:1.65,k:0.02}, cf_blue:{n:1.65,k:0.02}, ml:{n:1.6,k:0}, ml_arl:{n:1.25,k:0} },
   stack:{
     si:{ material:"si", thickness_um:2.0 },
-    dti:{ width_um:0.15, oxide_liner_um:0.02, liner:"oxide", fill:"si", center_open:true, center_gap_um:0.20 },  // depth = si.thickness
+    dti:{ width_um:0.15, oxide_liner_um:0.02, liner:"oxide", fill:"si", mode:"2x2_open", center_open:true, center_gap_x_um:0.20, center_gap_y_um:0.20 },  // depth = si.thickness
     barl:[ {material:"arl_hi",thickness_um:0.02}, {material:"arl_lo",thickness_um:0.05} ],
     grid:{ pitch:1, width_um:0.15, coat_on:true, coat_material:"oxide", coat_um:0.02, stack:[ {material:"grid_metal",height_um:0.30}, {material:"grid_metal",height_um:0.30} ] },
     cf:{ R:{material:"cf_red",thickness_um:0.60,curvature_um:0}, G:{material:"cf_green",thickness_um:0.60,curvature_um:0}, B:{material:"cf_blue",thickness_um:0.60,curvature_um:0} },
@@ -139,15 +139,26 @@ function cfMaxH(){ return Math.max(S.stack.cf.R.thickness_um,S.stack.cf.G.thickn
 function colorRole(c){ return {R:"cf_red",G:"cf_green",B:"cf_blue"}[c]; }
 function bandH(){ return Math.max(cfMaxH(), gridTotalH()); }
 // DTI: 물질명|null(Si)  (center 안 뚫음=Si, 트렌치=oxide 라이너 + fill). ol <= W/2
+// DTI 모드: "1x1"(전체 격자) | "2x2"(quad 경계만) | "2x2_open"(클로버: intra-quad 팔이 중앙 못미쳐 끊김)
+function dtiMode(){ const st=S.stack.dti; return st.mode || (st.center_open?"2x2_open":"1x1"); }
 function dtiAt(x,y){ const p=P(),st=S.stack.dti,W=+st.width_um,ol=Math.min(+st.oxide_liner_um,W/2),ox=st.liner||"oxide",fl=st.fill||"si";
-  let nearBox=false;
-  if(st.center_open){ const gh=(+st.center_gap_um||0)/2; const od=v=>{const i=Math.round(v/p);return(i%2!==0)?i:(v>i*p?i+1:i-1);};
-    const dxc=Math.abs(x-od(x)*p), dyc=Math.abs(y-od(y)*p);
-    if(dxc<gh && dyc<gh) return null;                       // center box: 식각 안 됨 -> 순수 Si (4픽셀 연결)
-    nearBox=(dxc<gh+ol && dyc<gh+ol); }                     // 팔 '끝벽'(식각면) -> 라이너
-  const d=Math.min(Math.abs(x-Math.round(x/p)*p),Math.abs(y-Math.round(y/p)*p));
-  if(d>=W/2) return null;
-  return (d>W/2-ol || nearBox)?ox:fl; }                     // 사이드월/끝벽 라이너, 안쪽 fill
+  const mode=dtiMode(), per=(mode==="2x2")?2*p:p;
+  const dx=Math.abs(x-Math.round(x/per)*per), dy=Math.abs(y-Math.round(y/per)*per);
+  let vAct=dx<W/2, hAct=dy<W/2, vEnd=false, hEnd=false;      // 수직/수평 트렌치
+  if(mode==="2x2_open"){
+    const gx=(+(st.center_gap_x_um!=null?st.center_gap_x_um:st.center_gap_um)||0)/2;
+    const gy=(+(st.center_gap_y_um!=null?st.center_gap_y_um:st.center_gap_um)||0)/2;
+    const bi=Math.round(x/p), bj=Math.round(y/p);
+    const od=v=>{const i=Math.round(v/p);return((i%2!==0)?i:(v>i*p?i+1:i-1))*p;};
+    if(vAct && bi%2!==0){ const dyc=Math.abs(y-od(y));       // intra-quad 수직 팔: 중앙 세로 gy 만큼 안 파임
+      if(dyc<gy) vAct=false; else if(dyc<gy+ol) vEnd=true; }
+    if(hAct && bj%2!==0){ const dxc=Math.abs(x-od(x));       // intra-quad 수평 팔: 중앙 가로 gx 만큼 안 파임
+      if(dxc<gx) hAct=false; else if(dxc<gx+ol) hEnd=true; }
+  }
+  if(!vAct && !hAct) return null;                            // 순수 Si (클로버 중앙/셀 내부)
+  if((vEnd&&vAct)||(hEnd&&hAct)) return ox;                  // 팔 '끝벽'(식각면) 라이너 (풀 폭)
+  if((vAct&&dx<=W/2-ol)||(hAct&&dy<=W/2-ol)) return fl;      // 트렌치 코어 채움
+  return ox; }                                               // 사이드월 라이너
 // Grid 울타리(fence): (x,y,zabs[um]) -> 물질명|null(셀 내부). 코팅=병합된 fence 표면(옆+위)
 function gridAt(x,y,zabs){ const g=S.stack.grid,p=P(),per=(g.pitch||1)*p,W=+g.width_um,cw=gridCoat(),H=gridStackH();
   const d=Math.min(Math.abs(x-Math.round(x/per)*per), Math.abs(y-Math.round(y/per)*per));
@@ -320,13 +331,19 @@ const STEPS=[
     h("div",{class:"seclbl"},["voxel 해상도"]), numRow("dxy (µm)",S.grid,"dxy_um"), numRow("dz (µm)",S.grid,"dz_um"), numRow("air margin (µm)",S.grid,"air_margin_um") ]},
  {t:"2 · Si substrate", d:"물질(n,k 폴더 연동) 과 두께. DTI depth = 이 두께", body:()=>[ matRow("Si 물질",S.stack.si,"material"), numRow("thickness (µm)",S.stack.si,"thickness_um") ]},
  {t:"3 · DTI", d:"Si 식각 → 판 표면 oxide 라이너 → 채움. depth = Si 두께", body:()=>{ const d=S.stack.dti;
-    const md=h("select",{}); [["full","1×1 분리 (전체 격자)"],["clover","2×2 center open (클로버)"]].forEach(([v,tx])=>{const o=h("option",{value:v},[tx]); if((d.center_open?"clover":"full")===v)o.selected=true; md.appendChild(o);});
-    md.onchange=()=>{ d.center_open=(md.value==="clover"); renderStep(); };
-    const rows=[ h("div",{class:"row"},[h("label",{},["DTI 형태"]),md]),
+    const cur=dtiMode();
+    const md=h("select",{}); [["1x1","1×1 분리 (전체 격자)"],["2x2","2×2 분리 (quad 경계만)"],["2x2_open","2×2 center open (클로버)"]].forEach(([v,tx])=>{const o=h("option",{value:v},[tx]); if(cur===v)o.selected=true; md.appendChild(o);});
+    md.onchange=()=>{ d.mode=md.value; d.center_open=(md.value==="2x2_open"); renderStep(); };
+    const rows=[ h("div",{class:"row"},[h("label",{},["DTI 분리"]),md]),
       numRow("width (µm)",d,"width_um"), numRow("oxide 라이너 (µm)",d,"oxide_liner_um"),
       matRow("라이너 물질",d,"liner"), matRow("채움 물질",d,"fill") ];
-    if(d.center_open) rows.push(numRow("center gap (µm)",d,"center_gap_um"));
-    rows.push(h("p",{class:"hint"},["공정: 모양대로 식각(클로버=2×2 중앙 안 팜, + 팔 유지) → 판 곳 표면 라이너 → 나머지 채움 → 4픽셀 Si 중앙 연결(네잎클로버). 라이너 ≤ width/2."]));
+    if(cur==="2x2_open"){
+      if(d.center_gap_x_um==null) d.center_gap_x_um=+d.center_gap_um||0.2;
+      if(d.center_gap_y_um==null) d.center_gap_y_um=+d.center_gap_um||0.2;
+      rows.push(numRow("center open 가로 (µm)",d,"center_gap_x_um"));
+      rows.push(numRow("center open 세로 (µm)",d,"center_gap_y_um"));
+      rows.push(h("p",{class:"hint"},["intra-quad 트렌치 팔이 중앙 못 미쳐 끊김(가로/세로 open 길이) → 4픽셀 Si 가 직각 클로버로 연결. 식각면(사이드월+팔 끝벽)에 라이너 → 나머지 채움."]));
+    } else rows.push(h("p",{class:"hint"},["식각 → 표면 라이너 → 채움. depth 는 Si 두께 전체."]));
     return rows; }},
  {t:"4 · BARL stack", d:"전면 다층 AR (개수·물질·두께)", body:()=>[ h("p",{class:"hint"},["아래→위 순서. 각 층 물질(폴더 연동)·두께."]), subEditor(S.stack.barl,[["material","material","mat"],["thickness","thickness_um","num"]]) ]},
  {t:"5 · Grid", d:"n×n 배열·width·물질 stack(각 height)·표면 코팅", body:()=>{ const g=S.stack.grid; const pt=h("select",{}); [["1","1×1 (pixel)"],["2","2×2 (quad)"]].forEach(([v,tx])=>{const o=h("option",{value:v},[tx]); if(String(g.pitch||1)===v)o.selected=true; pt.appendChild(o);}); pt.onchange=()=>{g.pitch=parseInt(pt.value); renderViews();};
