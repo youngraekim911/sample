@@ -1,0 +1,602 @@
+<title>CIS Structure Editor — qcell stack</title>
+<style>
+  :root{
+    --bg:#0e1318; --panel:#161d24; --panel-2:#1b232b; --line:#26313b;
+    --ink:#dbe6ee; --ink-dim:#8ea1af; --ink-faint:#5b6d7a;
+    --accent:#35d1c4; --accent-dim:#1f7a72; --amber:#f2c14e;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --ui:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme: light){
+    :root{--bg:#eef2f4;--panel:#fff;--panel-2:#f4f7f8;--line:#dbe3e8;
+      --ink:#16222b;--ink-dim:#54646f;--ink-faint:#8a9aa5;--accent:#118a80;--accent-dim:#8fded7;--amber:#c9902a;}
+  }
+  :root[data-theme="dark"]{--bg:#0e1318;--panel:#161d24;--panel-2:#1b232b;--line:#26313b;
+    --ink:#dbe6ee;--ink-dim:#8ea1af;--ink-faint:#5b6d7a;--accent:#35d1c4;--accent-dim:#1f7a72;--amber:#f2c14e;}
+  :root[data-theme="light"]{--bg:#eef2f4;--panel:#fff;--panel-2:#f4f7f8;--line:#dbe3e8;
+    --ink:#16222b;--ink-dim:#54646f;--ink-faint:#8a9aa5;--accent:#118a80;--accent-dim:#8fded7;--amber:#c9902a;}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);font-size:13.5px;line-height:1.45;
+    display:flex;flex-direction:column;min-height:100vh}
+  .topbar{display:flex;align-items:center;gap:14px;padding:11px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .brand h1{font-size:15px;font-weight:650;margin:0;letter-spacing:.2px}
+  .brand .sub{font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
+  .brand{display:flex;align-items:baseline;gap:10px}
+  .spacer{flex:1}
+  .btn{font-family:var(--ui);font-size:12.5px;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);
+    border-radius:7px;padding:7px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .btn:hover{border-color:var(--accent-dim)}
+  .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .btn.primary{background:var(--accent);color:#04211f;border-color:transparent;font-weight:600}
+  .btn.ghost{background:transparent}
+  .layout{display:flex;flex:1;min-height:0}
+  .side{width:360px;flex-shrink:0;border-right:1px solid var(--line);background:var(--panel);overflow-y:auto;padding:14px}
+  .stage{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg);overflow:auto}
+  .viewwrap{padding:16px;display:flex;flex-direction:column;gap:16px}
+  .card{border:1px solid var(--line);border-radius:9px;background:var(--panel-2);margin-bottom:10px;overflow:hidden}
+  .card>summary{cursor:pointer;padding:9px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.9px;
+    color:var(--ink-dim);font-weight:600;list-style:none;display:flex;align-items:center;gap:8px;user-select:none}
+  .card>summary::-webkit-details-marker{display:none}
+  .card>summary::before{content:"▸";color:var(--ink-faint);font-size:10px}
+  .card[open]>summary::before{content:"▾"}
+  .card .body{padding:10px 12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:9px}
+  .row{display:flex;align-items:center;gap:8px}
+  .row label{font-size:12px;color:var(--ink-dim);flex:1}
+  input[type=number],input[type=text],select{font-family:var(--mono);font-size:12px;color:var(--ink);
+    background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 6px;width:88px;text-align:right}
+  input[type=text]{text-align:left}
+  select{width:auto;font-family:var(--ui)}
+  input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11.5px}
+  th{text-align:left;color:var(--ink-faint);font-weight:500;padding:3px 4px;font-family:var(--ui);font-size:10px;text-transform:uppercase}
+  td{padding:2px 4px}
+  td input{width:100%}
+  .sublist{display:flex;flex-direction:column;gap:6px}
+  .subrow{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 7px}
+  .subrow select{flex:1}
+  .subrow input{width:74px}
+  .mini{font-size:11px;padding:3px 8px}
+  .del{color:#d66;cursor:pointer;font-size:14px;line-height:1;padding:0 4px;background:none;border:none}
+  canvas{display:block;background:var(--panel);border:1px solid var(--line);border-radius:8px;max-width:100%}
+  .panels{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  .vpanel{display:flex;flex-direction:column;gap:6px}
+  .vpanel .cap{font-family:var(--mono);font-size:11px;color:var(--ink-dim);letter-spacing:.3px}
+  .legend{display:flex;gap:12px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);margin-top:4px}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:-1px;border:1px solid rgba(128,128,128,.4)}
+  .hint{font-size:11px;color:var(--ink-faint);line-height:1.5}
+  dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);padding:0;max-width:min(720px,92vw)}
+  dialog::backdrop{background:rgba(4,8,11,.55)}
+  .dlg-h{display:flex;align-items:center;padding:12px 15px;border-bottom:1px solid var(--line);gap:8px}
+  .dlg-h h3{margin:0;font-size:13px}
+  .dlg-b{padding:14px}
+  textarea{width:100%;height:360px;font-family:var(--mono);font-size:11.5px;line-height:1.5;background:var(--panel-2);
+    color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px;resize:vertical}
+  .seclbl{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--ink-faint);margin:2px 0}
+</style>
+
+<div class="topbar">
+  <div class="brand"><h1>CIS Structure Editor</h1><span class="sub">qcell stack · YAML ⇄ UI</span></div>
+  <div class="spacer"></div>
+  <button class="btn ghost" id="themeBtn">◐ Theme</button>
+  <button class="btn ghost" id="importBtn">Import YAML</button>
+  <button class="btn primary" id="exportBtn">Export YAML</button>
+</div>
+
+<div class="layout">
+  <aside class="side" id="side"></aside>
+  <div class="stage"><div class="viewwrap">
+    <div class="panels">
+      <div class="vpanel">
+        <span class="cap" id="xzCap">XZ cross-section</span>
+        <canvas id="xz" width="720" height="440"></canvas>
+        <div class="legend" id="legend"></div>
+      </div>
+    </div>
+    <div class="panels">
+      <div class="vpanel"><span class="cap">DTI (top view · quad isolation)</span><canvas id="tvDti" width="230" height="230"></canvas></div>
+      <div class="vpanel"><span class="cap">CF + Grid (top view · per-pixel)</span><canvas id="tvCf" width="230" height="230"></canvas></div>
+      <div class="vpanel"><span class="cap">Microlens (top view · height)</span><canvas id="tvMl" width="230" height="230"></canvas></div>
+    </div>
+    <p class="hint" id="dims"></p>
+  </div></div>
+</div>
+
+<dialog id="dlg">
+  <div class="dlg-h"><h3 id="dlgTitle">YAML</h3><div class="spacer" style="flex:1"></div>
+    <button class="btn ghost" id="dlgCopy">Copy</button>
+    <button class="btn ghost" id="dlgLoad" style="display:none">Load</button>
+    <button class="btn ghost" id="dlgClose">Close</button></div>
+  <div class="dlg-b"><p class="hint" id="dlgHint" style="margin:0 0 9px"></p>
+    <textarea id="dlgText" spellcheck="false"></textarea></div>
+</dialog>
+
+<script>
+"use strict";
+// ============================ 미니 YAML (subset) ============================
+const YAML = {
+  emit(obj){ return this._block(obj, 0); },
+  _block(o, ind){
+    const pad = "  ".repeat(ind); let s = "";
+    if(Array.isArray(o)){
+      for(const it of o) s += pad + "- " + this._inlineOrScalar(it) + "\n";
+      return s;
+    }
+    for(const k in o){
+      const v = o[k];
+      if(v && typeof v === "object" && !Array.isArray(v) && !this._isFlat(v)){
+        s += pad + k + ":\n" + this._block(v, ind+1);
+      } else if(Array.isArray(v) && this._arrNeedsBlock(v)){
+        s += pad + k + ":\n" + this._block(v, ind+1);
+      } else {
+        s += pad + k + ": " + this._inlineOrScalar(v) + "\n";
+      }
+    }
+    return s;
+  },
+  _isFlat(o){ // 객체가 스칼라만? -> 인라인 {}
+    if(Array.isArray(o)) return false;
+    return Object.values(o).every(v => typeof v !== "object" || v === null);
+  },
+  _arrNeedsBlock(a){ // 원소가 map(스칼라 여러개) 이고 nested list 아니면 block(- {..})
+    return a.some(x => x && typeof x === "object" && !Array.isArray(x)) &&
+           !a.some(x => Array.isArray(x));
+  },
+  _inlineOrScalar(v){
+    if(v === null || v === undefined) return "";
+    if(Array.isArray(v)) return this._flow(v);
+    if(typeof v === "object") return this._flow(v);
+    return this._scalar(v);
+  },
+  _flow(v){
+    if(Array.isArray(v)) return "[" + v.map(x=>this._inlineOrScalar(x)).join(", ") + "]";
+    return "{ " + Object.entries(v).map(([k,x])=>k+": "+this._inlineOrScalar(x)).join(", ") + " }";
+  },
+  _scalar(v){
+    if(typeof v === "string"){ return /[:#\[\]{}",]|^\s|\s$/.test(v) ? JSON.stringify(v) : v; }
+    return String(v);
+  },
+  // ---- parse ----
+  parse(text){
+    const lines = text.replace(/\t/g,"  ").split("\n")
+      .map(l=>l.replace(/\s+$/,"")).filter(l=>l.trim()!=="" && !/^\s*#/.test(l));
+    let i = 0;
+    const peekInd = ()=> i<lines.length ? lines[i].match(/^ */)[0].length : -1;
+    const self = this;
+    function parseBlock(ind){
+      // list?
+      if(i<lines.length && lines[i].slice(ind).startsWith("- ")) return parseList(ind);
+      const obj = {};
+      while(i<lines.length){
+        const cur = lines[i]; const cind = cur.match(/^ */)[0].length;
+        if(cind < ind) break;
+        if(cind > ind){ i++; continue; }
+        const m = cur.slice(ind).match(/^([^:]+):(.*)$/);
+        if(!m){ i++; continue; }
+        const key = m[1].trim(); const rest = m[2].trim();
+        i++;
+        if(rest === ""){
+          const childInd = peekInd();
+          if(childInd > ind || (i<lines.length && lines[i].slice(childInd).startsWith("- ") && childInd>=ind)){
+            obj[key] = parseBlock(childInd > ind ? childInd : ind + 2);
+          } else obj[key] = null;
+        } else {
+          obj[key] = self._parseFlowOrScalar(rest);
+        }
+      }
+      return obj;
+    }
+    function parseList(ind){
+      const arr = [];
+      while(i<lines.length){
+        const cur = lines[i]; const cind = cur.match(/^ */)[0].length;
+        if(cind < ind || !cur.slice(ind).startsWith("- ")) break;
+        const rest = cur.slice(ind+2).trim();
+        i++;
+        if(rest === ""){ arr.push(parseBlock(peekInd())); }
+        else arr.push(self._parseFlowOrScalar(rest));
+      }
+      return arr;
+    }
+    return parseBlock(peekInd());
+  },
+  _parseFlowOrScalar(s){
+    s = s.trim();
+    if(s.startsWith("[") || s.startsWith("{")) return this._parseFlow(s);
+    return this._parseScalar(s);
+  },
+  _parseFlow(s){
+    let i = 0;
+    function ws(){ while(i<s.length && /\s/.test(s[i])) i++; }
+    function val(){
+      ws();
+      if(s[i]==="["){ i++; const a=[]; ws(); if(s[i]==="]"){i++;return a;}
+        while(true){ a.push(val()); ws(); if(s[i]===","){i++;continue;} if(s[i]==="]"){i++;break;} break; } return a; }
+      if(s[i]==="{"){ i++; const o={}; ws(); if(s[i]==="}"){i++;return o;}
+        while(true){ ws(); let k=""; while(i<s.length && s[i]!==":"){k+=s[i++];} i++; o[k.trim()]=val();
+          ws(); if(s[i]===","){i++;continue;} if(s[i]==="}"){i++;break;} break; } return o; }
+      if(s[i]==='"'){ let j=i+1,str=""; while(j<s.length&&s[j]!=='"'){str+=s[j++];} i=j+1; return str; }
+      let t=""; while(i<s.length && !/[,\]}]/.test(s[i])){t+=s[i++];}
+      return YAML._parseScalar(t.trim());
+    }
+    return val();
+  },
+  _parseScalar(s){
+    if(s===""||s==null) return null;
+    if(s[0]==='"'&&s[s.length-1]==='"') return JSON.parse(s);
+    if(s==="true")return true; if(s==="false")return false;
+    if(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s)) return parseFloat(s);
+    return s;
+  }
+};
+
+// ============================ 기본 구조(state) ============================
+const DEFAULT = {
+  grid:{ pixel_pitch_um:1.0, n_pixels:4, dxy_um:0.02, dz_um:0.02, air_margin_um:0.20 },
+  materials:{
+    air:{n:1.00,k:0.00}, si:{n:4.08,k:0.028}, oxide:{n:1.46,k:0.00},
+    dti_metal:{n:0.40,k:3.40}, arl_hi:{n:2.20,k:0.00}, arl_lo:{n:1.46,k:0.00},
+    grid_metal:{n:0.40,k:3.40}, cf_red:{n:1.65,k:0.02}, cf_green:{n:1.65,k:0.02},
+    cf_blue:{n:1.65,k:0.02}, ml:{n:1.60,k:0.00}, ml_arl:{n:1.25,k:0.00}
+  },
+  bayer:[["R","G","R","G"],["G","B","G","B"],["R","G","R","G"],["G","B","G","B"]],
+  stack:{
+    si_substrate:{ thickness_um:2.0, material:"si" },
+    dti:{ depth_um:0.50, wall_width_um:0.15, oxide_liner_um:0.02, metal:"dti_metal", fill:"si", center_open:true },
+    arl_bottom:[ {material:"arl_hi",thickness_um:0.02}, {material:"arl_lo",thickness_um:0.05} ],
+    color_filter:{ thickness_um:0.60,
+      grid:{ width_um:0.15, shape:"rect", oxide_wrap_um:0.02,
+        stack:[ {material:"grid_metal",thickness_um:0.30}, {material:"oxide",thickness_um:0.30} ] } },
+    ml_planar:{ thickness_um:0.30, material:"ml" },
+    microlens:{ sag_height_um:0.55, material:"ml",
+      quads:[[{shape:"2x2"},{shape:"2x1",orient:"h"}],[{shape:"2x1",orient:"v"},{shape:"1x1"}]] },
+    arl_top:[ {material:"ml_arl",thickness_um:0.10} ]
+  }
+};
+let S = structuredClone(DEFAULT);
+
+// ============================ 물질 표시색 ============================
+function matColor(name){
+  const M={air:"#e9f1fb",si:"#3b3b3b",oxide:"#bcd4e6",dti_metal:"#141414",grid_metal:"#141414",
+    arl_hi:"#8b6fd0",arl_lo:"#a9c7d6",cf_red:"#e24a4a",cf_green:"#3fb34f",cf_blue:"#3f6fd0",
+    ml:"#f2c14e",ml_arl:"#d9b3ff"};
+  if(M[name]) return M[name];
+  if(/red/.test(name))return"#e24a4a"; if(/green/.test(name))return"#3fb34f"; if(/blue/.test(name))return"#3f6fd0";
+  if(/metal|dti|grid/.test(name))return"#141414"; if(/oxide|arl_lo/.test(name))return"#bcd4e6";
+  if(/arl/.test(name))return"#8b6fd0"; if(/ml/.test(name))return"#f2c14e"; if(/si/.test(name))return"#3b3b3b";
+  return"#9aa";
+}
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+
+// ============================ 구조 도우미 ============================
+const P = ()=>S.grid.pixel_pitch_um, NP = ()=>S.grid.n_pixels;
+function stackTotalGrid(){ return S.stack.color_filter.grid.stack.reduce((a,s)=>a+ +s.thickness_um,0); }
+function colorMat(c){ return {R:"cf_red",G:"cf_green",B:"cf_blue"}[c]; }
+
+// ML sag (단면/topview 공용): (x,y) um -> 표면 높이(um)
+function mlSag(x,y){
+  const p=P(), h=+S.stack.microlens.sag_height_um, quads=S.stack.microlens.quads;
+  let sag=0;
+  function dome(cx,cy,ax,ay){ const r=((x-cx)/ax)**2+((y-cy)/ay)**2; if(r<=1) sag=Math.max(sag,h*Math.sqrt(1-r)); }
+  for(let qy=0;qy<2;qy++)for(let qx=0;qx<2;qx++){
+    const s=quads[qy][qx], x0=qx*2*p,y0=qy*2*p,cx0=x0+p,cy0=y0+p, sh=s.shape, or=s.orient||"h";
+    if(sh==="2x2") dome(cx0,cy0,p,p);
+    else if(sh==="1x1"){for(let a=0;a<2;a++)for(let b=0;b<2;b++)dome(x0+(b+.5)*p,y0+(a+.5)*p,p/2,p/2);}
+    else if(sh==="2x1"){ if(or==="h"){for(let a=0;a<2;a++)dome(cx0,y0+(a+.5)*p,p,p/2);}
+      else {for(let b=0;b<2;b++)dome(x0+(b+.5)*p,cy0,p/2,p);} }
+  }
+  return sag;
+}
+// 경계 위치 판정
+function nearBoundary(coord, w){ const p=P(); const u=((coord%p)+p)%p; const h=w/2; return u<h||u>p-h; }
+function isDtiWall(x,y){
+  const p=P(), st=S.stack.dti, w=+st.wall_width_um+2*(+st.oxide_liner_um);
+  // center_open: DTI 는 quad(2p) 경계만. 아니면 모든 pixel 경계.
+  const per = st.center_open ? 2*p : p;
+  const half=w/2;
+  const ux=((x%per)+per)%per, uy=((y%per)+per)%per;
+  return (ux<half||ux>per-half) || (uy<half||uy>per-half);
+}
+
+// ============================ 렌더: XZ 단면 ============================
+function totalHeight(){
+  const s=S.stack;
+  const arlB=s.arl_bottom.reduce((a,l)=>a+ +l.thickness_um,0);
+  const arlT=s.arl_top.reduce((a,l)=>a+ +l.thickness_um,0);
+  return +s.si_substrate.thickness_um + +s.dti.depth_um + arlB +
+    Math.max(+s.color_filter.thickness_um, stackTotalGrid()) + +s.ml_planar.thickness_um +
+    +s.microlens.sag_height_um + arlT + +S.grid.air_margin_um;
+}
+function drawXZ(){
+  const cv=document.getElementById("xz"), ctx=cv.getContext("2d");
+  const W=cv.width,H=cv.height; ctx.clearRect(0,0,W,H);
+  ctx.fillStyle=css("--panel"); ctx.fillRect(0,0,W,H);
+  const p=P(), np=NP(), span=p*np;
+  const s=S.stack;
+  const arlB=s.arl_bottom.reduce((a,l)=>a+ +l.thickness_um,0);
+  const arlTtot=s.arl_top.reduce((a,l)=>a+ +l.thickness_um,0);
+  const cfH=Math.max(+s.color_filter.thickness_um, stackTotalGrid());
+  const Htot=+s.si_substrate.thickness_um+ +s.dti.depth_um+arlB+cfH+ +s.ml_planar.thickness_um
+    + +s.microlens.sag_height_um+arlTtot+ +S.grid.air_margin_um;
+  const padL=44,padB=26,padT=10,padR=10;
+  const sx=(W-padL-padR)/span, sz=(H-padB-padT)/Htot;
+  const X=x=>padL+x*sx, Z=z=>H-padB-z*sz;   // z up
+  const cutY=+document.getElementById("cutY").value;   // um
+
+  function rect(x0,x1,z0,z1,col){ ctx.fillStyle=col; ctx.fillRect(X(x0),Z(z1),(x1-x0)*sx,(z1-z0)*sz); }
+  // 배경 air
+  rect(0,span,0,Htot,matColor("air"));
+
+  let z=0;
+  // 1) Si substrate
+  rect(0,span,z,z+ +s.si_substrate.thickness_um, matColor(s.si_substrate.material)); z+=+s.si_substrate.thickness_um;
+  // 2) DTI band
+  const dz0=z, dth=+s.dti.depth_um; rect(0,span,z,z+dth,matColor(s.dti.fill));
+  { const st=s.dti, wm=+st.wall_width_um, ol=+st.oxide_liner_um, per=st.center_open?2*p:p;
+    for(let b=0;b<=np;b+= (st.center_open?2:1)){ const xb=b*p; if(xb<0||xb>span)continue;
+      // oxide liner column + metal core
+      rect(xb-(wm/2+ol),xb+(wm/2+ol),z,z+dth,matColor("oxide"));
+      rect(xb-wm/2,xb+wm/2,z,z+dth,matColor(st.metal)); } }
+  z+=dth;
+  // 3) ARL bottom (blanket 다층)
+  for(const l of s.arl_bottom){ rect(0,span,z,z+ +l.thickness_um,matColor(l.material)); z+=+l.thickness_um; }
+  // 4) CF + grid
+  const cf0=z;
+  // CF 색 (픽셀별) 배경
+  for(let c=0;c<np;c++){ const col=colorMat(S.bayer[Math.max(0,Math.min(np-1,Math.floor(cutY/p)))][c]);
+    rect(c*p,(c+1)*p,z,z+ +s.color_filter.thickness_um,matColor(col)); }
+  // grid columns (모든 pixel 경계) : oxide wrap + stack
+  { const g=s.color_filter.grid, wm=+g.width_um, ow=+g.oxide_wrap_um, gt=stackTotalGrid();
+    for(let b=0;b<=np;b++){ const xb=b*p;
+      rect(xb-(wm/2+ow),xb+(wm/2+ow),z,z+gt+ow,matColor("oxide"));   // wrap
+      let zz=z; for(const sub of g.stack){ rect(xb-wm/2,xb+wm/2,zz,zz+ +sub.thickness_um,matColor(sub.material)); zz+=+sub.thickness_um; } } }
+  z+=cfH;
+  // 5) ML planar
+  rect(0,span,z,z+ +s.ml_planar.thickness_um,matColor(s.ml_planar.material)); z+=+s.ml_planar.thickness_um;
+  // 6) Microlens dome (cutY 라인 프로파일)
+  const ml0=z, mlmat=matColor(s.microlens.material);
+  { ctx.fillStyle=mlmat; ctx.beginPath(); let started=false;
+    const N=240; let prevTop=z;
+    for(let i2=0;i2<=N;i2++){ const x=span*i2/N; const sg=mlSag(x,cutY); const top=z+sg;
+      if(i2===0){ctx.moveTo(X(x),Z(z));} ctx.lineTo(X(x),Z(top)); }
+    ctx.lineTo(X(span),Z(z)); ctx.closePath(); ctx.fill(); }
+  // 7) ARL top (dome 표면 위 conformal 근사)
+  { let off=0; for(const l of s.arl_top){ const t=+l.thickness_um;
+      ctx.strokeStyle=matColor(l.material); ctx.lineWidth=Math.max(1,t*sz);
+      ctx.beginPath(); const N=240;
+      for(let i2=0;i2<=N;i2++){ const x=span*i2/N; const top=z+mlSag(x,cutY)+off+t/2;
+        i2? ctx.lineTo(X(x),Z(top)) : ctx.moveTo(X(x),Z(top)); } ctx.stroke(); off+=t; } }
+
+  // 축
+  ctx.strokeStyle=css("--line"); ctx.lineWidth=1; ctx.strokeRect(padL,padT,W-padL-padR,H-padB-padT);
+  ctx.fillStyle=css("--ink-dim"); ctx.font="10px "+css("--mono");
+  ctx.fillText("x [µm]",W/2-14,H-8);
+  ctx.save(); ctx.translate(12,H/2); ctx.rotate(-Math.PI/2); ctx.fillText("z [µm]",0,0); ctx.restore();
+  // 눈금
+  ctx.fillStyle=css("--ink-faint");
+  for(let x=0;x<=span+1e-6;x+=p){ ctx.fillText(x.toFixed(0),X(x)-3,H-14); }
+  document.getElementById("xzCap").textContent=`XZ cross-section @ y=${cutY.toFixed(2)}µm   (total ${Htot.toFixed(2)}µm)`;
+}
+
+// ============================ 렌더: top-views ============================
+function drawTop(id, fn){
+  const cv=document.getElementById(id), ctx=cv.getContext("2d"); const W=cv.width,H=cv.height;
+  ctx.clearRect(0,0,W,H); const p=P(),np=NP(),span=p*np; const pad=8;
+  const sc=Math.min(W-2*pad,H-2*pad)/span; const ox=(W-span*sc)/2, oy=(H-span*sc)/2;
+  const X=x=>ox+x*sc, Y=y=>H-oy-y*sc;
+  fn(ctx,{X,Y,sc,p,np,span});
+  ctx.strokeStyle=css("--line"); ctx.strokeRect(ox,oy,span*sc,span*sc);
+}
+function renderTops(){
+  const p=P(),np=NP();
+  // DTI: quad isolation
+  drawTop("tvDti",(ctx,g)=>{
+    // Si 배경
+    ctx.fillStyle=matColor("si"); ctx.fillRect(g.X(0),g.Y(g.span),g.span*g.sc,g.span*g.sc);
+    const st=S.stack.dti, wm=+st.wall_width_um, ol=+st.oxide_liner_um, w=wm+2*ol;
+    const step=st.center_open?2:1;
+    for(let b=0;b<=np;b+=step){ const c=b*p;
+      // 세로/가로 벽
+      ctx.fillStyle=matColor("oxide");
+      ctx.fillRect(g.X(c-w/2),g.Y(g.span),w*g.sc,g.span*g.sc);
+      ctx.fillRect(g.X(0),g.Y(c+w/2),g.span*g.sc,w*g.sc);
+      ctx.fillStyle=matColor(st.metal);
+      ctx.fillRect(g.X(c-wm/2),g.Y(g.span),wm*g.sc,g.span*g.sc);
+      ctx.fillRect(g.X(0),g.Y(c+wm/2),g.span*g.sc,wm*g.sc);
+    }
+  });
+  // CF + grid (per-pixel)
+  drawTop("tvCf",(ctx,g)=>{
+    for(let r=0;r<np;r++)for(let c=0;c<np;c++){ ctx.fillStyle=matColor(colorMat(S.bayer[r][c]));
+      ctx.fillRect(g.X(c*p)+1,g.Y((r+1)*p)+1,p*g.sc-2,p*g.sc-2); }
+    const gr=S.stack.color_filter.grid, wm=+gr.width_um, ow=+gr.oxide_wrap_um, w=wm+2*ow;
+    for(let b=0;b<=np;b++){ const c=b*p;
+      ctx.fillStyle=matColor("oxide"); ctx.fillRect(g.X(c-w/2),g.Y(g.span),w*g.sc,g.span*g.sc); ctx.fillRect(g.X(0),g.Y(c+w/2),g.span*g.sc,w*g.sc);
+      ctx.fillStyle=matColor("grid_metal"); ctx.fillRect(g.X(c-wm/2),g.Y(g.span),wm*g.sc,g.span*g.sc); ctx.fillRect(g.X(0),g.Y(c+wm/2),g.span*g.sc,wm*g.sc);
+    }
+  });
+  // ML height
+  drawTop("tvMl",(ctx,g)=>{
+    const N=90, h=+S.stack.microlens.sag_height_um;
+    for(let i=0;i<N;i++)for(let j=0;j<N;j++){ const x=g.span*(i+.5)/N,y=g.span*(j+.5)/N;
+      const sg=mlSag(x,y); if(sg<=0)continue; const t=sg/h;
+      ctx.fillStyle=`rgba(242,193,78,${0.15+0.85*t})`;
+      ctx.fillRect(g.X(g.span*i/N),g.Y(g.span*(j+1)/N),g.span/N*g.sc+1,g.span/N*g.sc+1); }
+  });
+}
+
+function renderLegend(){
+  const used=new Set(["air","si","oxide"]);
+  used.add(S.stack.dti.metal); used.add(S.stack.dti.fill);
+  S.stack.arl_bottom.forEach(l=>used.add(l.material));
+  ["cf_red","cf_green","cf_blue"].forEach(c=>used.add(c));
+  S.stack.color_filter.grid.stack.forEach(l=>used.add(l.material));
+  used.add(S.stack.ml_planar.material); used.add(S.stack.microlens.material);
+  S.stack.arl_top.forEach(l=>used.add(l.material));
+  const el=document.getElementById("legend"); el.innerHTML="";
+  [...used].forEach(n=>{ const s=document.createElement("span");
+    s.innerHTML=`<i style="background:${matColor(n)}"></i>${n}`; el.appendChild(s); });
+}
+function render(){ drawXZ(); renderTops(); renderLegend();
+  document.getElementById("dims").textContent=
+    `pitch ${P()}µm · ${NP()}×${NP()} px · grid stack ${stackTotalGrid().toFixed(2)}µm · total ${totalHeight().toFixed(2)}µm`;
+}
+
+// ============================ UI 빌드 ============================
+function h(tag,attrs,kids){ const e=document.createElement(tag);
+  for(const k in (attrs||{})){ if(k==="html")e.innerHTML=attrs[k]; else if(k.startsWith("on"))e[k]=attrs[k]; else e.setAttribute(k,attrs[k]); }
+  (kids||[]).forEach(c=>e.appendChild(typeof c==="string"?document.createTextNode(c):c)); return e; }
+function numRow(label, obj, key, step){
+  const inp=h("input",{type:"number",step:step||"0.01",value:obj[key]});
+  inp.oninput=()=>{ obj[key]=parseFloat(inp.value); render(); };
+  return h("div",{class:"row"},[h("label",{},[label]),inp]);
+}
+function matSelect(obj,key){ const sel=h("select",{});
+  Object.keys(S.materials).forEach(m=>{ const o=h("option",{value:m},[m]); if(obj[key]===m)o.selected=true; sel.appendChild(o); });
+  sel.onchange=()=>{obj[key]=sel.value;render();}; return sel; }
+function card(title, open, bodyKids){
+  const d=h("details",{class:"card"}); if(open)d.setAttribute("open","");
+  d.appendChild(h("summary",{},[title])); d.appendChild(h("div",{class:"body"},bodyKids)); return d; }
+
+function sublistEditor(arr, withMaterial){
+  const box=h("div",{class:"sublist"});
+  function redraw(){ box.innerHTML="";
+    arr.forEach((it,idx)=>{ const row=h("div",{class:"subrow"});
+      if(withMaterial) row.appendChild(matSelect(it,"material"));
+      const th=h("input",{type:"number",step:"0.01",value:it.thickness_um});
+      th.oninput=()=>{it.thickness_um=parseFloat(th.value);render();};
+      row.appendChild(th); row.appendChild(h("span",{class:"hint"},["µm"]));
+      const del=h("button",{class:"del",onclick:()=>{arr.splice(idx,1);redraw();render();}},["✕"]);
+      row.appendChild(del); box.appendChild(row); });
+    const add=h("button",{class:"btn mini",onclick:()=>{arr.push(withMaterial?{material:Object.keys(S.materials)[0],thickness_um:0.05}:{thickness_um:0.05});redraw();render();}},["+ add layer"]);
+    box.appendChild(add);
+  }
+  redraw(); return box;
+}
+
+function buildSide(){
+  const side=document.getElementById("side"); side.innerHTML="";
+
+  // Global
+  side.appendChild(card("Global", false,[
+    numRow("pixel pitch (µm)",S.grid,"pixel_pitch_um"),
+    numRow("n pixels",S.grid,"n_pixels","1"),
+    numRow("dxy (µm)",S.grid,"dxy_um"),
+    numRow("dz (µm)",S.grid,"dz_um"),
+    numRow("air margin (µm)",S.grid,"air_margin_um"),
+    (()=>{ const inp=h("input",{type:"number",step:"0.05",value:cutYState.v});
+      inp.id="cutY"; inp.oninput=()=>{cutYState.v=parseFloat(inp.value);render();};
+      return h("div",{class:"row"},[h("label",{},["XZ cut y (µm)"]),inp]); })(),
+  ]));
+
+  // Materials
+  const mtbl=h("table",{}); mtbl.appendChild(h("tr",{},[h("th",{},["material"]),h("th",{},["n"]),h("th",{},["k"]),h("th",{},[""])]));
+  function matRows(){ [...mtbl.querySelectorAll("tr.mat")].forEach(r=>r.remove());
+    Object.entries(S.materials).forEach(([name,mk])=>{ const tr=h("tr",{class:"mat"});
+      tr.appendChild(h("td",{},[name]));
+      const ni=h("input",{type:"number",step:"0.01",value:mk.n}); ni.oninput=()=>{mk.n=parseFloat(ni.value);render();};
+      const ki=h("input",{type:"number",step:"0.001",value:mk.k}); ki.oninput=()=>{mk.k=parseFloat(ki.value);render();};
+      tr.appendChild(h("td",{},[ni])); tr.appendChild(h("td",{},[ki]));
+      tr.appendChild(h("td",{},[h("button",{class:"del",onclick:()=>{delete S.materials[name];buildSide();render();}},["✕"])]));
+      mtbl.appendChild(tr); }); }
+  matRows();
+  const addMat=h("div",{class:"row"},[ (()=>{const i=h("input",{type:"text",placeholder:"new material name",id:"newmat"});i.style.flex="1";return i;})(),
+    h("button",{class:"btn mini",onclick:()=>{const nm=document.getElementById("newmat").value.trim(); if(nm&&!S.materials[nm]){S.materials[nm]={n:1.5,k:0};buildSide();}}},["+ add"]) ]);
+  side.appendChild(card("Materials (n, k)", false,[mtbl,addMat]));
+
+  // Si substrate
+  const ss=S.stack.si_substrate;
+  side.appendChild(card("① Si substrate", false,[ numRow("thickness (µm)",ss,"thickness_um"),
+    h("div",{class:"row"},[h("label",{},["material"]),matSelect(ss,"material")]) ]));
+
+  // DTI
+  const dti=S.stack.dti;
+  const coCk=h("input",{type:"checkbox"}); coCk.checked=dti.center_open; coCk.onchange=()=>{dti.center_open=coCk.checked;render();};
+  side.appendChild(card("② Si DTI (isolation)", true,[
+    numRow("depth (µm)",dti,"depth_um"), numRow("wall width (µm)",dti,"wall_width_um"),
+    numRow("oxide liner (µm)",dti,"oxide_liner_um"),
+    h("div",{class:"row"},[h("label",{},["metal"]),matSelect(dti,"metal")]),
+    h("div",{class:"row"},[h("label",{},["trench fill"]),matSelect(dti,"fill")]),
+    h("div",{class:"row"},[h("label",{},["center open (2×2 Si 연결)"]),coCk]),
+  ]));
+
+  // ARL bottom
+  side.appendChild(card("③ ARL bottom (blanket 다층)", false,[
+    h("p",{class:"hint"},["grid 분리 없는 전면 다층막 (아래→위)"]),
+    sublistEditor(S.stack.arl_bottom, true) ]));
+
+  // CF + grid
+  const cf=S.stack.color_filter, gr=cf.grid;
+  side.appendChild(card("④ Color Filter + Grid", true,[
+    numRow("CF thickness (µm)",cf,"thickness_um"),
+    h("div",{class:"seclbl"},["grid"]),
+    numRow("grid width (µm)",gr,"width_um"),
+    numRow("oxide wrap (µm)",gr,"oxide_wrap_um"),
+    h("div",{class:"row"},[h("label",{},["grid shape"]),(()=>{const sel=h("select",{});["rect","taper"].forEach(v=>{const o=h("option",{value:v},[v]);if(gr.shape===v)o.selected=true;sel.appendChild(o);});sel.onchange=()=>{gr.shape=sel.value;render();};return sel;})()]),
+    h("div",{class:"seclbl"},["grid stack (아래→위)"]),
+    sublistEditor(gr.stack, true),
+  ]));
+
+  // ML planar
+  const mp=S.stack.ml_planar;
+  side.appendChild(card("⑤ ML planar", false,[ numRow("thickness (µm)",mp,"thickness_um"),
+    h("div",{class:"row"},[h("label",{},["material"]),matSelect(mp,"material")]) ]));
+
+  // Microlens
+  const ml=S.stack.microlens;
+  const quadUI=h("div",{class:"sublist"});
+  const POS=[[1,0,"TL"],[1,1,"TR"],[0,0,"BL"],[0,1,"BR"]];
+  POS.forEach(([qy,qx,pos])=>{ const spec=ml.quads[qy][qx];
+    const sel=h("select",{}); [["2x2","2×2"],["2x1h","2×1 h"],["2x1v","2×1 v"],["1x1","1×1"]].forEach(([v,t])=>{const o=h("option",{value:v},[t]);
+      const cur=spec.shape==="2x1"?(spec.orient==="v"?"2x1v":"2x1h"):spec.shape; if(cur===v)o.selected=true; sel.appendChild(o);});
+    sel.onchange=()=>{ const v=sel.value; ml.quads[qy][qx]= v==="2x1h"?{shape:"2x1",orient:"h"}:v==="2x1v"?{shape:"2x1",orient:"v"}:{shape:v}; render(); };
+    quadUI.appendChild(h("div",{class:"subrow"},[h("span",{class:"hint",style:"width:26px"},[pos]),sel])); });
+  side.appendChild(card("⑥ Microlens", false,[ numRow("sag height (µm)",ml,"sag_height_um"),
+    h("div",{class:"row"},[h("label",{},["material"]),matSelect(ml,"material")]),
+    h("div",{class:"seclbl"},["quad shape"]), quadUI,
+    h("p",{class:"hint"},["세부 형상 변형은 ML shape editor 참조"]) ]));
+
+  // ARL top
+  side.appendChild(card("⑦ ARL top (air→ML)", false,[
+    h("p",{class:"hint"},["ML 표면 위 AR 코팅 (아래→위)"]),
+    sublistEditor(S.stack.arl_top, true) ]));
+}
+const cutYState={v:0.5};
+
+// ============================ Import / Export ============================
+const dlg=document.getElementById("dlg");
+document.getElementById("exportBtn").onclick=()=>{
+  const text="# CIS structure (structure_editor)\n"+YAML.emit(S);
+  document.getElementById("dlgTitle").textContent="Export YAML";
+  document.getElementById("dlgHint").textContent="structure_config.yaml 로 저장해서 파이프라인에 사용.";
+  document.getElementById("dlgText").value=text;
+  document.getElementById("dlgLoad").style.display="none";
+  // 다운로드도 제공
+  const blob=new Blob([text],{type:"text/yaml"}); const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob); a.download="structure_config.yaml"; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  dlg.showModal();
+};
+document.getElementById("importBtn").onclick=()=>{
+  document.getElementById("dlgTitle").textContent="Import YAML";
+  document.getElementById("dlgHint").textContent="YAML 붙여넣고 Load. (export 한 형식과 호환)";
+  document.getElementById("dlgText").value=""; document.getElementById("dlgLoad").style.display="";
+  dlg.showModal();
+};
+document.getElementById("dlgLoad").onclick=()=>{
+  try{ const obj=YAML.parse(document.getElementById("dlgText").value);
+    S=Object.assign(structuredClone(DEFAULT),obj);
+    if(obj.stack) S.stack=Object.assign(structuredClone(DEFAULT.stack),obj.stack);
+    buildSide(); render(); dlg.close();
+  }catch(e){ alert("parse error: "+e.message); }
+};
+document.getElementById("dlgCopy").onclick=async()=>{ const t=document.getElementById("dlgText"); t.select();
+  try{await navigator.clipboard.writeText(t.value);}catch(e){document.execCommand("copy");} };
+document.getElementById("dlgClose").onclick=()=>dlg.close();
+document.getElementById("themeBtn").onclick=()=>{ const r=document.documentElement;
+  const cur=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+  r.setAttribute("data-theme",cur==="dark"?"light":"dark"); render(); };
+
+// ============================ init ============================
+buildSide(); render();
+</script>

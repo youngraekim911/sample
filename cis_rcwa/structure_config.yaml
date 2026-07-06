@@ -1,0 +1,78 @@
+# =============================================================================
+# CIS qcell 구조 정의 v2  (structure editor 로 편집/저장/불러오기)
+#   단위: micron (um).  qcell = (2x2 pixel) quad x4 = 4x4 pixel
+#   층 순서(아래->위): Si+DTI -> ARL(하부,전면) -> CF+Grid -> ML평탄 -> ML -> ARL(상부)
+# =============================================================================
+
+grid:
+  pixel_pitch_um: 1.0
+  n_pixels: 4
+  dxy_um: 0.02
+  dz_um: 0.02
+  air_margin_um: 0.20
+
+# 물질 n,k  (파장 의존은 dispersion 으로 확장)
+materials:
+  air:        { n: 1.00, k: 0.00 }
+  si:         { n: 4.08, k: 0.028 }
+  oxide:      { n: 1.46, k: 0.00 }
+  dti_metal:  { n: 0.40, k: 3.40 }
+  arl_hi:     { n: 2.20, k: 0.00 }
+  arl_lo:     { n: 1.46, k: 0.00 }
+  grid_metal: { n: 0.40, k: 3.40 }
+  cf_red:     { n: 1.65, k: 0.02 }
+  cf_green:   { n: 1.65, k: 0.02 }
+  cf_blue:    { n: 1.65, k: 0.02 }
+  ml:         { n: 1.60, k: 0.00 }
+  ml_arl:     { n: 1.25, k: 0.00 }
+
+# Bayer 색배치 (row0 = 아래)
+bayer:
+  - [R, G, R, G]
+  - [G, B, G, B]
+  - [R, G, R, G]
+  - [G, B, G, B]
+
+# 층 스택 (아래 -> 위)
+stack:
+  si_substrate:
+    thickness_um: 2.0
+    material: si
+
+  dti:                      # Si backside deep trench isolation
+    depth_um: 0.50
+    wall_width_um: 0.15
+    oxide_liner_um: 0.02    # DTI 표면 균일 oxide
+    metal: dti_metal
+    fill: si                # 트렌치 내부(라이너 안쪽) 채움
+    center_open: true       # 2x2 내부 중앙 미연결 -> Si 연결
+
+  arl_bottom:               # 전면(blanket) 다층 AR (grid 분리 없음)
+    - { material: arl_hi, thickness_um: 0.02 }
+    - { material: arl_lo, thickness_um: 0.05 }
+
+  color_filter:
+    thickness_um: 0.60
+    grid:
+      width_um: 0.15
+      shape: rect           # rect | taper (편집 확장)
+      oxide_wrap_um: 0.02   # stack 후 grid 를 감싸는 oxide
+      stack:                # grid 자체가 다층 stack
+        - { material: grid_metal, thickness_um: 0.30 }
+        - { material: oxide,      thickness_um: 0.30 }
+
+  ml_planar:                # ML 동일물질 평탄화 (focus 거리)
+    thickness_um: 0.30
+    material: ml
+
+  microlens:
+    sag_height_um: 0.55
+    material: ml
+    quads:                  # 2x2 quad 별 렌즈 형태
+      - - { shape: "2x2" }
+        - { shape: "2x1", orient: "h" }
+      - - { shape: "2x1", orient: "v" }
+        - { shape: "1x1" }
+
+  arl_top:                  # air -> ML 사이 AR (ML 표면 위)
+    - { material: ml_arl, thickness_um: 0.10 }
