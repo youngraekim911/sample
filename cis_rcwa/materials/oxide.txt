@@ -1,0 +1,5 @@
+# oxide  n,k dispersion  (columns: wavelength_nm  n  k)
+# 근사값 — 실측 데이터로 교체 가능. 파장 step/range 자유(로더가 보간).
+ 400.0  1.4700  0.0000
+ 550.0  1.4600  0.0000
+ 700.0  1.4550  0.0000

@@ -120,9 +120,19 @@ python3 runner.py -c qcell_config.yaml --lam0 0.45 --lam1 0.65 --n 5 --nG 101 --
 - 무손실 패턴층 에너지 보존 R+T=1
 - 흡수층 물리적 R/T/A
 
-### 파장 의존 n,k
-`qcell_config.yaml` 의 `dispersion:` 에 `[lambda_um, n, k]` 테이블 지정
-(Si·CF 예시 포함 — 실측 값으로 교체 권장).
+### 파장 의존 n,k — `materials/` 폴더 (`materials.py`)
+물질별 txt 파일을 자동 로드해 **임의 파장 step/range 를 보간**으로 커버.
+```
+materials/<name>.txt     # 열: wavelength  n  k  (nm/um 자동감지, # 주석 허용)
+```
+```python
+from materials import MaterialLibrary
+lib = MaterialLibrary("materials")
+n, k = lib.nk("si", 0.55)      # 임의 파장 보간
+```
+우선순위: `materials/` 폴더 → config `dispersion:` → 물질 상수 n,k.
+구조 에디터에서 **📁 Load materials folder** 로 불러오면 물질별 λ-dep n,k 가
+물리고(λ✓), 편집상태는 자동 저장(localStorage).
 
 ### 진행중(WIP)
 - 픽셀별 QE / 3D |E|² 볼륨(Si 내부 필드): `RCWASolver` 필드복원 메서드

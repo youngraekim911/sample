@@ -17,13 +17,19 @@ import torch
 
 from build_qcell import QcellBuilder, load_config
 from rcwa import RCWASolver
+from materials import MaterialLibrary
 
 
 class RCWAPlaneWaveSimulator:
     def __init__(self, config_path, nG=101, downsample=2, trunc="circular",
-                 device=None, dtype=torch.complex128):
+                 device=None, dtype=torch.complex128, materials_dir="materials"):
         self.cfg = load_config(config_path)
         self.base_dir = os.path.dirname(os.path.abspath(config_path))
+        # materials/ 폴더 자동 로드 (파장별 n,k). 없으면 config dispersion/상수 fallback.
+        mdir = materials_dir if os.path.isabs(materials_dir) else os.path.join(self.base_dir, materials_dir)
+        self.matlib = MaterialLibrary(mdir) if os.path.isdir(mdir) else None
+        if self.matlib:
+            print(f"[materials] loaded {len(self.matlib.names())} from {mdir}")
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = dtype
         self.nG = nG
@@ -71,7 +77,9 @@ class RCWAPlaneWaveSimulator:
 
     # -----------------------------------------------------------------
     def _nk_at(self, name, lam):
-        """물질 name 의 (n,k) @ lam(um).  dispersion 있으면 보간, 없으면 상수."""
+        """물질 name 의 (n,k) @ lam(um).  우선순위: materials/ 폴더 -> config dispersion -> 상수."""
+        if self.matlib and self.matlib.has(name):
+            return self.matlib.nk(name, lam)
         disp = self.cfg.get("dispersion", {})
         if name in disp:
             arr = np.array(disp[name], dtype=float)     # [[lam,n,k],...]
