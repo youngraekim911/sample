@@ -51,6 +51,19 @@ qcell = 2×2 quad. **각 quad 마다** 렌즈 형태를 선택:
 2. **HTML 에디터 export** — `microlens_layout.deform_file: "ml_shapes.json"`
    (파일에 `quads` 포함 시 그 레이아웃이 우선 적용)
 
+## 구조 위저드 — `editors/structure_wizard.html`
+
+브라우저에서 **step-by-step**(1~8)으로 구조 설정 → 3D/단면 확인 → **npy 생성**:
+1. pixel pitch·n×n  2. Si 물질(폴더 n,k)·두께  3. DTI(width·oxide 라이너, depth=Si두께)
+4. BARL 다층  5. Grid(1×1/2×2·width·물질 stack·표면 코팅)  6. CF 컬러별 물질·두께
+7. ML 물질·평탄층·형상(ml_shapes.json import)  8. ARL top
+
+- **📁 Materials**: 폴더 n,k txt 로드 → 물질별 파장의존 n,k
+- **⤒ Import / ⤓ YAML**: 구조를 `<product>.yaml` 로 저장/불러오기
+- **⤓ npy + yaml**: 브라우저에서 `<product>_matid.npy` + `_meta.json` + `.yaml` 동시 생성
+  (numpy 로 바로 로드 가능 — Python 불필요)
+- 뷰: XZ 단면 / 3D isometric / top-view
+
 ## UI 에디터 — `ml_shape_editor.html`
 
 브라우저에서 열어 **드래그로 base 2D 형상을 변형**하고 dome/height 실시간 확인:

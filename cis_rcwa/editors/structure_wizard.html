@@ -1,0 +1,382 @@
+<title>CIS Structure Wizard — step by step</title>
+<style>
+  :root{--bg:#0e1318;--panel:#161d24;--panel-2:#1b232b;--line:#26313b;--ink:#dbe6ee;--ink-dim:#8ea1af;--ink-faint:#5b6d7a;
+    --accent:#35d1c4;--accent-dim:#1f7a72;--amber:#f2c14e;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--ui:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  @media (prefers-color-scheme: light){:root{--bg:#eef2f4;--panel:#fff;--panel-2:#f4f7f8;--line:#dbe3e8;--ink:#16222b;--ink-dim:#54646f;--ink-faint:#8a9aa5;--accent:#118a80;--accent-dim:#8fded7;--amber:#c9902a;}}
+  :root[data-theme="dark"]{--bg:#0e1318;--panel:#161d24;--panel-2:#1b232b;--line:#26313b;--ink:#dbe6ee;--ink-dim:#8ea1af;--ink-faint:#5b6d7a;--accent:#35d1c4;--accent-dim:#1f7a72;--amber:#f2c14e;}
+  :root[data-theme="light"]{--bg:#eef2f4;--panel:#fff;--panel-2:#f4f7f8;--line:#dbe3e8;--ink:#16222b;--ink-dim:#54646f;--ink-faint:#8a9aa5;--accent:#118a80;--accent-dim:#8fded7;--amber:#c9902a;}
+  *{box-sizing:border-box}html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);font-size:13.5px;line-height:1.45;display:flex;flex-direction:column;min-height:100vh}
+  .topbar{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .brand h1{font-size:15px;font-weight:650;margin:0}.brand .sub{font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
+  .brand{display:flex;align-items:baseline;gap:9px}.spacer{flex:1}
+  .btn{font-family:var(--ui);font-size:12.5px;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:7px;padding:7px 12px;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+  .btn:hover{border-color:var(--accent-dim)}.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .btn.primary{background:var(--accent);color:#04211f;border-color:transparent;font-weight:600}.btn.ghost{background:transparent}
+  .btn:disabled{opacity:.4;cursor:default}
+  input[type=text]{font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:7px;padding:6px 9px}
+  .layout{display:flex;flex:1;min-height:0}
+  .side{width:400px;flex-shrink:0;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+  .steps{display:flex;gap:4px;padding:12px 14px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+  .schip{font-family:var(--mono);font-size:11px;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);color:var(--ink-dim);cursor:pointer;background:var(--panel-2)}
+  .schip.on{background:var(--accent);color:#04211f;border-color:transparent;font-weight:700}
+  .schip.done{border-color:var(--accent-dim);color:var(--accent)}
+  .stepbody{flex:1;overflow-y:auto;padding:16px}
+  .stepbody h2{font-size:14px;margin:0 0 4px}.stepbody .desc{font-size:12px;color:var(--ink-faint);margin:0 0 14px}
+  .navrow{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--line)}
+  .row{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+  .row label{font-size:12px;color:var(--ink-dim);flex:1}
+  input[type=number]{font-family:var(--mono);font-size:12px;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:4px 6px;width:92px;text-align:right}
+  select{font-family:var(--ui);font-size:12px;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
+  input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
+  .sublist{display:flex;flex-direction:column;gap:6px;margin:6px 0}
+  .subrow{display:flex;align-items:center;gap:6px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:5px 7px}
+  .subrow select{flex:1}.subrow input{width:78px}
+  .del{color:#d66;cursor:pointer;background:none;border:none;font-size:14px}
+  .mini{font-size:11.5px;padding:5px 9px}
+  .seclbl{font-size:10px;text-transform:uppercase;letter-spacing:.9px;color:var(--ink-faint);margin:10px 0 5px}
+  .hint{font-size:11px;color:var(--ink-faint);line-height:1.5}
+  .stage{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg)}
+  .viewtabs{display:flex;gap:4px;padding:10px 14px;border-bottom:1px solid var(--line);align-items:center}
+  .vtab{font-size:12px;padding:5px 11px;border-radius:6px;cursor:pointer;border:1px solid var(--line);background:var(--panel-2);color:var(--ink-dim)}
+  .vtab.on{color:var(--ink);border-color:var(--accent-dim)}
+  .viewwrap{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+  canvas{display:block;background:var(--panel);border:1px solid var(--line);border-radius:8px;max-width:100%}
+  .legend{display:flex;gap:11px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;color:var(--ink-dim)}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:5px;vertical-align:-1px;border:1px solid rgba(128,128,128,.4)}
+  .statusbar{border-top:1px solid var(--line);background:var(--panel);padding:8px 14px;font-family:var(--mono);font-size:11.5px;color:var(--ink-dim);display:flex;gap:18px}
+  dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);padding:0;max-width:min(720px,92vw)}
+  dialog::backdrop{background:rgba(4,8,11,.55)}
+  .dlg-h{display:flex;align-items:center;padding:12px 15px;border-bottom:1px solid var(--line);gap:8px}
+  .dlg-h h3{margin:0;font-size:13px}.dlg-b{padding:14px}
+  textarea{width:100%;height:340px;font-family:var(--mono);font-size:11.5px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px}
+</style>
+
+<div class="topbar">
+  <div class="brand"><h1>CIS Structure Wizard</h1><span class="sub">step by step → 3D → npy</span></div>
+  <div class="spacer"></div>
+  <input id="prodName" type="text" placeholder="product name" style="width:150px">
+  <button class="btn ghost" id="themeBtn">◐</button>
+  <button class="btn ghost" id="matBtn">📁 Materials</button>
+  <button class="btn ghost" id="importBtn">⤒ Import</button>
+  <button class="btn ghost" id="yamlBtn">⤓ YAML</button>
+  <button class="btn primary" id="npyBtn">⤓ npy + yaml</button>
+</div>
+
+<div class="layout">
+  <aside class="side">
+    <div class="steps" id="steps"></div>
+    <div class="stepbody" id="stepBody"></div>
+    <div class="navrow">
+      <button class="btn" id="backBtn">← Back</button>
+      <div class="spacer"></div>
+      <button class="btn primary" id="nextBtn">Next →</button>
+    </div>
+  </aside>
+  <div class="stage">
+    <div class="viewtabs">
+      <span class="vtab on" data-v="xz">XZ cross-section</span>
+      <span class="vtab" data-v="iso">3D (isometric)</span>
+      <span class="vtab" data-v="top">Top views</span>
+      <div class="spacer"></div>
+      <label class="hint" style="display:flex;gap:6px;align-items:center">cut y <input type="number" id="cutY" step="0.05" value="0.5" style="width:70px"></label>
+    </div>
+    <div class="viewwrap" id="viewWrap"></div>
+    <div class="statusbar" id="status"></div>
+  </div>
+</div>
+
+<input type="file" id="matFolder" webkitdirectory directory multiple style="display:none">
+<dialog id="dlg"><div class="dlg-h"><h3 id="dlgTitle">YAML</h3><div class="spacer"></div>
+  <button class="btn ghost" id="dlgCopy">Copy</button><button class="btn ghost" id="dlgClose">Close</button></div>
+  <div class="dlg-b"><p class="hint" id="dlgHint" style="margin:0 0 9px"></p><textarea id="dlgText" spellcheck="false"></textarea></div></dialog>
+
+<script>
+"use strict";
+// ============================ 상태 ============================
+const DEFAULT = {
+  product:"qcell_demo",
+  grid:{ pixel_pitch_um:1.0, n_pixels:4, dxy_um:0.02, dz_um:0.02, air_margin_um:0.20 },
+  bayer:[["R","G","R","G"],["G","B","G","B"],["R","G","R","G"],["G","B","G","B"]],
+  materials:{ air:{n:1,k:0}, si:{n:4.08,k:0.028}, oxide:{n:1.46,k:0}, arl_hi:{n:2.2,k:0}, arl_lo:{n:1.46,k:0},
+    grid_metal:{n:0.4,k:3.4}, cf_red:{n:1.65,k:0.02}, cf_green:{n:1.65,k:0.02}, cf_blue:{n:1.65,k:0.02}, ml:{n:1.6,k:0}, ml_arl:{n:1.25,k:0} },
+  stack:{
+    si:{ material:"si", thickness_um:2.0 },
+    dti:{ width_um:0.15, oxide_liner_um:0.02, liner:"oxide", fill:"oxide", center_open:true, center_gap_um:0.20 },  // depth = si.thickness
+    barl:[ {material:"arl_hi",thickness_um:0.02}, {material:"arl_lo",thickness_um:0.05} ],
+    grid:{ pitch:1, width_um:0.15, coat_material:"oxide", coat_um:0.02, stack:[ {material:"grid_metal",height_um:0.30}, {material:"grid_metal",height_um:0.30} ] },
+    cf:{ R:{material:"cf_red",thickness_um:0.60}, G:{material:"cf_green",thickness_um:0.60}, B:{material:"cf_blue",thickness_um:0.60} },
+    ml:{ material:"ml", planar_um:0.30, sag_height_um:0.55,
+         quads:[[{shape:"2x2"},{shape:"2x1",orient:"h"}],[{shape:"2x1",orient:"v"},{shape:"1x1"}]], deformations:{} },
+    arl_top:{ material:"ml_arl", thickness_um:0.10 },
+  }
+};
+let refLambda=0.55, folderLib={}, curStep=0, viewMode="xz";
+let S=(function(){ try{const j=localStorage.getItem("cis_wizard_v1"); if(j){const d=JSON.parse(j);
+  if(d.refLambda)refLambda=d.refLambda; if(d.folderLib)folderLib=d.folderLib; if(d.S)return d.S;} }catch(e){} return structuredClone(DEFAULT); })();
+function save(){ try{localStorage.setItem("cis_wizard_v1",JSON.stringify({S,refLambda,folderLib}));}catch(e){} }
+
+// ============================ 물질 ============================
+function interp1(x,xs,ys){ if(x<=xs[0])return ys[0]; const n=xs.length; if(x>=xs[n-1])return ys[n-1];
+  for(let i=1;i<n;i++){ if(x<=xs[i]){const t=(x-xs[i-1])/(xs[i]-xs[i-1]); return ys[i-1]+t*(ys[i]-ys[i-1]);} } return ys[n-1]; }
+function matTable(name){ const m=S.materials[name]||{}; if(m.src&&folderLib[m.src])return folderLib[m.src]; if(folderLib[name])return folderLib[name]; if(m.nk&&m.nk.length)return m.nk; return null; }
+function matNK(name){ const m=S.materials[name]||{n:1,k:0}; const t=matTable(name);
+  if(t&&t.length){const L=t.map(r=>r[0]); return {n:interp1(refLambda,L,t.map(r=>r[1])),k:interp1(refLambda,L,t.map(r=>r[2]))};} return {n:+m.n||0,k:+m.k||0}; }
+function parseNK(txt){ const rows=[]; txt.split(/\r?\n/).forEach(l=>{l=l.trim(); if(!l||l[0]==="#")return; const p=l.replace(/,/g," ").split(/\s+/).map(Number); if(p.length>=3&&p.slice(0,3).every(v=>!isNaN(v)))rows.push(p.slice(0,3));}); if(!rows.length)return null; rows.sort((a,b)=>a[0]-b[0]); const mx=Math.max(...rows.map(r=>r[0])),sc=mx>100?0.001:1; return rows.map(r=>[r[0]*sc,r[1],r[2]]); }
+function matColor(name){ const M={air:"#e9f1fb",si:"#3b3b3b",oxide:"#bcd4e6",grid_metal:"#141414",arl_hi:"#8b6fd0",arl_lo:"#a9c7d6",cf_red:"#e24a4a",cf_green:"#3fb34f",cf_blue:"#3f6fd0",ml:"#f2c14e",ml_arl:"#d9b3ff"};
+  if(M[name])return M[name]; if(/red/.test(name))return"#e24a4a"; if(/green/.test(name))return"#3fb34f"; if(/blue/.test(name))return"#3f6fd0"; if(/metal/.test(name))return"#141414"; if(/oxide|arl_lo/.test(name))return"#bcd4e6"; if(/arl/.test(name))return"#8b6fd0"; if(/ml/.test(name))return"#f2c14e"; if(/si/.test(name))return"#3b3b3b"; return"#9aa"; }
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+
+// ============================ 구조 지오메트리 (xy 패턴 함수) ============================
+const P=()=>+S.grid.pixel_pitch_um, NP=()=>+S.grid.n_pixels;
+function gridStackH(){ return S.stack.grid.stack.reduce((a,s)=>a+ +s.height_um,0); }
+function cfMaxH(){ return Math.max(S.stack.cf.R.thickness_um,S.stack.cf.G.thickness_um,S.stack.cf.B.thickness_um); }
+function colorRole(c){ return {R:"cf_red",G:"cf_green",B:"cf_blue"}[c]; }
+function bandH(){ return Math.max(cfMaxH(), gridStackH()); }
+// DTI: 물질명|null(Si)  (center 안 뚫음=Si, 트렌치=oxide 라이너 + fill)
+function dtiAt(x,y){ const p=P(),st=S.stack.dti,ol=+st.oxide_liner_um,W=+st.width_um,ox=st.liner||"oxide",fl=st.fill||"oxide";
+  if(st.center_open){ const gh=(+st.center_gap_um||0)/2; const od=v=>{const i=Math.round(v/p);return(i%2!==0)?i:(v>i*p?i+1:i-1);};
+    if(Math.abs(x-od(x)*p)<gh && Math.abs(y-od(y)*p)<gh) return null; }
+  const d=Math.min(Math.abs(x-Math.round(x/p)*p),Math.abs(y-Math.round(y/p)*p));
+  if(d>=W/2) return null; return (d>W/2-ol)?ox:fl; }   // 사이드월 라이너 / 나머지 fill
+// Grid: (x,zf 0..1) -> 물질명|null(CF)
+function gridAt(x,zf){ const g=S.stack.grid,p=P(),per=(g.pitch||1)*p,W=+g.width_um,cw=+(g.coat_um||0);
+  const d=Math.abs(x-Math.round(x/per)*per); if(d>W/2+cw)return null; if(d>W/2)return g.coat_material||"oxide";
+  const H=gridStackH(); let zz=zf*H,acc=0; for(const s of g.stack){acc+=+s.height_um; if(zz<=acc+1e-9)return s.material;} return g.stack.length?g.stack[g.stack.length-1].material:"grid_metal"; }
+// ML sag(x,y)
+function mlSag(x,y){ const p=P(),h=+S.stack.ml.sag_height_um,q=S.stack.ml.quads,def=S.stack.ml.deformations||{}; let sag=0;
+  function bt(id,ang){ const b=def[id]&&def[id].b_theta; if(!b)return 1; const n=b.length; let a=((ang%(2*Math.PI))+2*Math.PI)%(2*Math.PI); let f=a/(2*Math.PI)*n,i0=Math.floor(f)%n,t=f-Math.floor(f); return b[i0]*(1-t)+b[(i0+1)%n]*t; }
+  function dome(id,cx,cy,ax,ay){ const u=(x-cx)/ax,v=(y-cy)/ay,rho=Math.hypot(u,v); if(rho<1e-9){sag=Math.max(sag,h);return;} let ang=Math.atan2(v,u); const B=bt(id,ang); if(rho<=B){const r=rho/B; sag=Math.max(sag,h*Math.sqrt(Math.max(0,1-r*r)));} }
+  for(let qy=0;qy<2;qy++)for(let qx=0;qx<2;qx++){ const s=q[qy][qx],x0=qx*2*p,y0=qy*2*p,cx0=x0+p,cy0=y0+p,sh=s.shape,or=s.orient||"h";
+    if(sh==="2x2")dome(`q${qy}${qx}_2x2_0`,cx0,cy0,p,p);
+    else if(sh==="1x1"){for(let a=0;a<2;a++)for(let b=0;b<2;b++)dome(`q${qy}${qx}_1x1_${a*2+b}`,x0+(b+.5)*p,y0+(a+.5)*p,p/2,p/2);}
+    else if(sh==="2x1"){ if(or==="h")for(let a=0;a<2;a++)dome(`q${qy}${qx}_2x1_${a}`,cx0,y0+(a+.5)*p,p,p/2); else for(let b=0;b<2;b++)dome(`q${qy}${qx}_2x1_${b}`,x0+(b+.5)*p,cy0,p/2,p);} }
+  return sag; }
+function totalH(){ const s=S.stack; return +s.si.thickness_um + s.barl.reduce((a,l)=>a+ +l.thickness_um,0) + bandH() + +s.ml.planar_um + +s.ml.sag_height_um + +s.arl_top.thickness_um + +S.grid.air_margin_um; }
+
+// ============================ npy voxel 빌드 ============================
+function buildVoxels(){
+  const p=P(),np=NP(),span=p*np,dxy=+S.grid.dxy_um,dz=+S.grid.dz_um,s=S.stack;
+  const nx=Math.round(span/dxy),ny=Math.round(span/dxy);
+  const barlH=s.barl.reduce((a,l)=>a+ +l.thickness_um,0), band=bandH();
+  const Ht=totalH(), nz=Math.round(Ht/dz);
+  // 물질 id 맵
+  const names=["air"]; const idOf=n=>{ let i=names.indexOf(n); if(i<0){i=names.length;names.push(n);} return i; };
+  const data=new Uint8Array(nz*ny*nx);   // z-major: [z][y][x]
+  const idx=(z,y,x)=>(z*ny+y)*nx+x;
+  // z 밴드 경계(아래->위)
+  const zSi=+s.si.thickness_um;
+  const barlTop=zSi+barlH, cfTop=barlTop+band, planarTop=cfTop+ +s.ml.planar_um, mlTop=planarTop+ +s.ml.sag_height_um;
+  const cfRowMat=(r,c)=>colorRole(S.bayer[r][c]);
+  const airId=idOf("air");
+  for(let zi=0;zi<nz;zi++){ const zc=(zi+0.5)*dz;
+    for(let yi=0;yi<ny;yi++){ const y=(yi+0.5)*dxy;
+      for(let xi=0;xi<nx;xi++){ const x=(xi+0.5)*dxy; let mat="air";
+        if(zc<zSi){ const m=dtiAt(x,y); mat = m? m : s.si.material; }              // Si + DTI(full depth)
+        else if(zc<barlTop){ let zz=zc-zSi,acc=0; mat=s.barl[0]?s.barl[0].material:"oxide"; for(const l of s.barl){acc+=+l.thickness_um; if(zz<=acc){mat=l.material;break;}} }
+        else if(zc<cfTop){ const zf=(zc-barlTop); const pr=Math.min(np-1,Math.floor(y/p)),pc=Math.min(np-1,Math.floor(x/p));
+            const gm=gridAt(x, zf/gridStackH()); if(gm && zf<=gridStackH()+ (S.stack.grid.coat_um||0)) mat=gm;
+            else { const col=cfRowMat(pr,pc), cth=S.stack.cf[{cf_red:"R",cf_green:"G",cf_blue:"B"}[col]].thickness_um; mat = (zf<=cth)? col : "air"; } }
+        else if(zc<planarTop){ mat=s.ml.material; }                                 // ML planar
+        else { const surf=planarTop + mlSag(x,y); const arlT=+s.arl_top.thickness_um;
+            if(zc<=surf) mat=s.ml.material; else if(zc<=surf+arlT) mat=s.arl_top.material; else mat="air"; }
+        data[idx(zi,yi,xi)]=idOf(mat);
+      } } }
+  return {data,shape:[nz,ny,nx],names,dxy,dz};
+}
+function npyU8(arr,shape){ const hdr=`{'descr': '|u1', 'fortran_order': False, 'shape': (${shape.join(', ')}), }`;
+  let need=(64-((10+hdr.length+1)%64))%64; const hs=hdr+" ".repeat(need)+"\n"; const hb=new TextEncoder().encode(hs);
+  const out=new Uint8Array(10+hb.length+arr.length); out.set([0x93,0x4E,0x55,0x4D,0x50,0x59,1,0],0);
+  out[8]=hb.length&255; out[9]=(hb.length>>8)&255; out.set(hb,10); out.set(arr,10+hb.length); return out; }
+
+// ============================ 렌더 ============================
+function el(id){return document.getElementById(id);}
+function renderViews(){
+  const w=el("viewWrap"); w.innerHTML="";
+  if(viewMode==="xz"){ const c=mkCanvas(760,460); w.appendChild(c.wrap); drawXZ(c.cv);
+    const lg=document.createElement("div"); lg.className="legend"; usedMats().forEach(n=>{const s=document.createElement("span"); s.innerHTML=`<i style="background:${matColor(n)}"></i>${n}`; lg.appendChild(s);}); w.appendChild(lg); }
+  else if(viewMode==="iso"){ const c=mkCanvas(760,520); w.appendChild(c.wrap); drawISO(c.cv); }
+  else { ["DTI","CF+Grid","ML"].forEach((t,i)=>{ const box=document.createElement("div"); const cap=document.createElement("div"); cap.className="hint"; cap.textContent=t; const c=mkCanvas(240,240); box.appendChild(cap); box.appendChild(c.wrap); w.appendChild(box); drawTop(c.cv,i); }); w.style.flexDirection="row"; w.style.flexWrap="wrap"; }
+  if(viewMode!=="top") w.style.flexDirection="column";
+  el("status").innerHTML=`pitch ${P()}µm · ${NP()}×${NP()} · grid ${gridStackH().toFixed(2)}µm · total ${totalH().toFixed(2)}µm · npy ${Math.round(P()*NP()/S.grid.dxy_um)}×${Math.round(P()*NP()/S.grid.dxy_um)}×${Math.round(totalH()/S.grid.dz_um)}`;
+  save();
+}
+function mkCanvas(w,h){ const wrap=document.createElement("div"); const cv=document.createElement("canvas"); cv.width=w; cv.height=h; wrap.appendChild(cv); return {wrap,cv}; }
+function usedMats(){ const u=new Set(["air",S.stack.si.material,S.stack.dti.liner,S.stack.dti.fill]); S.stack.barl.forEach(l=>u.add(l.material)); u.add(S.stack.grid.coat_material); S.stack.grid.stack.forEach(l=>u.add(l.material)); ["R","G","B"].forEach(c=>u.add(S.stack.cf[c].material)); u.add(S.stack.ml.material); u.add(S.stack.arl_top.material); return [...u]; }
+
+function drawXZ(cv){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height; ctx.clearRect(0,0,W,H); ctx.fillStyle=css("--panel"); ctx.fillRect(0,0,W,H);
+  const p=P(),np=NP(),span=p*np,s=S.stack; const Ht=totalH(); const padL=40,padB=22,padT=8,padR=8;
+  const sx=(W-padL-padR)/span, sz=(H-padB-padT)/Ht; const X=x=>padL+x*sx, Z=z=>H-padB-z*sz; const cutY=+el("cutY").value;
+  function rect(x0,x1,z0,z1,col){ctx.fillStyle=col; ctx.fillRect(X(x0),Z(z1),(x1-x0)*sx,(z1-z0)*sz);}
+  rect(0,span,0,Ht,matColor("air"));
+  let z=0; const zSi=+s.si.thickness_um;
+  // Si + DTI(full depth) rasterize
+  rect(0,span,0,zSi,matColor(s.si.material));
+  { const wpx=Math.round(W-padL-padR); for(let px=0;px<wpx;px++){ const x=px/sx; const m=dtiAt(x,cutY); if(!m)continue; ctx.fillStyle=matColor(m); ctx.fillRect(padL+px,Z(zSi),1,zSi*sz);} }
+  z=zSi;
+  for(const l of s.barl){ rect(0,span,z,z+ +l.thickness_um,matColor(l.material)); z+=+l.thickness_um; }
+  // CF + grid
+  const band=bandH(), row=Math.max(0,Math.min(np-1,Math.floor(cutY/p)));
+  for(let c=0;c<np;c++){ const col=S.bayer[row][c],role=colorRole(col),cth=s.cf[{cf_red:"R",cf_green:"G",cf_blue:"B"}[role]].thickness_um; rect(c*p,(c+1)*p,z,z+cth,matColor(role)); }
+  { const gt=gridStackH(),wpx=Math.round(W-padL-padR),hpx=Math.max(1,Math.round(gt*sz)); for(let px=0;px<wpx;px++){ const x=px/sx; for(let pz=0;pz<hpx;pz++){ const zf=1-(pz+0.5)/hpx; const m=gridAt(x,zf); if(!m)continue; ctx.fillStyle=matColor(m); ctx.fillRect(padL+px,Z(z+gt)+pz,1,1);} } }
+  z+=band;
+  rect(0,span,z,z+ +s.ml.planar_um,matColor(s.ml.material)); const planarTop=z+ +s.ml.planar_um; z=planarTop;
+  // ML dome
+  ctx.fillStyle=matColor(s.ml.material); ctx.beginPath(); const N=260;
+  for(let i=0;i<=N;i++){ const x=span*i/N,top=planarTop+mlSag(x,cutY); i?ctx.lineTo(X(x),Z(top)):ctx.moveTo(X(x),Z(planarTop)); } ctx.lineTo(X(span),Z(planarTop)); ctx.closePath(); ctx.fill();
+  // ARL top conformal
+  ctx.strokeStyle=matColor(s.arl_top.material); ctx.lineWidth=Math.max(1,+s.arl_top.thickness_um*sz); ctx.beginPath();
+  for(let i=0;i<=N;i++){ const x=span*i/N,top=planarTop+mlSag(x,cutY)+ +s.arl_top.thickness_um/2; i?ctx.lineTo(X(x),Z(top)):ctx.moveTo(X(x),Z(top)); } ctx.stroke();
+  ctx.strokeStyle=css("--line"); ctx.strokeRect(padL,padT,W-padL-padR,H-padB-padT);
+  ctx.fillStyle=css("--ink-faint"); ctx.font="10px "+css("--mono"); for(let x=0;x<=span+1e-6;x+=p)ctx.fillText(x.toFixed(0),X(x)-3,H-8);
+}
+function drawTop(cv,which){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height,p=P(),np=NP(),span=p*np,pad=8; ctx.clearRect(0,0,W,H);
+  const sc=Math.min(W-2*pad,H-2*pad)/span,ox=(W-span*sc)/2,oy=(H-span*sc)/2; const X=x=>ox+x*sc,Y=y=>H-oy-y*sc;
+  if(which===0){ ctx.fillStyle=matColor(S.stack.si.material); ctx.fillRect(ox,oy,span*sc,span*sc); const N=Math.round(span*sc);
+    for(let py=0;py<N;py++)for(let px=0;px<N;px++){ const m=dtiAt(px/sc,(N-1-py)/sc); if(!m)continue; ctx.fillStyle=matColor(m); ctx.fillRect(ox+px,oy+py,1,1);} }
+  else if(which===1){ for(let r=0;r<np;r++)for(let c=0;c<np;c++){ctx.fillStyle=matColor(colorRole(S.bayer[r][c])); ctx.fillRect(X(c*p)+1,Y((r+1)*p)+1,p*sc-2,p*sc-2);}
+    const g=S.stack.grid,per=(g.pitch||1)*p,wm=+g.width_um,cw=+(g.coat_um||0),w=wm+2*cw,gm=g.stack[0]?g.stack[0].material:"grid_metal";
+    for(let cc=0;cc<=span+1e-6;cc+=per){ ctx.fillStyle=matColor(g.coat_material||"oxide"); ctx.fillRect(X(cc-w/2),oy,w*sc,span*sc); ctx.fillRect(ox,Y(cc+w/2),span*sc,w*sc); ctx.fillStyle=matColor(gm); ctx.fillRect(X(cc-wm/2),oy,wm*sc,span*sc); ctx.fillRect(ox,Y(cc+wm/2),span*sc,wm*sc);} }
+  else { const N=90,h=+S.stack.ml.sag_height_um; for(let i=0;i<N;i++)for(let j=0;j<N;j++){ const sg=mlSag(span*(i+.5)/N,span*(j+.5)/N); if(sg<=0)continue; ctx.fillStyle=`rgba(242,193,78,${0.15+0.85*sg/h})`; ctx.fillRect(X(span*i/N),Y(span*(j+1)/N),span/N*sc+1,span/N*sc+1);} }
+  ctx.strokeStyle=css("--line"); ctx.strokeRect(ox,oy,span*sc,span*sc);
+}
+// 간단 isometric: 층을 3D 박스로 (top 면에 패턴)
+function drawISO(cv){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height; ctx.clearRect(0,0,W,H); ctx.fillStyle=css("--panel"); ctx.fillRect(0,0,W,H);
+  const p=P(),np=NP(),span=p*np,s=S.stack; const Ht=totalH();
+  const sc=Math.min((W*0.5)/span,(H*0.42)/span), ez=Math.min((H*0.44)/Ht, sc*1.4); // xy scale, z scale
+  const ax=0.55, ay=0.30;   // iso axes
+  const cx=W*0.36, cy=H*0.62;
+  function proj(x,y,z){ return [cx + (x-y)*sc*ax + 0, cy + (x+y)*sc*ay - z*ez]; }
+  // 층 리스트 (아래->위): [z0,z1, topPatternFn|color, sideColor]
+  const layers=[];
+  layers.push([0,+s.si.thickness_um,"dti",matColor(s.si.material)]);
+  let z=+s.si.thickness_um; s.barl.forEach(l=>{layers.push([z,z+ +l.thickness_um,matColor(l.material),matColor(l.material)]); z+=+l.thickness_um;});
+  const band=bandH(); layers.push([z,z+band,"cf",matColor("cf_green")]); z+=band;
+  layers.push([z,z+ +s.ml.planar_um,matColor(s.ml.material),matColor(s.ml.material)]); z+=+s.ml.planar_um;
+  layers.push([z,z+ +s.ml.sag_height_um,"ml",matColor(s.ml.material)]);
+  function box(z0,z1,topFn,side){ const c=[[0,0],[span,0],[span,span],[0,span]];
+    // 옆면 2개
+    function quad(pa,pb,shade){ ctx.beginPath(); ctx.moveTo(...proj(pa[0],pa[1],z0)); ctx.lineTo(...proj(pb[0],pb[1],z0)); ctx.lineTo(...proj(pb[0],pb[1],z1)); ctx.lineTo(...proj(pa[0],pa[1],z1)); ctx.closePath(); ctx.fillStyle=shade; ctx.fill(); ctx.strokeStyle="rgba(0,0,0,.25)"; ctx.stroke(); }
+    quad(c[1],c[2],shade(side,-24)); quad(c[2],c[3],shade(side,-42));
+    // top 면
+    ctx.beginPath(); c.forEach((pp,i)=>{const q=proj(pp[0],pp[1],z1); i?ctx.lineTo(...q):ctx.moveTo(...q);}); ctx.closePath();
+    if(typeof topFn==="string"){ ctx.fillStyle=topFn; ctx.fill(); }
+    else { ctx.save(); ctx.clip(); // 패턴 샘플
+      const M=46; for(let i=0;i<M;i++)for(let j=0;j<M;j++){ const x=span*(i+.5)/M,y=span*(j+.5)/M; let col=null;
+        if(topFn==="dti"){const m=dtiAt(x,y); col=m?matColor(m):matColor(s.si.material);} else if(topFn==="cf"){ col=matColor(colorRole(S.bayer[Math.min(np-1,Math.floor(y/p))][Math.min(np-1,Math.floor(x/p))])); } else if(topFn==="ml"){ const sg=mlSag(x,y); col=sg>0?`rgba(242,193,78,${.35+.65*sg/ +s.ml.sag_height_um})`:"rgba(233,241,251,.15)"; }
+        if(!col)continue; const q0=proj(span*i/M,span*j/M,z1),q1=proj(span*(i+1)/M,span*j/M,z1),q2=proj(span*(i+1)/M,span*(j+1)/M,z1),q3=proj(span*i/M,span*(j+1)/M,z1);
+        ctx.beginPath(); ctx.moveTo(...q0); ctx.lineTo(...q1); ctx.lineTo(...q2); ctx.lineTo(...q3); ctx.closePath(); ctx.fillStyle=col; ctx.fill(); }
+      ctx.restore(); }
+    ctx.strokeStyle="rgba(0,0,0,.3)"; ctx.stroke();
+  }
+  function shade(hex,d){ hex=hex.replace('#',''); if(hex.length===3)hex=hex.split('').map(c=>c+c).join(''); let n=parseInt(hex,16); let r=Math.max(0,Math.min(255,((n>>16)&255)+d)),g=Math.max(0,Math.min(255,((n>>8)&255)+d)),bl=Math.max(0,Math.min(255,(n&255)+d)); return `rgb(${r},${g},${bl})`; }
+  layers.forEach(L=>box(L[0],L[1],L[2],L[3]));
+  ctx.fillStyle=css("--ink-faint"); ctx.font="11px "+css("--mono"); ctx.fillText("isometric · 아래→위 층 적층 (top 면 패턴)",12,18);
+}
+
+// ============================ 위저드 스텝 ============================
+function h(tag,at,kids){ const e=document.createElement(tag); for(const k in(at||{})){ if(k==="html")e.innerHTML=at[k]; else if(k[0]==="o"&&k[1]==="n")e[k]=at[k]; else e.setAttribute(k,at[k]); } (kids||[]).forEach(c=>e.appendChild(typeof c==="string"?document.createTextNode(c):c)); return e; }
+function numRow(lb,o,k,st){ const i=h("input",{type:"number",step:st||"0.01",value:o[k]}); i.oninput=()=>{o[k]=parseFloat(i.value); renderViews();}; return h("div",{class:"row"},[h("label",{},[lb]),i]); }
+function matRow(lb,o,k){ const sel=h("select",{}); Object.keys(S.materials).forEach(m=>{const op=h("option",{value:m},[m+(matTable(m)?" ·λ":"")]); if(o[k]===m)op.selected=true; sel.appendChild(op);}); sel.onchange=()=>{o[k]=sel.value; renderViews();};
+  const nk=matNK(o[k]); return h("div",{class:"row"},[h("label",{},[lb]),sel,h("span",{class:"hint"},[`n${nk.n.toFixed(2)} k${nk.k.toFixed(3)}`])]); }
+function subEditor(arr, fields){ // fields: [['material','mat'],['두께','thickness_um']] etc
+  const box=h("div",{class:"sublist"}); function rd(){ box.innerHTML="";
+    arr.forEach((it,i)=>{ const row=h("div",{class:"subrow"});
+      fields.forEach(([lb,key,kind])=>{ if(kind==="mat"){ const sel=h("select",{}); Object.keys(S.materials).forEach(m=>{const o=h("option",{value:m},[m]); if(it[key]===m)o.selected=true; sel.appendChild(o);}); sel.onchange=()=>{it[key]=sel.value; renderViews();}; row.appendChild(sel); }
+        else { const inp=h("input",{type:"number",step:"0.01",value:it[key]}); inp.oninput=()=>{it[key]=parseFloat(inp.value); renderViews();}; row.appendChild(inp); } });
+      row.appendChild(h("button",{class:"del",onclick:()=>{arr.splice(i,1); rd(); renderViews();}},["✕"])); box.appendChild(row); });
+    const add=h("button",{class:"btn mini",onclick:()=>{ const nn={}; fields.forEach(([lb,key,kind])=>nn[key]=kind==="mat"?Object.keys(S.materials)[0]:0.1); arr.push(nn); rd(); renderViews(); }},["+ add layer"]); box.appendChild(add);
+  } rd(); return box;
+}
+const STEPS=[
+ {t:"1 · Pixel array", d:"pitch 와 n×n 배열", body:()=>[ numRow("pixel pitch (µm)",S.grid,"pixel_pitch_um"), numRow("n × n",S.grid,"n_pixels","1"),
+    h("div",{class:"seclbl"},["voxel 해상도"]), numRow("dxy (µm)",S.grid,"dxy_um"), numRow("dz (µm)",S.grid,"dz_um"), numRow("air margin (µm)",S.grid,"air_margin_um") ]},
+ {t:"2 · Si substrate", d:"물질(n,k 폴더 연동) 과 두께. DTI depth = 이 두께", body:()=>[ matRow("Si 물질",S.stack.si,"material"), numRow("thickness (µm)",S.stack.si,"thickness_um") ]},
+ {t:"3 · DTI", d:"depth = Si 두께. width, oxide 라이너 두께(나머지 fill)", body:()=>{ const d=S.stack.dti; const co=h("input",{type:"checkbox"}); co.checked=d.center_open; co.onchange=()=>{d.center_open=co.checked; renderViews();};
+    return [ numRow("width (µm)",d,"width_um"), numRow("oxide 라이너 (µm)",d,"oxide_liner_um"), matRow("라이너 물질",d,"liner"), matRow("나머지 fill",d,"fill"),
+      h("div",{class:"row"},[h("label",{},["center open (Si 연결)"]),co]), numRow("center gap (µm)",d,"center_gap_um"), h("p",{class:"hint"},["depth 는 Si 두께와 동일(전체 관통)."]) ]; }},
+ {t:"4 · BARL stack", d:"전면 다층 AR (개수·물질·두께)", body:()=>[ h("p",{class:"hint"},["아래→위 순서. 각 층 물질(폴더 연동)·두께."]), subEditor(S.stack.barl,[["material","material","mat"],["thickness","thickness_um","num"]]) ]},
+ {t:"5 · Grid", d:"n×n 배열·width·물질 stack(각 height)·표면 코팅", body:()=>{ const g=S.stack.grid; const pt=h("select",{}); [["1","1×1 (pixel)"],["2","2×2 (quad)"]].forEach(([v,tx])=>{const o=h("option",{value:v},[tx]); if(String(g.pitch||1)===v)o.selected=true; pt.appendChild(o);}); pt.onchange=()=>{g.pitch=parseInt(pt.value); renderViews();};
+    return [ h("div",{class:"row"},[h("label",{},["grid 배열"]),pt]), numRow("width (µm)",g,"width_um"),
+      h("div",{class:"seclbl"},["물질 stack (아래→위, 각 height)"]), subEditor(g.stack,[["material","material","mat"],["height","height_um","num"]]),
+      h("div",{class:"seclbl"},["표면 코팅 (옆면·윗면)"]), matRow("코팅 물질",g,"coat_material"), numRow("코팅 두께 (µm)",g,"coat_um") ]; }},
+ {t:"6 · Color Filter", d:"각 컬러별 물질·두께", body:()=>[ h("div",{class:"seclbl"},["Red"]), matRow("R 물질",S.stack.cf.R,"material"), numRow("R 두께 (µm)",S.stack.cf.R,"thickness_um"),
+    h("div",{class:"seclbl"},["Green"]), matRow("G 물질",S.stack.cf.G,"material"), numRow("G 두께 (µm)",S.stack.cf.G,"thickness_um"),
+    h("div",{class:"seclbl"},["Blue"]), matRow("B 물질",S.stack.cf.B,"material"), numRow("B 두께 (µm)",S.stack.cf.B,"thickness_um") ]},
+ {t:"7 · Microlens", d:"물질·평탄층 두께·ML 형상(shape editor 연동)", body:()=>{ const m=S.stack.ml;
+    const imp=h("button",{class:"btn mini",onclick:()=>document.getElementById("mlFile").click()},["⤒ Import ml_shapes.json"]);
+    const nd=Object.keys(m.deformations||{}).length;
+    return [ matRow("ML 물질",m,"material"), numRow("평탄층 두께 (µm)",m,"planar_um"), numRow("sag height (µm)",m,"sag_height_um"),
+      h("div",{class:"seclbl"},["ML 형상"]), h("p",{class:"hint"},["ML shape editor 에서 저장한 ml_shapes.json(quads+deformations) 불러오기. 현재 변형 렌즈: "+nd+"개"]), imp ]; }},
+ {t:"8 · ARL top", d:"air→ML 사이 AR (물질·두께)", body:()=>[ matRow("ARL 물질",S.stack.arl_top,"material"), numRow("thickness (µm)",S.stack.arl_top,"thickness_um"),
+    h("p",{class:"hint"},["여기까지가 구조 셋업. 우측에서 3D 확인 후 상단 '⤓ Generate .npy'."]) ]},
+];
+function buildSteps(){ const st=el("steps"); st.innerHTML=""; STEPS.forEach((s,i)=>{ const c=h("div",{class:"schip"+(i===curStep?" on":(i<curStep?" done":"")),onclick:()=>{curStep=i; renderStep();}},[String(i+1)]); st.appendChild(c); }); }
+function renderStep(){ buildSteps(); const b=el("stepBody"); b.innerHTML=""; const s=STEPS[curStep];
+  b.appendChild(h("h2",{},[s.t])); b.appendChild(h("p",{class:"desc"},[s.d])); s.body().forEach(x=>b.appendChild(x));
+  el("backBtn").disabled=curStep===0; el("nextBtn").textContent=curStep===STEPS.length-1?"Done ✓":"Next →"; renderViews(); }
+
+// ============================ 이벤트 ============================
+el("backBtn").onclick=()=>{ if(curStep>0){curStep--; renderStep();} };
+el("nextBtn").onclick=()=>{ if(curStep<STEPS.length-1){curStep++; renderStep();} };
+document.querySelectorAll(".vtab").forEach(t=>t.onclick=()=>{ document.querySelectorAll(".vtab").forEach(x=>x.classList.remove("on")); t.classList.add("on"); viewMode=t.dataset.v; renderViews(); });
+el("cutY").oninput=()=>renderViews();
+el("themeBtn").onclick=()=>{ const r=document.documentElement,cur=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); r.setAttribute("data-theme",cur==="dark"?"light":"dark"); renderViews(); };
+el("matBtn").onclick=()=>el("matFolder").click();
+el("matFolder").onchange=async e=>{ let n=0; for(const f of [...e.target.files]){ if(!/\.txt$/i.test(f.name))continue; let t; try{t=await f.text();}catch(_){continue;} const nk=parseNK(t); if(!nk)continue; folderLib[f.name.replace(/\.txt$/i,"")]=nk; n++; }
+  for(const role in S.materials){ if(!S.materials[role].src&&folderLib[role])S.materials[role].src=role; } e.target.value=""; renderStep(); alert(n+" 물질 n,k 로드됨"); };
+// ML shapes import
+const mlFileIn=h("input",{type:"file",id:"mlFile",accept:".json",style:"display:none"}); document.body.appendChild(mlFileIn);
+mlFileIn.onchange=async e=>{ const f=e.target.files[0]; if(!f)return; try{ const d=JSON.parse(await f.text()); if(d.quads)S.stack.ml.quads=d.quads; if(d.deformations)S.stack.ml.deformations=d.deformations; if(d.sag_height_um)S.stack.ml.sag_height_um=d.sag_height_um; renderStep(); alert("ML 형상 로드됨"); }catch(err){alert("JSON 오류: "+err.message);} e.target.value=""; };
+
+const prod=el("prodName"); prod.value=S.product||""; prod.oninput=()=>{S.product=prod.value; save();};
+const dlg=el("dlg");
+function pname(){ return (S.product||"structure").trim().replace(/[^\w\-.]/g,"_")||"structure"; }
+function structYAML(){ const exp=structuredClone(S); for(const m in exp.materials){ const at=matNK(m),src=exp.materials[m].src; exp.materials[m]={n:+at.n.toFixed(4),k:+at.k.toFixed(4)}; if(src)exp.materials[m].src=src; }
+  return "# CIS structure · product: "+(S.product||"")+"\n# 파장별 n,k 는 materials 폴더 txt (아래는 λ="+refLambda+"µm 상수)\n"+toYAML(exp); }
+function download(name,text,type){ const blob=new Blob([text],{type:type||"text/yaml"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
+el("yamlBtn").onclick=()=>{ const text=structYAML(); download(pname()+".yaml",text);
+  el("dlgTitle").textContent="Export · "+pname()+".yaml"; el("dlgHint").textContent="구조 YAML 저장됨. Import 로 다시 불러올 수 있음."; el("dlgText").value=text; dlg.showModal(); };
+// YAML import
+el("importBtn").onclick=()=>el("yamlFile").click();
+const yamlFileIn=h("input",{type:"file",id:"yamlFile",accept:".yaml,.yml",style:"display:none"}); document.body.appendChild(yamlFileIn);
+yamlFileIn.onchange=async e=>{ const f=e.target.files[0]; if(!f)return; try{ loadStruct(parseYAML(await f.text())); alert("구조 불러옴: "+(S.product||f.name)); }catch(err){alert("YAML 오류: "+err.message);} e.target.value=""; };
+el("dlgCopy").onclick=async()=>{ const t=el("dlgText"); t.select(); try{await navigator.clipboard.writeText(t.value);}catch(e){document.execCommand("copy");} };
+el("dlgClose").onclick=()=>dlg.close();
+el("npyBtn").onclick=()=>{ const v=buildVoxels(); const nm=pname();
+  download(nm+"_matid.npy", npyU8(v.data,v.shape), "application/octet-stream");   // 구조 npy
+  const leg={product:S.product,shape_zyx:v.shape,voxel_um:{dz:v.dz,dy:v.dxy,dx:v.dxy},
+    materials:v.names.map((n,i)=>({id:i,name:n,...matNK(n)}))};
+  download(nm+"_meta.json", JSON.stringify(leg,null,2), "application/json");      // id/n,k
+  download(nm+".yaml", structYAML());                                             // 구조 YAML (같이)
+  alert(`생성 완료:\n · ${nm}_matid.npy  (${v.shape.join("×")}, ${(v.data.length/1e6).toFixed(1)} MB uint8)\n · ${nm}_meta.json (물질 id/n,k)\n · ${nm}.yaml (구조 설정, import 가능)`); };
+
+// 간단 YAML emit (구조 저장용)
+function toYAML(o,ind){ ind=ind||0; const pad="  ".repeat(ind); let s="";
+  if(Array.isArray(o)){ for(const it of o) s+=pad+"- "+flow(it)+"\n"; return s; }
+  for(const k in o){ const v=o[k]; if(v&&typeof v==="object"&&!Array.isArray(v)&&!flat(v)) s+=pad+k+":\n"+toYAML(v,ind+1);
+    else if(Array.isArray(v)&&v.some(x=>x&&typeof x==="object")) s+=pad+k+":\n"+toYAML(v,ind+1); else s+=pad+k+": "+flow(v)+"\n"; } return s; }
+function flat(o){ return !Array.isArray(o)&&Object.values(o).every(v=>typeof v!=="object"||v===null); }
+function flow(v){ if(v==null)return""; if(Array.isArray(v))return "["+v.map(flow).join(", ")+"]"; if(typeof v==="object")return "{ "+Object.entries(v).map(([k,x])=>k+": "+flow(x)).join(", ")+" }"; if(typeof v==="string")return /[:#\[\]{}",]/.test(v)?JSON.stringify(v):v; return String(v); }
+// 간단 YAML parser (구조 import)
+function parseYAML(text){ const lines=text.replace(/\t/g,"  ").split("\n").map(l=>l.replace(/\s+$/,"")).filter(l=>l.trim()!==""&&!/^\s*#/.test(l)); let i=0;
+  const peek=()=> i<lines.length?lines[i].match(/^ */)[0].length:-1;
+  function block(ind){ if(i<lines.length&&lines[i].slice(ind).startsWith("- "))return list(ind); const o={};
+    while(i<lines.length){ const cur=lines[i],ci=cur.match(/^ */)[0].length; if(ci<ind)break; if(ci>ind){i++;continue;}
+      const m=cur.slice(ind).match(/^([^:]+):(.*)$/); if(!m){i++;continue;} const key=m[1].trim(),rest=m[2].trim(); i++;
+      if(rest===""){ const ci2=peek(); o[key]=(ci2>ind||(i<lines.length&&lines[i].slice(ci2).startsWith("- ")&&ci2>=ind))?block(ci2>ind?ci2:ind+2):null; }
+      else o[key]=pf(rest); } return o; }
+  function list(ind){ const a=[]; while(i<lines.length){ const cur=lines[i],ci=cur.match(/^ */)[0].length; if(ci<ind||!cur.slice(ind).startsWith("- "))break; const rest=cur.slice(ind+2).trim(); i++; if(rest==="")a.push(block(peek())); else a.push(pf(rest)); } return a; }
+  return block(peek());
+  function pf(s){ s=s.trim(); if(s[0]==="["||s[0]==="{")return flowP(s); return sc(s); }
+  function flowP(s){ let j=0; function ws(){while(j<s.length&&/\s/.test(s[j]))j++;} function val(){ ws();
+    if(s[j]==="["){j++;const a=[];ws();if(s[j]==="]"){j++;return a;} while(true){a.push(val());ws();if(s[j]===","){j++;continue;}if(s[j]==="]"){j++;break;}break;}return a;}
+    if(s[j]==="{"){j++;const o={};ws();if(s[j]==="}"){j++;return o;} while(true){ws();let k="";while(j<s.length&&s[j]!==":"){k+=s[j++];}j++;o[k.trim()]=val();ws();if(s[j]===","){j++;continue;}if(s[j]==="}"){j++;break;}break;}return o;}
+    if(s[j]==='"'){let k=j+1,str="";while(k<s.length&&s[k]!=='"'){str+=s[k++];}j=k+1;return str;} let t="";while(j<s.length&&!/[,\]}]/.test(s[j])){t+=s[j++];} return sc(t.trim()); } return val(); }
+  function sc(s){ if(s===""||s==null)return null; if(s[0]==='"'&&s[s.length-1]==='"')return JSON.parse(s); if(s==="true")return true; if(s==="false")return false; if(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s))return parseFloat(s); return s; } }
+function loadStruct(obj){ S=Object.assign(structuredClone(DEFAULT),obj); if(obj.stack)S.stack=Object.assign(structuredClone(DEFAULT.stack),obj.stack); if(obj.materials)S.materials=Object.assign(structuredClone(DEFAULT.materials),obj.materials); prod.value=S.product||""; curStep=0; renderStep(); }
+
+// ============================ init ============================
+renderStep();
+</script>
