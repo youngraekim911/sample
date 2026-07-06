@@ -65,8 +65,12 @@ python3 run_qe.py -c conf/wizard_config.yaml --nG 101
   oxide 라이너 → 채움. 클로버는 4픽셀 Si 가 중앙에서 연결.
 - **BARL**: 4×4 전면 blanket 다층.
 - **Grid**: 울타리(fence) 1×1/2×2, 다층 stack(동일물질 연결) → 병합 표면(옆+위) oxide 코팅 옵션.
+  **taper**: 하부 width 기준, 상부 `top_ratio`(0.8~1)로 선형 축소.
 - **CF**: 울타리 셀 채움, 컬러별 두께 + **상부 곡률(meniscus, +볼록/−오목)** — RCWA 반영.
-- **ML**: 평탄층(최저 CF top 기준) → dome(quads + b_theta 변형). **ARL**: ML 표면 conformal(ALD).
+- **ML 풍선(balloon) 모델**: 렌즈 = 원/타원 footprint(중심·반경)만 정의 →
+  높이 = `hr`×min(반경), 곡률 자동. 겹치면 max(sag) → 교선이 풍선 '찌부' 접촉선.
+  step7 인라인 에디터에서 드래그(이동/크기). 파라미터 (cx,cy,ax,ay,hr)뿐이라 일반화/최적화 용이.
+- **ARL**: ML 표면 conformal(ALD).
 
 ## 구조 위저드 — `editors/structure_wizard.html`
 

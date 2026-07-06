@@ -84,58 +84,62 @@ class WizardBuilder:
               np.where(any_t, li_id, si_id)))
         return out.astype(np.uint8)
 
-    # ------------------------------------------------------------- ML sag
-    def _ml_sag(self):
+    # ------------------------------------------------------------- ML (풍선 모델)
+    def _ml_lenses(self):
+        """렌즈 footprint 목록 [{cx,cy,ax,ay},...] — 명시 lenses 우선, 없으면 quad 템플릿."""
         ml = self.s["ml"]
+        if ml.get("lenses"):
+            return [dict(L) for L in ml["lenses"]]
         p = self.p
-        h = float(ml["sag_height_um"])
-        quads = ml["quads"]
-        defs = ml.get("deformations") or {}
-        sag = np.zeros_like(self.X)
-
-        def btheta(lid, theta):
-            spec = defs.get(lid)
-            if not spec or "b_theta" not in spec:
-                return 1.0
-            b = np.asarray(spec["b_theta"], float)
-            n = len(b)
-            ang = np.mod(theta, 2 * math.pi)
-            f = ang / (2 * math.pi) * n
-            i0 = np.floor(f).astype(int) % n
-            t = f - np.floor(f)
-            return b[i0] * (1 - t) + b[(i0 + 1) % n] * t
-
-        def dome(lid, cx, cy, ax, ay):
-            u = (self.X - cx) / ax
-            v = (self.Y - cy) / ay
-            rho = np.hypot(u, v)
-            B = btheta(lid, np.arctan2(v, u))
-            r = rho / np.maximum(B, 1e-9)
-            s = np.where(r <= 1, h * np.sqrt(np.clip(1 - r * r, 0, 1)), 0.0)
-            np.maximum(sag, s, out=sag)
-
+        out = []
         for qy in range(2):
             for qx in range(2):
-                spec = quads[qy][qx]
-                sh = spec["shape"]
-                orient = spec.get("orient", "h")
+                sp = ml["quads"][qy][qx]
+                sc = float(sp.get("scale", 1) or 1)
+                sh = sp["shape"]
+                orient = sp.get("orient", "h")
                 x0, y0 = qx * 2 * p, qy * 2 * p
-                cx0, cy0 = x0 + p, y0 + p
+                cx, cy = x0 + p, y0 + p
+                add = lambda ccx, ccy, ax, ay: out.append(
+                    {"cx": ccx, "cy": ccy, "ax": ax * sc, "ay": ay * sc})
                 if sh == "2x2":
-                    dome(f"q{qy}{qx}_2x2_0", cx0, cy0, p, p)
+                    add(cx, cy, p, p)
                 elif sh == "1x1":
                     for a in range(2):
                         for b in range(2):
-                            dome(f"q{qy}{qx}_1x1_{a*2+b}",
-                                 x0 + (b + .5) * p, y0 + (a + .5) * p, p / 2, p / 2)
+                            add(x0 + (b + .5) * p, y0 + (a + .5) * p, p / 2, p / 2)
                 elif sh == "2x1":
                     if orient == "h":
                         for a in range(2):
-                            dome(f"q{qy}{qx}_2x1_{a}", cx0, y0 + (a + .5) * p, p, p / 2)
+                            add(cx, y0 + (a + .5) * p, p, p / 2)
                     else:
                         for b in range(2):
-                            dome(f"q{qy}{qx}_2x1_{b}", x0 + (b + .5) * p, cy0, p / 2, p)
+                            add(x0 + (b + .5) * p, cy, p / 2, p)
+        return out
+
+    def _ml_hr(self):
+        ml = self.s["ml"]
+        if ml.get("hr") is not None:
+            return float(ml["hr"])
+        return float(ml.get("sag_height_um", 0.55)) / (self.p / 2)
+
+    def _ml_sag(self):
+        """풍선 모델: 각 렌즈 = 타원 캡 h=hr*min(ax,ay). 겹침은 max -> 접촉 교선(찌부)."""
+        hr = self._ml_hr()
+        sag = np.zeros_like(self.X)
+        for L in self._ml_lenses():
+            u = (self.X - float(L["cx"])) / float(L["ax"])
+            v = (self.Y - float(L["cy"])) / float(L["ay"])
+            r2 = u * u + v * v
+            hL = hr * min(float(L["ax"]), float(L["ay"]))
+            s = np.where(r2 < 1, hL * np.sqrt(np.clip(1 - r2, 0, 1)), 0.0)
+            np.maximum(sag, s, out=sag)
         return sag
+
+    def _ml_maxh(self):
+        hr = self._ml_hr()
+        return max((hr * min(float(L["ax"]), float(L["ay"]))
+                    for L in self._ml_lenses()), default=0.0)
 
     # ------------------------------------------------------------- build
     def build(self):
@@ -155,7 +159,7 @@ class WizardBuilder:
         cfTopMin = float(np.min(th + np.minimum(0, cv)))
         planar = max(cfTopMin + float(s["ml"]["planar_um"]), cfTopMax, gridTot)
         sag = self._ml_sag()
-        sagH = float(s["ml"]["sag_height_um"])
+        sagH = self._ml_maxh()                 # 풍선 모델: hr*min(반경) 최대
         arlT = float(s["arl_top"]["thickness_um"])
         Ht = zSi + barlH + planar + sagH + arlT + self.air
         nz = int(round(Ht / dz))
@@ -167,8 +171,7 @@ class WizardBuilder:
         dg = np.minimum(np.abs(self.X - np.round(self.X / per) * per),
                         np.abs(self.Y - np.round(self.Y / per) * per))
         W = float(g["width_um"])
-        fence = dg < W / 2
-        side = dg < W / 2 + cw
+        ratio = min(1.0, max(0.8, float(g.get("top_ratio", 1) or 1)))   # 상부/하부 폭 비율
         coat_id = self._id(g.get("coat_material", "oxide")) if cw > 0 else 0
         gbounds = []
         acc = 0.0
@@ -220,6 +223,10 @@ class WizardBuilder:
                 sl = np.full((self.ny, self.nx), ml_id, dtype=np.uint8)   # 평탄화 fill
                 m = zabs <= zTop
                 sl[m] = cf_map[m]                                          # CF (곡면 top)
+                # taper: 아래 W -> 위 W*ratio 선형
+                wz = W * (1 - (1 - ratio) * min(zabs / gridH, 1.0)) if gridH > 0 else W
+                fence = dg < wz / 2
+                side = dg < wz / 2 + cw
                 if zabs <= gridH:                                          # fence stack
                     gid = gbounds[-1][1]
                     for b_, i_ in gbounds:

@@ -28,22 +28,22 @@ stack:
   barl:                      # 전면(blanket) 다층
     - { material: arl_hi, thickness_um: 0.02 }
     - { material: arl_lo, thickness_um: 0.05 }
-  grid:                      # 울타리(fence) — stack 후 표면 oxide 코팅 옵션
-    { pitch: 1, width_um: 0.15, coat_on: true, coat_material: oxide, coat_um: 0.02,
+  grid:                      # 울타리(fence) — 하부 width 기준, 상부 top_ratio(0.8~1)로 축소(taper)
+    { pitch: 1, width_um: 0.15, top_ratio: 0.85, coat_on: true, coat_material: oxide, coat_um: 0.02,
       stack: [ { material: grid_metal, height_um: 0.30 },
                { material: grid_metal, height_um: 0.30 } ] }
   cf:                        # 울타리 셀 채움. curvature: +볼록/-오목 (셀 중앙 offset)
     R: { material: cf_red,   thickness_um: 0.60, curvature_um: -0.05 }
     G: { material: cf_green, thickness_um: 0.60, curvature_um: -0.05 }
     B: { material: cf_blue,  thickness_um: 0.60, curvature_um: -0.05 }
-  ml:
+  ml:                        # 풍선(balloon) 모델: footprint(원/타원) -> 높이=hr*min(반경), 곡률 자동
     material: ml
     planar_um: 0.30          # 최저 CF top 기준 평탄층 두께
-    sag_height_um: 0.55
-    quads:
-      - - { shape: "2x2" }
-        - { shape: "2x1", orient: h }
-      - - { shape: "2x1", orient: v }
-        - { shape: "1x1" }
-    deformations: {}
+    hr: 0.55                 # h/r 비율 (1=반구)
+    quads:                   # 템플릿 (shape + scale; scale>1 이면 이웃과 겹쳐 '찌부')
+      - - { shape: "2x2", scale: 1 }
+        - { shape: "2x1", orient: h, scale: 1 }
+      - - { shape: "2x1", orient: v, scale: 1 }
+        - { shape: "1x1", scale: 1 }
+    lenses: null             # 개별 편집 시 [{cx,cy,ax,ay},...] (템플릿 대체)
   arl_top: { material: ml_arl, thickness_um: 0.10 }   # ML 표면 conformal (ALD)
