@@ -290,21 +290,27 @@ function mlSag(x,y){
 }
 // 경계 위치 판정
 function nearBoundary(coord, w){ const p=P(); const u=((coord%p)+p)%p; const h=w/2; return u<h||u>p-h; }
-function isDtiWall(x,y){
-  // DTI 는 모든 pixel 경계에 벽. center_open 이면 quad 중앙(+교차) 작은 사각만 제거(Si 연결).
-  const p=P(), st=S.stack.dti, half=(+st.wall_width_um+2*(+st.oxide_liner_um))/2;
-  const bx=Math.round(x/p), by=Math.round(y/p);
-  const nearX=Math.abs(x-bx*p)<half, nearY=Math.abs(y-by*p)<half;
-  if(!(nearX||nearY)) return false;
+// DTI 물질 판정: 'metal' | 'oxide' | null(Si)
+function dtiAt(x,y){
+  const p=P(), st=S.stack.dti, ol=+st.oxide_liner_um, wm=+st.wall_width_um;
+  // 1) center open: quad 중앙(odd*p) 의 '사각' window — 가장자리 oxide 코팅, 안쪽 Si
   if(st.center_open){
     const gh=(+st.center_gap_um||0)/2;
-    // quad 중앙 = odd*p (intra-quad 경계 교차점)
     const oddIdx=v=>{ const i=Math.round(v/p); return (i%2!==0)?i:(v>i*p?i+1:i-1); };
-    const ix=oddIdx(x), iy=oddIdx(y);
-    if(Math.abs(x-ix*p)<gh && Math.abs(y-iy*p)<gh) return false;  // 중앙 일부 제거
+    const cx=oddIdx(x)*p, cy=oddIdx(y)*p;
+    const dxc=Math.abs(x-cx), dyc=Math.abs(y-cy);
+    if(dxc<gh && dyc<gh){                       // 개구 사각 안
+      const edge=Math.min(gh-dxc, gh-dyc);
+      return edge<ol ? 'oxide' : null;          // 표면 oxide 코팅 / 안쪽 Si
+    }
   }
-  return true;
+  // 2) 일반 DTI 벽 (모든 pixel 경계): oxide 라이너 + metal 코어
+  const bx=Math.round(x/p), by=Math.round(y/p);
+  const dx=Math.abs(x-bx*p), dy=Math.abs(y-by*p);
+  if(!(dx<wm/2+ol || dy<wm/2+ol)) return null;  // Si 내부
+  return (dx<wm/2 || dy<wm/2) ? 'metal' : 'oxide';
 }
+function dtiColor(m){ return m==='metal' ? matColor(S.stack.dti.metal) : matColor('oxide'); }
 
 // ============================ 렌더: XZ 단면 ============================
 function totalHeight(){
@@ -338,12 +344,11 @@ function drawXZ(){
   let z=0;
   // 1) Si substrate
   rect(0,span,z,z+ +s.si_substrate.thickness_um, matColor(s.si_substrate.material)); z+=+s.si_substrate.thickness_um;
-  // 2) DTI band
-  const dz0=z, dth=+s.dti.depth_um; rect(0,span,z,z+dth,matColor(s.dti.fill));
-  { const st=s.dti, wm=+st.wall_width_um, ol=+st.oxide_liner_um;
-    for(let b=0;b<=np;b++){ const xb=b*p; if(!isDtiWall(xb,cutY)) continue;  // 중앙 gap 이면 skip
-      rect(xb-(wm/2+ol),xb+(wm/2+ol),z,z+dth,matColor("oxide"));
-      rect(xb-wm/2,xb+wm/2,z,z+dth,matColor(st.metal)); } }
+  // 2) DTI band — cutY 라인을 x 로 rasterize (개구 사각/코팅 정확 반영)
+  const dth=+s.dti.depth_um; rect(0,span,z,z+dth,matColor(s.dti.fill));   // Si 배경
+  { const wpx=Math.round((W-padL-padR));
+    for(let px=0;px<wpx;px++){ const x=px/sx; const m=dtiAt(x,cutY); if(!m) continue;
+      ctx.fillStyle=dtiColor(m); ctx.fillRect(padL+px, Z(z+dth), 1, dth*sz); } }
   z+=dth;
   // 3) ARL bottom (blanket 다층)
   for(const l of s.arl_bottom){ rect(0,span,z,z+ +l.thickness_um,matColor(l.material)); z+=+l.thickness_um; }
@@ -396,23 +401,14 @@ function drawTop(id, fn){
 }
 function renderTops(){
   const p=P(),np=NP();
-  // DTI: quad isolation
+  // DTI: rasterize (metal/oxide/Si). center open = 사각 window + oxide 코팅
   drawTop("tvDti",(ctx,g)=>{
-    // Si 배경
-    ctx.fillStyle=matColor("si"); ctx.fillRect(g.X(0),g.Y(g.span),g.span*g.sc,g.span*g.sc);
-    const st=S.stack.dti, wm=+st.wall_width_um, ol=+st.oxide_liner_um, w=wm+2*ol;
-    for(let b=0;b<=np;b++){ const c=b*p;   // 모든 pixel 경계
-      ctx.fillStyle=matColor("oxide");
-      ctx.fillRect(g.X(c-w/2),g.Y(g.span),w*g.sc,g.span*g.sc);
-      ctx.fillRect(g.X(0),g.Y(c+w/2),g.span*g.sc,w*g.sc);
-      ctx.fillStyle=matColor(st.metal);
-      ctx.fillRect(g.X(c-wm/2),g.Y(g.span),wm*g.sc,g.span*g.sc);
-      ctx.fillRect(g.X(0),g.Y(c+wm/2),g.span*g.sc,wm*g.sc);
-    }
-    // center gap: quad 중앙(odd*p,odd*p) 작은 사각만 Si 로 제거 -> 4픽셀 연결
-    if(st.center_open){ const gap=+st.center_gap_um||0; ctx.fillStyle=matColor(st.fill);
-      for(let ix=1;ix<np;ix+=2)for(let iy=1;iy<np;iy+=2){ const cx=ix*p,cy=iy*p;
-        ctx.fillRect(g.X(cx-gap/2),g.Y(cy+gap/2),gap*g.sc,gap*g.sc); } }
+    ctx.fillStyle=matColor(S.stack.dti.fill);
+    ctx.fillRect(g.X(0),g.Y(g.span),g.span*g.sc,g.span*g.sc);
+    const x0=g.X(0), y0=g.Y(g.span), side=g.span*g.sc, N=Math.round(side);
+    for(let py=0;py<N;py++)for(let px=0;px<N;px++){
+      const xu=px/g.sc, yu=(N-1-py)/g.sc; const m=dtiAt(xu,yu); if(!m) continue;
+      ctx.fillStyle=dtiColor(m); ctx.fillRect(x0+px, y0+py, 1, 1); }
   });
   // CF + grid (per-pixel)
   drawTop("tvCf",(ctx,g)=>{
