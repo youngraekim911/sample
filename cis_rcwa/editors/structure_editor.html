@@ -247,8 +247,8 @@ const DEFAULT = {
     dti:{ depth_um:0.50, wall_width_um:0.15, oxide_liner_um:0.02, liner:"oxide", fill:"si", center_open:true, center_gap_um:0.20 },
     arl_bottom:[ {material:"arl_hi",thickness_um:0.02}, {material:"arl_lo",thickness_um:0.05} ],
     color_filter:{ thickness_um:0.60,
-      grid:{ width_um:0.15, shape:"rect", oxide_wrap_um:0.02,
-        stack:[ {material:"grid_metal",thickness_um:0.30}, {material:"oxide",thickness_um:0.30} ] } },
+      grid:{ pitch:1, top_width_um:0.10, bottom_width_um:0.18, oxide_coat:true, oxide_wrap_um:0.02,
+        stack:[ {material:"grid_metal",thickness_um:0.30}, {material:"grid_metal",thickness_um:0.30} ] } },
     ml_planar:{ thickness_um:0.30, material:"ml" },
     microlens:{ sag_height_um:0.55, material:"ml",
       quads:[[{shape:"2x2"},{shape:"2x1",orient:"h"}],[{shape:"2x1",orient:"v"},{shape:"1x1"}]] },
@@ -291,6 +291,19 @@ function css(v){return getComputedStyle(document.documentElement).getPropertyVal
 const P = ()=>S.grid.pixel_pitch_um, NP = ()=>S.grid.n_pixels;
 function stackTotalGrid(){ return S.stack.color_filter.grid.stack.reduce((a,s)=>a+ +s.thickness_um,0); }
 function colorMat(c){ return {R:"cf_red",G:"cf_green",B:"cf_blue"}[c]; }
+// Grid 물질 판정: x(um), zf(0=아래..1=위) -> 물질명 | null(CF).  taper + 다층 + oxide 코팅
+function gridMatAt(x, zf){
+  const g=S.stack.color_filter.grid, p=P();
+  const per=(g.pitch||1)*p, tw=+g.top_width_um, bw=+g.bottom_width_um;
+  const ow=g.oxide_coat? +(g.oxide_wrap_um||0):0;
+  const w=bw+(tw-bw)*zf;                                  // 위 얇고 아래 두꺼움
+  const d=Math.abs(x-Math.round(x/per)*per);
+  if(d>w/2+ow) return null;                               // CF 영역
+  if(d>w/2) return "oxide";                               // 표면 oxide 코팅
+  const H=stackTotalGrid(); let zz=zf*H, acc=0;           // 다층: zf 로 sublayer 결정
+  for(const sub of g.stack){ acc+=+sub.thickness_um; if(zz<=acc+1e-9) return sub.material; }
+  return g.stack.length? g.stack[g.stack.length-1].material : "grid_metal";
+}
 
 // ML sag (단면/topview 공용): (x,y) um -> 표면 높이(um)
 function mlSag(x,y){
@@ -365,16 +378,13 @@ function drawXZ(){
   z+=dth;
   // 3) ARL bottom (blanket 다층)
   for(const l of s.arl_bottom){ rect(0,span,z,z+ +l.thickness_um,matColor(l.material)); z+=+l.thickness_um; }
-  // 4) CF + grid
-  const cf0=z;
-  // CF 색 (픽셀별) 배경
-  for(let c=0;c<np;c++){ const col=colorMat(S.bayer[Math.max(0,Math.min(np-1,Math.floor(cutY/p)))][c]);
-    rect(c*p,(c+1)*p,z,z+ +s.color_filter.thickness_um,matColor(col)); }
-  // grid columns (모든 pixel 경계) : oxide wrap + stack
-  { const g=s.color_filter.grid, wm=+g.width_um, ow=+g.oxide_wrap_um, gt=stackTotalGrid();
-    for(let b=0;b<=np;b++){ const xb=b*p;
-      rect(xb-(wm/2+ow),xb+(wm/2+ow),z,z+gt+ow,matColor("oxide"));   // wrap
-      let zz=z; for(const sub of g.stack){ rect(xb-wm/2,xb+wm/2,zz,zz+ +sub.thickness_um,matColor(sub.material)); zz+=+sub.thickness_um; } } }
+  // 4) CF + grid  (CF 색 배경 위에 grid 를 taper/다층/oxide코팅 rasterize)
+  { const rowIdx=Math.max(0,Math.min(np-1,Math.floor(cutY/p)));
+    for(let c=0;c<np;c++) rect(c*p,(c+1)*p,z,z+ +s.color_filter.thickness_um,matColor(colorMat(S.bayer[rowIdx][c])));
+    const gt=stackTotalGrid(), wpx=Math.round(W-padL-padR), hpx=Math.max(1,Math.round(gt*sz));
+    for(let px=0;px<wpx;px++){ const x=px/sx;
+      for(let pz=0;pz<hpx;pz++){ const zf=1-(pz+0.5)/hpx; const m=gridMatAt(x,zf); if(!m) continue;
+        ctx.fillStyle=matColor(m); ctx.fillRect(padL+px, Z(z+gt)+pz, 1, 1); } } }
   z+=cfH;
   // 5) ML planar
   rect(0,span,z,z+ +s.ml_planar.thickness_um,matColor(s.ml_planar.material)); z+=+s.ml_planar.thickness_um;
@@ -427,10 +437,11 @@ function renderTops(){
   drawTop("tvCf",(ctx,g)=>{
     for(let r=0;r<np;r++)for(let c=0;c<np;c++){ ctx.fillStyle=matColor(colorMat(S.bayer[r][c]));
       ctx.fillRect(g.X(c*p)+1,g.Y((r+1)*p)+1,p*g.sc-2,p*g.sc-2); }
-    const gr=S.stack.color_filter.grid, wm=+gr.width_um, ow=+gr.oxide_wrap_um, w=wm+2*ow;
-    for(let b=0;b<=np;b++){ const c=b*p;
+    const gr=S.stack.color_filter.grid, per=(gr.pitch||1)*p, wm=+gr.bottom_width_um,
+          ow=gr.oxide_coat?+(gr.oxide_wrap_um||0):0, w=wm+2*ow, gm=gr.stack[0]?gr.stack[0].material:"grid_metal";
+    for(let c=0;c<=g.span+1e-6;c+=per){
       ctx.fillStyle=matColor("oxide"); ctx.fillRect(g.X(c-w/2),g.Y(g.span),w*g.sc,g.span*g.sc); ctx.fillRect(g.X(0),g.Y(c+w/2),g.span*g.sc,w*g.sc);
-      ctx.fillStyle=matColor("grid_metal"); ctx.fillRect(g.X(c-wm/2),g.Y(g.span),wm*g.sc,g.span*g.sc); ctx.fillRect(g.X(0),g.Y(c+wm/2),g.span*g.sc,wm*g.sc);
+      ctx.fillStyle=matColor(gm); ctx.fillRect(g.X(c-wm/2),g.Y(g.span),wm*g.sc,g.span*g.sc); ctx.fillRect(g.X(0),g.Y(c+wm/2),g.span*g.sc,wm*g.sc);
     }
   });
   // ML height
@@ -554,13 +565,19 @@ function buildSide(){
 
   // CF + grid
   const cf=S.stack.color_filter, gr=cf.grid;
+  const gpit=h("select",{}); [["1","1×1 (pixel)"],["2","2×2 (quad)"]].forEach(([v,t])=>{const o=h("option",{value:v},[t]); if(String(gr.pitch||1)===v)o.selected=true; gpit.appendChild(o);});
+  gpit.onchange=()=>{gr.pitch=parseInt(gpit.value); render();};
+  const gcoat=h("input",{type:"checkbox"}); gcoat.checked=gr.oxide_coat!==false; gcoat.onchange=()=>{gr.oxide_coat=gcoat.checked; render();};
   side.appendChild(card("④ Color Filter + Grid", true,[
     numRow("CF thickness (µm)",cf,"thickness_um"),
     h("div",{class:"seclbl"},["grid"]),
-    numRow("grid width (µm)",gr,"width_um"),
-    numRow("oxide wrap (µm)",gr,"oxide_wrap_um"),
-    h("div",{class:"row"},[h("label",{},["grid shape"]),(()=>{const sel=h("select",{});["rect","taper"].forEach(v=>{const o=h("option",{value:v},[v]);if(gr.shape===v)o.selected=true;sel.appendChild(o);});sel.onchange=()=>{gr.shape=sel.value;render();};return sel;})()]),
-    h("div",{class:"seclbl"},["grid stack (아래→위)"]),
+    h("div",{class:"row"},[h("label",{},["grid pitch"]),gpit]),
+    numRow("top width (µm)",gr,"top_width_um"),
+    numRow("bottom width (µm)",gr,"bottom_width_um"),
+    h("p",{class:"hint"},["보통 위가 얇고 아래가 두꺼움 (taper). height 는 아래 stack 합."]),
+    h("div",{class:"row"},[h("label",{},["oxide 표면 코팅"]),gcoat]),
+    numRow("oxide coat (µm)",gr,"oxide_wrap_um"),
+    h("div",{class:"seclbl"},["grid stack (아래→위) · 동일물질 연결"]),
     sublistEditor(gr.stack, true),
   ]));
 

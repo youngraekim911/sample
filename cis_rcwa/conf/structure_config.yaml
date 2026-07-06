@@ -55,12 +55,14 @@ stack:
   color_filter:
     thickness_um: 0.60
     grid:
-      width_um: 0.15
-      shape: rect           # rect | taper (편집 확장)
-      oxide_wrap_um: 0.02   # stack 후 grid 를 감싸는 oxide
-      stack:                # grid 자체가 다층 stack
+      pitch: 1              # 1=1x1(pixel) / 2=2x2(quad) grid
+      top_width_um: 0.10    # 위 폭 (얇음)
+      bottom_width_um: 0.18 # 아래 폭 (두꺼움) — taper
+      oxide_coat: true      # grid 표면 oxide 코팅 여부
+      oxide_wrap_um: 0.02   # 코팅 두께
+      stack:                # 다층 grid (아래→위, 동일물질 연결). height = 합
         - { material: grid_metal, thickness_um: 0.30 }
-        - { material: oxide,      thickness_um: 0.30 }
+        - { material: grid_metal, thickness_um: 0.30 }
 
   ml_planar:                # ML 동일물질 평탄화 (focus 거리)
     thickness_um: 0.30

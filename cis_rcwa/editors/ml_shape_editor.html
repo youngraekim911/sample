@@ -266,34 +266,35 @@ function enumerateLenses(quads){
   return out;
 }
 
+function initPts(){ const p=[]; for(let k=0;k<NCTRL;k++){ const a=2*Math.PI*k/NCTRL; p.push({x:Math.cos(a),y:Math.sin(a)}); } return p; }
 function rebuildLenses(){
   const prev = state.lenses, next = {};
   for(const [id,cx,cy,ax,ay] of enumerateLenses(state.quads)){
-    const m = (prev[id] && prev[id].m) ? prev[id].m.slice() : new Array(NCTRL).fill(1);
-    next[id] = {cx,cy,ax,ay,m};
+    const pts = (prev[id] && prev[id].pts) ? prev[id].pts.map(p=>({x:p.x,y:p.y})) : initPts();
+    next[id] = {cx,cy,ax,ay,pts};
   }
   state.lenses = next;
   if(!state.selected || !next[state.selected]) state.selected = Object.keys(next)[0]||null;
 }
 
-// --- m(NCTRL) -> B(theta) periodic linear interp ---
-function interpM(m, ang){                 // ang in [0,2pi)
-  const step = 2*Math.PI/NCTRL;
-  let f = ang/step, i0 = Math.floor(f)%NCTRL, t = f-Math.floor(f);
-  const i1 = (i0+1)%NCTRL;
-  return m[i0]*(1-t) + m[i1]*t;
+// --- B(theta): 자유 제어점 다각형에 대한 ray-cast 반경 (정규화 좌표, 이상원=1) ---
+function radiusAt(L, ang){
+  const dx=Math.cos(ang), dy=Math.sin(ang), N=L.pts.length; let best=null;
+  for(let k=0;k<N;k++){ const a=L.pts[k], b=L.pts[(k+1)%N];
+    const ex=b.x-a.x, ey=b.y-a.y, det=ex*dy-dx*ey;
+    if(Math.abs(det)<1e-12) continue;
+    const t=(ex*a.y-ey*a.x)/det, s=(dx*a.y-dy*a.x)/det;
+    if(t>1e-9 && s>=-1e-6 && s<=1+1e-6){ if(best===null||t>best) best=t; }
+  }
+  return best!==null?best:1;
 }
-function mToBtheta(m){
-  const b = new Array(NTHETA);
-  for(let k=0;k<NTHETA;k++){ b[k] = interpM(m, 2*Math.PI*k/NTHETA); }
-  return b;
-}
+function ptsToBtheta(L){ const b=new Array(NTHETA); for(let k=0;k<NTHETA;k++) b[k]=radiusAt(L,2*Math.PI*k/NTHETA); return b; }
 
 // --- dome height (volume 보존) : h = V0 / unitVol ---
 function computeHeight(L){
-  const {ax,ay,m} = L;
-  const N = 64;                            // 적분 격자 (normalized bbox)
-  const d = 2*MAX_M/N, dA = (d*ax)*(d*ay); // µm^2
+  const {ax,ay} = L;
+  const N = 64;
+  const d = 2*MAX_M/N, dA = (d*ax)*(d*ay);
   let unit = 0;
   for(let i=0;i<N;i++){
     const u = -MAX_M + (i+0.5)*d;
@@ -301,33 +302,33 @@ function computeHeight(L){
       const v = -MAX_M + (j+0.5)*d;
       const rho = Math.hypot(u,v); if(rho<1e-9){ unit += 1*dA; continue; }
       let ang = Math.atan2(v,u); if(ang<0) ang+=2*Math.PI;
-      const B = interpM(m, ang);
+      const B = radiusAt(L, ang);
       if(rho<=B){ const r=rho/B; unit += Math.sqrt(Math.max(0,1-r*r))*dA; }
     }
   }
   const V0 = H0*(2/3)*Math.PI*ax*ay;
   return unit>0 ? V0/unit : H0;
 }
-function isDeformed(L){ return L.m.some(v=>Math.abs(v-1)>1e-3); }
+function isDeformed(L){ return L.pts.some(p=>Math.abs(Math.hypot(p.x,p.y)-1)>1e-3); }
 
-// --- presets: 방향성 변형을 m 에 적용 (strength 0..1) ---
+// --- presets: 방향성 변형을 제어점에 적용 (strength 0..1) ---
 function applyShape(L, kind, s){
-  const m = new Array(NCTRL).fill(1);
+  const pts=[];
   for(let k=0;k<NCTRL;k++){
     const a = 2*Math.PI*k/NCTRL;
     let d=0;
     switch(kind){
-      case "ellipse_x": d =  Math.cos(2*a); break;         // x 방향 팽창
+      case "ellipse_x": d =  Math.cos(2*a); break;
       case "ellipse_y": d = -Math.cos(2*a); break;
-      case "square":    d =  0.32*Math.cos(4*a); break;    // 각짐
-      case "tri":       d =  Math.cos(3*a); break;         // 3-lobe
+      case "square":    d =  0.32*Math.cos(4*a); break;
+      case "tri":       d =  Math.cos(3*a); break;
       case "pear":      d =  Math.cos(a) - 0.35*Math.cos(2*a); break;
       default: d=0;
     }
-    m[k] = 1 + s*d;
-    m[k] = Math.min(MAX_M, Math.max(MIN_M, m[k]));
+    const r = Math.min(MAX_M, Math.max(MIN_M, 1 + s*d));
+    pts.push({x:r*Math.cos(a), y:r*Math.sin(a)});
   }
-  L.m = m;
+  L.pts = pts;
 }
 
 // ---------------------------------------------------------------------------
@@ -386,17 +387,12 @@ function hexA(hex, a){
   const n=parseInt(hex,16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
 }
 
-function lensBoundaryPts(L, n){
-  const pts=[];
-  for(let k=0;k<n;k++){
-    const a=2*Math.PI*k/n, B=interpM(L.m,a);
-    pts.push([L.cx + L.ax*B*Math.cos(a), L.cy + L.ay*B*Math.sin(a)]);
-  }
-  return pts;
+function lensBoundaryPts(L){
+  return L.pts.map(p=>[L.cx + L.ax*p.x, L.cy + L.ay*p.y]);
 }
 function drawLens(id, sel){
   const L=state.lenses[id];
-  const pts=lensBoundaryPts(L, 96);
+  const pts=lensBoundaryPts(L);
   vctx.beginPath();
   pts.forEach((p,i)=> i? vctx.lineTo(X(p[0]),Y(p[1])) : vctx.moveTo(X(p[0]),Y(p[1])));
   vctx.closePath();
@@ -420,10 +416,9 @@ function drawLens(id, sel){
       k?vctx.lineTo(X(x),Y(y)):vctx.moveTo(X(x),Y(y)); }
     vctx.setLineDash([4,4]); vctx.strokeStyle=hexA(css("--ink-dim"),.7); vctx.lineWidth=1; vctx.stroke();
     vctx.setLineDash([]);
-    // control 핸들
+    // control 핸들 (자유 이동)
     for(let k=0;k<NCTRL;k++){
-      const a=2*Math.PI*k/NCTRL, B=L.m[k];
-      const x=L.cx+L.ax*B*Math.cos(a), y=L.cy+L.ay*B*Math.sin(a);
+      const x=L.cx+L.ax*L.pts[k].x, y=L.cy+L.ay*L.pts[k].y;
       vctx.beginPath(); vctx.arc(X(x),Y(y),5,0,2*Math.PI);
       vctx.fillStyle=css("--accent"); vctx.fill();
       vctx.lineWidth=1.5; vctx.strokeStyle=css("--bg"); vctx.stroke();
@@ -452,22 +447,23 @@ function drawCross(){
   cctx.strokeStyle=hexA(css("--line"),1); cctx.lineWidth=1;
   cctx.beginPath(); cctx.moveTo(padX,y0); cctx.lineTo(W-padX,y0); cctx.stroke();
   // 이상형 (점선)
-  function profile(mArr, off){
+  function profile(Ldef){   // Ldef=null 이면 이상원, 아니면 변형 렌즈
     cctx.beginPath(); let started=false;
     for(let px=-xspan/2; px<=xspan/2; px+=xspan/240){
-      const u=px/L.ax; let ang = u>=0?0:Math.PI; const B=interpM(mArr,ang);
+      const u=px/L.ax; let ang = u>=0?0:Math.PI;
+      const B = Ldef ? radiusAt(Ldef,ang) : 1;
       const rho=Math.abs(u); let s=0;
       if(rho<=B){ const rr=rho/B; s=Math.sqrt(Math.max(0,1-rr*rr)); }
-      const hh = mArr===L.m ? h : H0;
+      const hh = Ldef ? h : H0;
       const X=x0+px*sx, Yv=y0 - s*hh*sy;
       if(s>0||started){ started?cctx.lineTo(X,Yv):cctx.moveTo(X,Yv); started=true; }
     }
     cctx.stroke();
   }
   cctx.setLineDash([4,4]); cctx.strokeStyle=hexA(css("--ink-dim"),.8); cctx.lineWidth=1.2;
-  profile(new Array(NCTRL).fill(1));
+  profile(null);
   cctx.setLineDash([]); cctx.strokeStyle=css("--amber"); cctx.lineWidth=2;
-  profile(L.m);
+  profile(L);
   document.getElementById("crossCap").textContent =
     `cross-section · ${state.selected} · h=${h.toFixed(3)}µm  (ideal ${H0}µm dashed)`;
 }
@@ -487,8 +483,7 @@ view.addEventListener("pointerdown", ev=>{
   const sel=state.selected && state.lenses[state.selected];
   if(sel){
     for(let k=0;k<NCTRL;k++){
-      const a=2*Math.PI*k/NCTRL, B=sel.m[k];
-      const hx=sel.cx+sel.ax*B*Math.cos(a), hy=sel.cy+sel.ay*B*Math.sin(a);
+      const hx=sel.cx+sel.ax*sel.pts[k].x, hy=sel.cy+sel.ay*sel.pts[k].y;
       if(Math.hypot(X(hx)-X(ux),Y(hy)-Y(uy))<9){ drag={id:state.selected,k}; view.setPointerCapture(ev.pointerId); return; }
     }
   }
@@ -497,7 +492,7 @@ view.addEventListener("pointerdown", ev=>{
   for(const id in state.lenses){ const L=state.lenses[id];
     const u=(ux-L.cx)/L.ax, v=(uy-L.cy)/L.ay, rho=Math.hypot(u,v);
     let ang=Math.atan2(v,u); if(ang<0)ang+=2*Math.PI;
-    if(rho<=interpM(L.m,ang)) pick=id;
+    if(rho<=radiusAt(L,ang)) pick=id;
   }
   if(pick){ state.selected=pick; syncPanel(); draw(); }
 });
@@ -505,10 +500,11 @@ view.addEventListener("pointermove", ev=>{
   if(!drag) return;
   const [ux,uy]=ptUM(ev);
   const L=state.lenses[drag.id];
-  const u=(ux-L.cx)/L.ax, v=(uy-L.cy)/L.ay;
-  let m=Math.hypot(u,v);
-  m=Math.min(MAX_M,Math.max(MIN_M,m));
-  L.m[drag.k]=m;
+  let u=(ux-L.cx)/L.ax, v=(uy-L.cy)/L.ay;   // 정규화 좌표 (자유 2D)
+  const r=Math.hypot(u,v);
+  if(r>MAX_M){ u*=MAX_M/r; v*=MAX_M/r; }         // 반경만 clamp, 방향은 자유
+  else if(r<MIN_M && r>1e-6){ u*=MIN_M/r; v*=MIN_M/r; }
+  L.pts[drag.k]={x:u, y:v};
   draw(); syncPanelLight();
 });
 view.addEventListener("pointerup", ev=>{ if(drag){ drag=null; syncPanel(); } });
@@ -577,12 +573,12 @@ function applyPreset(){
 }
 document.getElementById("resetLens").addEventListener("click",()=>{
   const L=state.selected&&state.lenses[state.selected]; if(!L)return;
-  L.m=new Array(NCTRL).fill(1);
+  L.pts=initPts();
   document.getElementById("preset").value="none"; document.getElementById("strength").value=0;
   draw(); buildLensList(); syncPanelLight();
 });
 document.getElementById("resetAll").addEventListener("click",()=>{
-  for(const id in state.lenses) state.lenses[id].m=new Array(NCTRL).fill(1);
+  for(const id in state.lenses) state.lenses[id].pts=initPts();
   document.getElementById("preset").value="none"; document.getElementById("strength").value=0;
   draw(); buildLensList(); syncPanelLight();
 });
@@ -594,7 +590,7 @@ function buildExport(){
   const deformations={};
   for(const id in state.lenses){
     const L=state.lenses[id];
-    if(isDeformed(L)) deformations[id]={b_theta: mToBtheta(L.m).map(v=>+v.toFixed(4))};
+    if(isDeformed(L)) deformations[id]={b_theta: ptsToBtheta(L).map(v=>+v.toFixed(4))};
   }
   return {schema:"cis_ml_shapes/1", n_theta:NTHETA, pitch_um:PITCH,
           sag_height_um:H0, quads:state.quads, deformations};
