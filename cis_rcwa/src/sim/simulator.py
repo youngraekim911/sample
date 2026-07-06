@@ -15,19 +15,27 @@ import os
 import numpy as np
 import torch
 
-from build_qcell import QcellBuilder, load_config
-from rcwa import RCWASolver
-from materials import MaterialLibrary
+from ..structure.builder import QcellBuilder
+from ..config.loader import load_config
+from ..rcwa import RCWASolver
+from ..materials.library import MaterialLibrary
 
 
 class RCWAPlaneWaveSimulator:
     def __init__(self, config_path, nG=101, downsample=2, trunc="circular",
-                 device=None, dtype=torch.complex128, materials_dir="materials"):
+                 device=None, dtype=torch.complex128, materials_dir=None):
         self.cfg = load_config(config_path)
         self.base_dir = os.path.dirname(os.path.abspath(config_path))
-        # materials/ 폴더 자동 로드 (파장별 n,k). 없으면 config dispersion/상수 fallback.
-        mdir = materials_dir if os.path.isabs(materials_dir) else os.path.join(self.base_dir, materials_dir)
-        self.matlib = MaterialLibrary(mdir) if os.path.isdir(mdir) else None
+        # 물질 폴더(파장별 n,k) 자동 탐색: 지정값 -> conf 옆 materials -> repo data/materials
+        cands = []
+        if materials_dir:
+            cands.append(materials_dir if os.path.isabs(materials_dir)
+                         else os.path.join(self.base_dir, materials_dir))
+        cands.append(os.path.join(self.base_dir, "materials"))
+        cands.append(os.path.join(self.base_dir, "..", "data", "materials"))
+        cands.append(os.path.join(os.getcwd(), "data", "materials"))
+        mdir = next((d for d in cands if os.path.isdir(d)), None)
+        self.matlib = MaterialLibrary(mdir) if mdir else None
         if self.matlib:
             print(f"[materials] loaded {len(self.matlib.names())} from {mdir}")
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")

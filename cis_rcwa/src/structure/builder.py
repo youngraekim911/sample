@@ -308,7 +308,7 @@ class QcellBuilder:
 # ----------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description="CIS qcell -> npy builder")
-    ap.add_argument("-c", "--config", default="qcell_config.yaml")
+    ap.add_argument("-c", "--config", default="conf/qcell_config.yaml")
     ap.add_argument("-o", "--outdir", default=".")
     args = ap.parse_args()
 

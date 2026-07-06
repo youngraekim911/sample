@@ -98,15 +98,34 @@ config(YAML) → build_qcell(구조) → RCWAPlaneWaveSimulator → RCWASolver
 
 특징: 원형/사각형 truncation · 복소굴절률(흡수) · 비수직 입사(θ,φ) · GPU 가속.
 
+### 폴더 구조 (src/ 블록)
+```
+cis_rcwa/
+  conf/            설정 YAML (qcell_config, structure_config)
+  data/materials/  물질별 파장 n,k txt
+  editors/         structure_editor.html, ml_shape_editor.html
+  src/
+    config/        loader(YAML) + schema(dataclass)
+    materials/     library.py (MaterialLibrary)
+    structure/     builder.py(RCWATensorStack) + color_filter/si_dti/shrink[stub]
+    rcwa/          rcwa/kbloch/fft_funs/torch_eig + tests/validate + eig/[stub]
+    sim/           simulator, runner, qe_calc/cone/models/option[stub]
+    viz/ eval/ opt/ utils/ api/ cache/ core/   [블록]
+  validate.py / build_structure.py / run_qe.py   (최상위 실행 진입점)
+```
+
 ### 실행
 ```bash
 pip install torch pyyaml numpy matplotlib
 
 # 검증 (Fresnel / thin-film TMM / 에너지 보존 — 해석해 일치)
-python3 rcwa/tests/validate.py
+python3 validate.py
+
+# 구조 생성(npy)
+python3 build_structure.py -c conf/qcell_config.yaml -o out
 
 # QE 파장 sweep  (금속 grid 고대비 -> nG>=101 권장)
-python3 runner.py -c qcell_config.yaml --lam0 0.45 --lam1 0.65 --n 5 --nG 101 --downsample 2
+python3 run_qe.py -c conf/qcell_config.yaml --lam0 0.45 --lam1 0.65 --n 5 --nG 101 --downsample 2
 # 출력: out/qe_spectrum.csv, out/qe_spectrum.png
 ```
 

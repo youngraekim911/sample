@@ -14,7 +14,7 @@ import argparse
 import numpy as np
 import torch
 
-from simulator import RCWAPlaneWaveSimulator
+from .simulator import RCWAPlaneWaveSimulator
 
 
 def sweep(config, lam0, lam1, nlam, nG, downsample, theta, phi, device):
@@ -70,7 +70,7 @@ def save_outputs(rows, outdir):
 
 def main():
     ap = argparse.ArgumentParser(description="RCWA QE wavelength sweep")
-    ap.add_argument("-c", "--config", default="qcell_config.yaml")
+    ap.add_argument("-c", "--config", default="conf/qcell_config.yaml")
     ap.add_argument("-o", "--outdir", default="out")
     ap.add_argument("--lam0", type=float, default=0.40)
     ap.add_argument("--lam1", type=float, default=0.70)
