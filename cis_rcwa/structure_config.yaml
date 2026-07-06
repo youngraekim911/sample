@@ -45,7 +45,8 @@ stack:
     oxide_liner_um: 0.02    # DTI 표면 균일 oxide
     metal: dti_metal
     fill: si                # 트렌치 내부(라이너 안쪽) 채움
-    center_open: true       # 2x2 내부 중앙 미연결 -> Si 연결
+    center_open: true       # 2x2 내부 + 교차 중앙 일부만 제거 -> Si 중앙 연결
+    center_gap_um: 0.20     # 제거되는 중앙 사각 크기 (intra-quad 벽은 유지)
 
   arl_bottom:               # 전면(blanket) 다층 AR (grid 분리 없음)
     - { material: arl_hi, thickness_um: 0.02 }

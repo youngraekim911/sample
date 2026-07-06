@@ -243,7 +243,7 @@ const DEFAULT = {
   bayer:[["R","G","R","G"],["G","B","G","B"],["R","G","R","G"],["G","B","G","B"]],
   stack:{
     si_substrate:{ thickness_um:2.0, material:"si" },
-    dti:{ depth_um:0.50, wall_width_um:0.15, oxide_liner_um:0.02, metal:"dti_metal", fill:"si", center_open:true },
+    dti:{ depth_um:0.50, wall_width_um:0.15, oxide_liner_um:0.02, metal:"dti_metal", fill:"si", center_open:true, center_gap_um:0.20 },
     arl_bottom:[ {material:"arl_hi",thickness_um:0.02}, {material:"arl_lo",thickness_um:0.05} ],
     color_filter:{ thickness_um:0.60,
       grid:{ width_um:0.15, shape:"rect", oxide_wrap_um:0.02,
@@ -291,12 +291,19 @@ function mlSag(x,y){
 // 경계 위치 판정
 function nearBoundary(coord, w){ const p=P(); const u=((coord%p)+p)%p; const h=w/2; return u<h||u>p-h; }
 function isDtiWall(x,y){
-  const p=P(), st=S.stack.dti, w=+st.wall_width_um+2*(+st.oxide_liner_um);
-  // center_open: DTI 는 quad(2p) 경계만. 아니면 모든 pixel 경계.
-  const per = st.center_open ? 2*p : p;
-  const half=w/2;
-  const ux=((x%per)+per)%per, uy=((y%per)+per)%per;
-  return (ux<half||ux>per-half) || (uy<half||uy>per-half);
+  // DTI 는 모든 pixel 경계에 벽. center_open 이면 quad 중앙(+교차) 작은 사각만 제거(Si 연결).
+  const p=P(), st=S.stack.dti, half=(+st.wall_width_um+2*(+st.oxide_liner_um))/2;
+  const bx=Math.round(x/p), by=Math.round(y/p);
+  const nearX=Math.abs(x-bx*p)<half, nearY=Math.abs(y-by*p)<half;
+  if(!(nearX||nearY)) return false;
+  if(st.center_open){
+    const gh=(+st.center_gap_um||0)/2;
+    // quad 중앙 = odd*p (intra-quad 경계 교차점)
+    const oddIdx=v=>{ const i=Math.round(v/p); return (i%2!==0)?i:(v>i*p?i+1:i-1); };
+    const ix=oddIdx(x), iy=oddIdx(y);
+    if(Math.abs(x-ix*p)<gh && Math.abs(y-iy*p)<gh) return false;  // 중앙 일부 제거
+  }
+  return true;
 }
 
 // ============================ 렌더: XZ 단면 ============================
@@ -333,9 +340,8 @@ function drawXZ(){
   rect(0,span,z,z+ +s.si_substrate.thickness_um, matColor(s.si_substrate.material)); z+=+s.si_substrate.thickness_um;
   // 2) DTI band
   const dz0=z, dth=+s.dti.depth_um; rect(0,span,z,z+dth,matColor(s.dti.fill));
-  { const st=s.dti, wm=+st.wall_width_um, ol=+st.oxide_liner_um, per=st.center_open?2*p:p;
-    for(let b=0;b<=np;b+= (st.center_open?2:1)){ const xb=b*p; if(xb<0||xb>span)continue;
-      // oxide liner column + metal core
+  { const st=s.dti, wm=+st.wall_width_um, ol=+st.oxide_liner_um;
+    for(let b=0;b<=np;b++){ const xb=b*p; if(!isDtiWall(xb,cutY)) continue;  // 중앙 gap 이면 skip
       rect(xb-(wm/2+ol),xb+(wm/2+ol),z,z+dth,matColor("oxide"));
       rect(xb-wm/2,xb+wm/2,z,z+dth,matColor(st.metal)); } }
   z+=dth;
@@ -395,9 +401,7 @@ function renderTops(){
     // Si 배경
     ctx.fillStyle=matColor("si"); ctx.fillRect(g.X(0),g.Y(g.span),g.span*g.sc,g.span*g.sc);
     const st=S.stack.dti, wm=+st.wall_width_um, ol=+st.oxide_liner_um, w=wm+2*ol;
-    const step=st.center_open?2:1;
-    for(let b=0;b<=np;b+=step){ const c=b*p;
-      // 세로/가로 벽
+    for(let b=0;b<=np;b++){ const c=b*p;   // 모든 pixel 경계
       ctx.fillStyle=matColor("oxide");
       ctx.fillRect(g.X(c-w/2),g.Y(g.span),w*g.sc,g.span*g.sc);
       ctx.fillRect(g.X(0),g.Y(c+w/2),g.span*g.sc,w*g.sc);
@@ -405,6 +409,10 @@ function renderTops(){
       ctx.fillRect(g.X(c-wm/2),g.Y(g.span),wm*g.sc,g.span*g.sc);
       ctx.fillRect(g.X(0),g.Y(c+wm/2),g.span*g.sc,wm*g.sc);
     }
+    // center gap: quad 중앙(odd*p,odd*p) 작은 사각만 Si 로 제거 -> 4픽셀 연결
+    if(st.center_open){ const gap=+st.center_gap_um||0; ctx.fillStyle=matColor(st.fill);
+      for(let ix=1;ix<np;ix+=2)for(let iy=1;iy<np;iy+=2){ const cx=ix*p,cy=iy*p;
+        ctx.fillRect(g.X(cx-gap/2),g.Y(cy+gap/2),gap*g.sc,gap*g.sc); } }
   });
   // CF + grid (per-pixel)
   drawTop("tvCf",(ctx,g)=>{
@@ -519,6 +527,8 @@ function buildSide(){
     h("div",{class:"row"},[h("label",{},["metal"]),matSelect(dti,"metal")]),
     h("div",{class:"row"},[h("label",{},["trench fill"]),matSelect(dti,"fill")]),
     h("div",{class:"row"},[h("label",{},["center open (2×2 Si 연결)"]),coCk]),
+    numRow("center gap (µm)",dti,"center_gap_um"),
+    h("p",{class:"hint"},["+ 교차 중앙의 이만큼만 제거 → 4픽셀 Si 중앙 연결"]),
   ]));
 
   // ARL bottom
