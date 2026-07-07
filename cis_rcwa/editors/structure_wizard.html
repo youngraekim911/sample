@@ -323,8 +323,10 @@ async function buildVoxPrep(){
   const names=["air"]; const idm={air:0}; const idOf=n=>{ if(!(n in idm)){idm[n]=names.length;names.push(n);} return idm[n]; };
   // ---- 2D 프리컴퓨트 ----
   const nP=nx*ny;
-  const siMap=new Uint8Array(nP), gD=new Float32Array(nP), cfTopM=new Float32Array(nP),
-        cfIdM=new Uint8Array(nP), sagM=new Float32Array(nP);
+  // 주의: 거리/높이 맵은 Float64 — float32 면 경계값(예: d=0.01 vs wz/2=0.01)이
+  // 반올림돼 Python 빌더(float64)와 경계 한 겹이 어긋남 (JS/Python npy 동치 요구)
+  const siMap=new Uint8Array(nP), gD=new Float64Array(nP), cfTopM=new Float64Array(nP),
+        cfIdM=new Uint8Array(nP), sagM=new Float64Array(nP);
   const g=st.grid, per=(g.pitch||1)*p, cfPer=((S.cf_array==="tetra")?2:1)*p;
   const W=+g.width_um, cw=gridCoat(), gH=gridStackH(),
         ratio=Math.min(1,Math.max(0,+(g.top_ratio!=null?g.top_ratio:1)||0));

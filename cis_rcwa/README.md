@@ -82,8 +82,19 @@ python3 run_qe.py -c conf/wizard_config.yaml --nG 101
 - **📁 Materials**: 폴더 n,k txt 로드 → 물질별 파장의존 n,k
 - **⤒ Import / ⤓ YAML**: 구조를 `<product>.yaml` 로 저장/불러오기
 - **⤓ npy + yaml**: 브라우저에서 `<product>_matid.npy` + `_meta.json` + `.yaml` 동시 생성
-  (numpy 로 바로 로드 가능 — Python 불필요)
+  (numpy 로 바로 로드 가능 — Python 불필요. 4GB 초과 해상도는 Chrome/Edge 에서
+  디스크 스트리밍 저장. 브라우저 npy == Python 빌더 npy, voxel 100% 동일 검증)
 - 뷰: XZ 단면 / 3D isometric / top-view
+
+### 뽑은 npy 확인 — `view_npy.py`
+```bash
+python3 view_npy.py -i <product>_matid.npy        # 옆의 _meta.json 자동 사용
+# -> <product>_view.png : XZ/YZ 단면(물질 다양한 슬라이스 자동 선택) +
+#    z-점유율 스택 + 대표 z 3곳 XY 평면 + 물질 범례 / z-밴드 요약 출력
+```
+npy 규약: `uint8` 물질 id, shape `[nz, ny, nx]` — **z=0 이 바닥(Si)**, 빛은 +z 위에서 입사.
+`a[z]` 가 높이 z 의 XY 평면. 단면을 정확히 pixel 경계(y=1.0µm 등)에서 자르면
+grid 벽/DTI 를 따라 잘려 벽 물질만 보이니 셀 중앙(y=0.5µm 등)으로 자를 것.
 
 ## UI 에디터 — `ml_shape_editor.html`
 
