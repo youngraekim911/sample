@@ -316,8 +316,8 @@ function matFast(x,y,zc,upto){ const g=GC; if(!g)return matAt(x,y,zc,upto);
   if(upto>=7&&zc<=surf+g.arlT)return g.arlName;
   return "air"; }
 
-// 고속 npy 빌더: 2D 맵 프리컴퓨트 + z 밴드 채움 (비동기 chunk, 진행률 콜백)
-async function buildVoxels(onProg){
+// 고속 npy 빌더: 2D 맵 프리컴퓨트 -> prep(fillSlab) 반환 (전체/스트리밍 공용)
+async function buildVoxPrep(){
   const p=P(),np=NP(),span=p*np,dxy=+S.grid.dxy_um,dz=+S.grid.dz_um,st=S.stack;
   const nx=Math.round(span/dxy),ny=nx,nz=Math.round(totalH()/dz);
   const names=["air"]; const idm={air:0}; const idOf=n=>{ if(!(n in idm)){idm[n]=names.length;names.push(n);} return idm[n]; };
@@ -347,12 +347,11 @@ async function buildVoxels(onProg){
   const coatId=cw>0?idOf(g.coat_material||"oxide"):0;
   const mlId=idOf(st.ml.material), arlId=idOf(st.arl_top.material), arlT=+st.arl_top.thickness_um;
   const barlTop=zSi+barlH, plSpan=planarSpan(), plTop=barlTop+plSpan;
-  const data=new Uint8Array(nz*ny*nx);
-  for(let zi=0;zi<nz;zi++){ const zc=(zi+0.5)*dz, base=zi*nP;
-    if(zc<zSi){ data.set(siMap,base); }
+  const fillSlab=(zi,out,off)=>{ const zc=(zi+0.5)*dz;
+    if(zc<zSi){ out.set(siMap,off); }
     else if(zc<barlTop){ const zz=zc-zSi; let mid=barlB.length?barlB[barlB.length-1][1]:0;
       for(const [b_,i_] of barlB){ if(zz<=b_){mid=i_;break;} }
-      data.fill(mid,base,base+nP); }
+      out.fill(mid,off,off+nP); }
     else if(zc<plTop){ const zabs=zc-barlTop;
       const wz=gH>0? W*(1-(1-ratio)*Math.min(zabs/gH,1)) : W;
       let gid=0; if(zabs<=gH){ gid=gB.length?gB[gB.length-1][1]:0; for(const [b_,i_] of gB){ if(zabs<=b_){gid=i_;break;} } }
@@ -362,18 +361,43 @@ async function buildVoxels(onProg){
         const d=gD[k];
         if(inG){ if(d<wz/2)m=gid; else if(cw>0&&d<wz/2+cw)m=coatId; }
         else if(inCap && d<wz/2+cw) m=coatId;
-        data[base+k]=m; } }
+        out[off+k]=m; } }
     else { for(let k=0;k<nP;k++){ const surf=plTop+sagM[k]; let m=0;
         if(zc<=surf)m=mlId; else if(zc<=surf+arlT)m=arlId;
-        data[base+k]=m; } }
-    if(onProg && (zi&15)===0){ onProg(zi/nz); await new Promise(r=>setTimeout(r,0)); }
-  }
+        out[off+k]=m; } } };
+  return {nx,ny,nz,nP,names,dxy,dz,fillSlab};
+}
+// 전체 배열 생성 (<=4GB)
+async function buildVoxels(onProg){ const P0=await buildVoxPrep();
+  const {nx,ny,nz,nP,names,dxy,dz,fillSlab}=P0;
+  const data=new Uint8Array(nz*nP);
+  for(let zi=0;zi<nz;zi++){ fillSlab(zi,data,zi*nP);
+    if(onProg&&(zi&15)===0){ onProg(zi/nz); await new Promise(r=>setTimeout(r,0)); } }
   return {data,shape:[nz,ny,nx],names,dxy,dz};
 }
-function npyU8(arr,shape){ const hdr=`{'descr': '|u1', 'fortran_order': False, 'shape': (${shape.join(', ')}), }`;
+function npyHeader(shape){ const hdr=`{'descr': '|u1', 'fortran_order': False, 'shape': (${shape.join(', ')}), }`;
   let need=(64-((10+hdr.length+1)%64))%64; const hs=hdr+" ".repeat(need)+"\n"; const hb=new TextEncoder().encode(hs);
-  const out=new Uint8Array(10+hb.length+arr.length); out.set([0x93,0x4E,0x55,0x4D,0x50,0x59,1,0],0);
-  out[8]=hb.length&255; out[9]=(hb.length>>8)&255; out.set(hb,10); out.set(arr,10+hb.length); return out; }
+  const out=new Uint8Array(10+hb.length); out.set([0x93,0x4E,0x55,0x4D,0x50,0x59,1,0],0);
+  out[8]=hb.length&255; out[9]=(hb.length>>8)&255; out.set(hb,10); return out; }
+function npyU8(arr,shape){ const h=npyHeader(shape);
+  const out=new Uint8Array(h.length+arr.length); out.set(h,0); out.set(arr,h.length); return out; }
+// 4GB 초과 npy: 디스크로 슬랩(z단면)별 스트리밍 저장 (File System Access API, Chrome/Edge)
+async function exportNpyStream(onProg){
+  const Pp=await buildVoxPrep(); const {nx,ny,nz,nP,names,dxy,dz,fillSlab}=Pp;
+  const handle=await window.showSaveFilePicker({
+    suggestedName:pname()+"_matid.npy",
+    types:[{description:"NumPy array",accept:{"application/octet-stream":[".npy"]}}]});
+  const w=await handle.createWritable();
+  try{
+    await w.write(npyHeader([nz,ny,nx]));
+    const slab=new Uint8Array(nP);
+    for(let zi=0;zi<nz;zi++){ fillSlab(zi,slab,0);
+      await w.write(slab.slice());                       // write 는 버퍼 소유 -> 복사본 전달
+      if(onProg&&(zi&7)===0) onProg(zi/nz); }
+    await w.close();
+  }catch(err){ try{await w.abort();}catch(_){} throw err; }
+  return {shape:[nz,ny,nx],names,dxy,dz,bytes:nz*nP};
+}
 
 // ============================ 렌더 ============================
 function el(id){return document.getElementById(id);}
@@ -787,13 +811,32 @@ yamlFileIn.onchange=async e=>{ const f=e.target.files[0]; if(!f)return; try{ loa
 el("dlgCopy").onclick=async()=>{ const t=el("dlgText"); t.select(); try{await navigator.clipboard.writeText(t.value);}catch(e){document.execCommand("copy");} };
 el("dlgClose").onclick=()=>dlg.close();
 el("npyBtn").onclick=async()=>{ const btn=el("npyBtn"), t0=btn.textContent;
-  // 용량 가드: nx*ny*nz 사전 계산 (예: dxy=0.001 -> 71GB 방지)
+  // 용량 가드: nx*ny*nz 사전 계산 (예: dxy=0.001 -> 71GB)
   { const span=P()*NP(), nx=Math.round(span/S.grid.dxy_um), nz=Math.round(totalH()/S.grid.dz_um);
     const bytes=nx*nx*nz;
     if(!isFinite(bytes)||bytes>4.0e9){
       const gb=(bytes/1e9).toFixed(1);
+      if(window.showSaveFilePicker){
+        // 메모리에 다 안 올라가는 크기 -> 디스크로 z-슬랩 스트리밍 저장
+        if(!confirm(`npy ${nx}×${nx}×${nz} ≈ ${gb} GB — 메모리 한계(4GB) 초과라\n`+
+                    `디스크로 직접 스트리밍 저장합니다 (저장 위치 선택 창이 뜸).\n`+
+                    `meta.json / yaml 은 함께 다운로드됩니다. 진행할까요?`)) return;
+        btn.disabled=true;
+        try{
+          const v=await exportNpyStream(f=>{btn.textContent="스트리밍 "+Math.round(f*100)+"%";});
+          const nm=pname();
+          const leg={product:S.product,shape_zyx:v.shape,voxel_um:{dz:v.dz,dy:v.dxy,dx:v.dxy},
+            materials:v.names.map((n,i)=>({id:i,name:n,...matNK(n)}))};
+          download(nm+"_meta.json", JSON.stringify(leg,null,2), "application/json");
+          download(nm+".yaml", structYAML());
+          alert(`스트리밍 저장 완료:\n · <선택 위치>  (${v.shape.join("×")}, ${(v.bytes/1e9).toFixed(2)} GB uint8 npy)\n`+
+                ` · ${nm}_meta.json (물질 id/n,k)\n · ${nm}.yaml (구조 설정)`);
+        }catch(err){ if(err&&err.name!=="AbortError") alert("스트리밍 저장 오류: "+err.message); }
+        finally{ btn.disabled=false; btn.textContent=t0; }
+        return; }
       alert(`npy ${nx}×${nx}×${nz} ≈ ${gb} GB — 브라우저 배열 한계(4GB) 초과.\n\n`+
-            `이 해상도가 필요하면 같은 YAML 로 Python 빌더를 사용하세요:\n`+
+            `Chrome/Edge 에서는 이 버튼이 디스크 스트리밍 저장을 지원합니다.\n`+
+            `또는 같은 YAML 로 Python 빌더를 사용하세요:\n`+
             `PYTHONPATH=. python3 -m src.structure.wizard_builder -c <product>.yaml -o out\n`+
             `(YAML 버튼으로 저장한 파일 그대로 사용)`);
       return; }
