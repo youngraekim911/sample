@@ -123,23 +123,27 @@ class WizardBuilder:
             return float(ml["hr"])
         return float(ml.get("sag_height_um", 0.55)) / (self.p / 2)
 
+    def _ml_height(self, L):
+        """렌즈 높이: height_um>0 이면 고정(µm) -> footprint 따라 곡률 변화, 아니면 hr*min(반경)."""
+        hu = float(self.s["ml"].get("height_um", 0) or 0)
+        if hu > 0:
+            return hu
+        return self._ml_hr() * min(float(L["ax"]), float(L["ay"]))
+
     def _ml_sag(self):
-        """풍선 모델: 각 렌즈 = 타원 캡 h=hr*min(ax,ay). 겹침은 max -> 접촉 교선(찌부)."""
-        hr = self._ml_hr()
+        """풍선 모델: 각 렌즈 = 타원 캡. 겹침은 max -> 접촉 교선(찌부)."""
         sag = np.zeros_like(self.X)
         for L in self._ml_lenses():
             u = (self.X - float(L["cx"])) / float(L["ax"])
             v = (self.Y - float(L["cy"])) / float(L["ay"])
             r2 = u * u + v * v
-            hL = hr * min(float(L["ax"]), float(L["ay"]))
+            hL = self._ml_height(L)
             s = np.where(r2 < 1, hL * np.sqrt(np.clip(1 - r2, 0, 1)), 0.0)
             np.maximum(sag, s, out=sag)
         return sag
 
     def _ml_maxh(self):
-        hr = self._ml_hr()
-        return max((hr * min(float(L["ax"]), float(L["ay"]))
-                    for L in self._ml_lenses()), default=0.0)
+        return max((self._ml_height(L) for L in self._ml_lenses()), default=0.0)
 
     # ------------------------------------------------------------- build
     def build(self):
@@ -187,9 +191,10 @@ class WizardBuilder:
         for r in range(self.npx):
             for c in range(self.npx):
                 colcode[(pr == r) & (pc == c)] = colmap[bay[r][c]]
-        u = (self.X - (np.floor(self.X / per) + 0.5) * per) / (per / 2)
-        v = (self.Y - (np.floor(self.Y / per) + 0.5) * per) / (per / 2)
-        pin = 1 - np.maximum(u * u, v * v)              # 벽=0, 중앙=1
+        cf_per = (2 if (self.cfg.get("cf_array") == "tetra") else 1) * p   # CF array 단위 셀
+        u = (self.X - (np.floor(self.X / cf_per) + 0.5) * cf_per) / (cf_per / 2)
+        v = (self.Y - (np.floor(self.Y / cf_per) + 0.5) * cf_per) / (cf_per / 2)
+        pin = 1 - np.minimum(1.0, u * u + v * v)        # 원형(radial) 메니스커스, 벽=0 중앙=1
         zTop = th[colcode] + cv[colcode] * pin
         cf_ids = np.array([self._id(cf[c]["material"]) for c in "RGB"], dtype=np.uint8)
         cf_map = cf_ids[colcode]
