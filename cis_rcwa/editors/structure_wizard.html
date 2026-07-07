@@ -693,6 +693,17 @@ yamlFileIn.onchange=async e=>{ const f=e.target.files[0]; if(!f)return; try{ loa
 el("dlgCopy").onclick=async()=>{ const t=el("dlgText"); t.select(); try{await navigator.clipboard.writeText(t.value);}catch(e){document.execCommand("copy");} };
 el("dlgClose").onclick=()=>dlg.close();
 el("npyBtn").onclick=async()=>{ const btn=el("npyBtn"), t0=btn.textContent;
+  // 용량 가드: nx*ny*nz 사전 계산 (예: dxy=0.001 -> 71GB 방지)
+  { const span=P()*NP(), nx=Math.round(span/S.grid.dxy_um), nz=Math.round(totalH()/S.grid.dz_um);
+    const bytes=nx*nx*nz;
+    if(!isFinite(bytes)||bytes>8e8){
+      const gb=(bytes/1e9).toFixed(1);
+      const sugXY=Math.max(0.002,+(span/800).toFixed(3)), sugZ=Math.max(0.002,+(totalH()/600).toFixed(3));
+      alert(`npy 크기 초과: ${nx}×${nx}×${nz} ≈ ${gb} GB (한계 0.8GB)\n\n`+
+            `dxy/dz 는 '복셀 해상도'입니다 — 1nm 치수 정밀도는 지오메트리에 이미 반영되므로\n`+
+            `복셀은 더 커도 됩니다. step1 에서 dxy ≥ ${sugXY}, dz ≥ ${sugZ} (µm) 권장.`);
+      return; }
+    if(bytes>2.5e8 && !confirm(`npy ${nx}×${nx}×${nz} ≈ ${(bytes/1e6).toFixed(0)} MB — 생성할까요?`)) return; }
   btn.disabled=true;
   let v; try{ v=await buildVoxels(f=>{btn.textContent="생성중 "+Math.round(f*100)+"%";}); }
   catch(err){ btn.disabled=false; btn.textContent=t0; alert("npy 생성 오류: "+err.message); return; }
