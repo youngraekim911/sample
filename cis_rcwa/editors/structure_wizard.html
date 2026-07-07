@@ -80,6 +80,7 @@
   <div class="stage">
     <div class="viewtabs">
       <span class="hint">3D: 드래그=회전 · 휠=줌</span>
+      <label class="hint" style="display:flex;gap:5px;align-items:center"><input type="checkbox" id="cutChk"> 내부 절단</label>
       <button class="btn ghost mini" id="resetView">reset view</button>
       <div class="spacer"></div>
       <label class="hint" style="display:flex;gap:6px;align-items:center">cut <input type="number" id="cutY" step="0.05" value="0.5" style="width:70px"></label>
@@ -179,7 +180,7 @@ function dtiAt(x,y){ const p=P(),st=S.stack.dti,W=+st.width_um,ol=Math.min(+st.o
   return ox; }                                               // 사이드월 라이너
 // Grid 울타리(fence): (x,y,zabs[um]) -> 물질명|null(셀 내부). taper: 하부 width 기준 상부 축소(0.8~1)
 function gridAt(x,y,zabs){ const g=S.stack.grid,p=P(),per=(g.pitch||1)*p,W=+g.width_um,cw=gridCoat(),H=gridStackH();
-  const ratio=Math.min(1,Math.max(0.8,+(g.top_ratio!=null?g.top_ratio:1)||1));
+  const ratio=Math.min(1,Math.max(0,+(g.top_ratio!=null?g.top_ratio:1)||0));
   const wz=W*(1-(1-ratio)*Math.min(zabs/Math.max(H,1e-9),1));   // 아래 W -> 위 W*ratio 선형
   const d=Math.min(Math.abs(x-Math.round(x/per)*per), Math.abs(y-Math.round(y/per)*per));
   if(d>wz/2+cw || zabs>H+cw) return null;
@@ -291,9 +292,21 @@ function drawSection(cv, axis){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.he
   const wpx=W-padL-padR, hpx=H-padB-padT;
   const sx=wpx/span, sz=hpx/Ht, cut=+el("cutY").value;
   const bg=rgbCss("--panel"), img=ctx.createImageData(wpx,hpx), D=img.data;
-  for(let pz=0;pz<hpx;pz++){ const zc=(hpx-(pz+0.5))/sz;
-    for(let px=0;px<wpx;px++){ const u=(px+0.5)/sx; const x=axis==="x"?u:cut, y=axis==="x"?cut:u;
-      const m=matAt(x,y,zc,curStep); const c=(m==="air")?bg:rgbOf(m);
+  // 픽셀당 5점 샘플: 전부 같으면 그 값, 다르면 '가장 드문' 물질(=얇은층: 1nm 라이너/BARL) 표시
+  const OFF=[[0.5,0.5],[0.12,0.12],[0.88,0.12],[0.12,0.88],[0.88,0.88]];
+  for(let pz=0;pz<hpx;pz++){
+    for(let px=0;px<wpx;px++){
+      let m0=null,all=true; const cnt={};
+      for(const [ou,oz] of OFF){ const u=(px+ou)/sx, zc=(hpx-(pz+oz))/sz;
+        const x=axis==="x"?u:cut, y=axis==="x"?cut:u;
+        const m=matAt(x,y,zc,curStep);
+        if(m0===null)m0=m; else if(m!==m0)all=false;
+        cnt[m]=(cnt[m]||0)+1; }
+      let m=m0;
+      if(!all){ let best=null,bc=99;
+        for(const k in cnt){ if(k==="air")continue; if(cnt[k]<bc){bc=cnt[k];best=k;} }
+        m=best||m0; }
+      const c=(m==="air")?bg:rgbOf(m);
       const o=(pz*wpx+px)*4; D[o]=c[0];D[o+1]=c[1];D[o+2]=c[2];D[o+3]=255; } }
   ctx.putImageData(img,padL,padT);
   ctx.strokeStyle=css("--line"); ctx.strokeRect(padL,padT,wpx,hpx);
@@ -317,12 +330,25 @@ function build3D(){ const span=P()*NP(), Ht=totalH();
   if(curStep<1){ iso={faces:[],span,Ht}; redraw3D(); return; }
   const q=+(el("viewQ")?el("viewQ").value:2);
   const nvx=q>=2?64:44, dv=span/nvx, nvz=Math.max(16,Math.round(Ht/(Math.max(span,Ht)/(q>=2?92:60)))), dvz=Ht/nvz;
-  const cutOn=curStep>=2;                                // step2(Si만)는 내부 없음 -> 절단 안함
+  const cutOn=!!(el("cutChk")&&el("cutChk").checked);    // 절단은 옵션 (기본 OFF -> ㄱ자 없음)
   const cutX=span*0.5, cutY=span*0.5;
+  // 복셀 물질: z 7점 샘플. 섞이면 '양끝(벌크)이 아닌 내부 물질'(=얇은층) 우선 보존
+  const ZO=[-0.43,-0.29,-0.14,0,0.14,0.29,0.43];
+  const vox=(x,y,z)=>{ const ss=ZO.map(o=>matAt(x,y,z+o*dvz,curStep));
+    const first=ss[0],last=ss[ss.length-1]; let mix=false;
+    for(const m of ss) if(m!==first){mix=true;break;}
+    if(!mix) return first==="air"?null:first;
+    const cnt={}; ss.forEach(m=>cnt[m]=(cnt[m]||0)+1);
+    let best=null,bc=99;
+    for(const k in cnt){ if(k==="air"||k===first||k===last)continue; if(cnt[k]<bc){bc=cnt[k];best=k;} }
+    if(best) return best;                                   // 내부 얇은층
+    const c=ss[3]; if(c!=="air") return c;                  // 경계: 중앙 샘플
+    for(const k in cnt){ if(k!=="air") return k; }
+    return null; };
   const grid=[];
   for(let k=0;k<nvz;k++){ const pk=[]; const z=(k+0.5)*dvz;
     for(let j=0;j<nvx;j++){ const pj=[]; const y=(j+0.5)*dv;
-      for(let i=0;i<nvx;i++){ const x=(i+0.5)*dv; let m; if(cutOn&&x>cutX&&y>cutY)m="cut"; else { m=matAt(x,y,z,curStep); if(m==="air")m=null; } pj.push(m); }
+      for(let i=0;i<nvx;i++){ const x=(i+0.5)*dv; let m; if(cutOn&&x>cutX&&y>cutY)m="cut"; else m=vox(x,y,z); pj.push(m); }
       pk.push(pj);} grid.push(pk); }
   const cell=(i,j,k)=> (i<0||j<0||k<0||i>=nvx||j>=nvx||k>=nvz)?null:grid[k][j][i];
   const faces=[]; const dirs=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
@@ -356,43 +382,43 @@ function h(tag,at,kids){ const e=document.createElement(tag); for(const k in(at|
 function numRow(lb,o,k,st){ const i=h("input",{type:"number",step:st||"0.01",value:o[k]}); i.oninput=()=>{o[k]=parseFloat(i.value); renderViews();}; return h("div",{class:"row"},[h("label",{},[lb]),i]); }
 function matRow(lb,o,k){ const sel=h("select",{}); Object.keys(S.materials).forEach(m=>{const op=h("option",{value:m},[m+(matTable(m)?" ·λ":"")]); if(o[k]===m)op.selected=true; sel.appendChild(op);}); sel.onchange=()=>{o[k]=sel.value; renderViews();};
   const nk=matNK(o[k]); return h("div",{class:"row"},[h("label",{},[lb]),sel,h("span",{class:"hint"},[`n${nk.n.toFixed(2)} k${nk.k.toFixed(3)}`])]); }
-function subEditor(arr, fields){ // fields: [['material','mat'],['두께','thickness_um']] etc
+function subEditor(arr, fields, st){ // fields: [['material','mat'],['두께','thickness_um']] etc
   const box=h("div",{class:"sublist"}); function rd(){ box.innerHTML="";
     arr.forEach((it,i)=>{ const row=h("div",{class:"subrow"});
       fields.forEach(([lb,key,kind])=>{ if(kind==="mat"){ const sel=h("select",{}); Object.keys(S.materials).forEach(m=>{const o=h("option",{value:m},[m]); if(it[key]===m)o.selected=true; sel.appendChild(o);}); sel.onchange=()=>{it[key]=sel.value; renderViews();}; row.appendChild(sel); }
-        else { const inp=h("input",{type:"number",step:"0.01",value:it[key]}); inp.oninput=()=>{it[key]=parseFloat(inp.value); renderViews();}; row.appendChild(inp); } });
+        else { const inp=h("input",{type:"number",step:st||"0.001",value:it[key]}); inp.oninput=()=>{it[key]=parseFloat(inp.value); renderViews();}; row.appendChild(inp); } });
       row.appendChild(h("button",{class:"del",onclick:()=>{arr.splice(i,1); rd(); renderViews();}},["✕"])); box.appendChild(row); });
     const add=h("button",{class:"btn mini",onclick:()=>{ const nn={}; fields.forEach(([lb,key,kind])=>nn[key]=kind==="mat"?Object.keys(S.materials)[0]:0.1); arr.push(nn); rd(); renderViews(); }},["+ add layer"]); box.appendChild(add);
   } rd(); return box;
 }
 const STEPS=[
- {t:"1 · Pixel array", d:"pitch 와 n×n 배열", body:()=>[ numRow("pixel pitch (µm)",S.grid,"pixel_pitch_um"), numRow("n × n",S.grid,"n_pixels","1"),
-    h("div",{class:"seclbl"},["voxel 해상도"]), numRow("dxy (µm)",S.grid,"dxy_um"), numRow("dz (µm)",S.grid,"dz_um"), numRow("air margin (µm)",S.grid,"air_margin_um") ]},
- {t:"2 · Si substrate", d:"물질(n,k 폴더 연동) 과 두께. DTI depth = 이 두께", body:()=>[ matRow("Si 물질",S.stack.si,"material"), numRow("thickness (µm)",S.stack.si,"thickness_um") ]},
+ {t:"1 · Pixel array", d:"pitch 와 n×n 배열", body:()=>[ numRow("pixel pitch (µm)",S.grid,"pixel_pitch_um","0.01"), numRow("n × n",S.grid,"n_pixels","1"),
+    h("div",{class:"seclbl"},["voxel 해상도"]), numRow("dxy (µm)",S.grid,"dxy_um","0.001"), numRow("dz (µm)",S.grid,"dz_um","0.001"), numRow("air margin (µm)",S.grid,"air_margin_um","0.01") ]},
+ {t:"2 · Si substrate", d:"물질(n,k 폴더 연동) 과 두께. DTI depth = 이 두께", body:()=>[ matRow("Si 물질",S.stack.si,"material"), numRow("thickness (µm)",S.stack.si,"thickness_um","0.1") ]},
  {t:"3 · DTI", d:"Si 식각 → 판 표면 oxide 라이너 → 채움. depth = Si 두께", body:()=>{ const d=S.stack.dti;
     const cur=dtiMode();
     const md=h("select",{}); [["1x1","1×1 분리 (전체 격자)"],["2x2","2×2 분리 (quad 경계만)"],["2x2_open","2×2 center open (클로버)"]].forEach(([v,tx])=>{const o=h("option",{value:v},[tx]); if(cur===v)o.selected=true; md.appendChild(o);});
     md.onchange=()=>{ d.mode=md.value; d.center_open=(md.value==="2x2_open"); renderStep(); };
     const rows=[ h("div",{class:"row"},[h("label",{},["DTI 분리"]),md]),
-      numRow("width (µm)",d,"width_um"), numRow("oxide 라이너 (µm)",d,"oxide_liner_um"),
+      numRow("width (µm)",d,"width_um","0.001"), numRow("oxide 라이너 (µm)",d,"oxide_liner_um","0.001"),
       matRow("라이너 물질",d,"liner"), matRow("채움 물질",d,"fill") ];
     if(cur==="2x2_open"){
       if(d.center_gap_x_um==null) d.center_gap_x_um=+d.center_gap_um||0.2;
       if(d.center_gap_y_um==null) d.center_gap_y_um=+d.center_gap_um||0.2;
-      rows.push(numRow("center open 가로 (µm)",d,"center_gap_x_um"));
-      rows.push(numRow("center open 세로 (µm)",d,"center_gap_y_um"));
+      rows.push(numRow("center open 가로 (µm)",d,"center_gap_x_um","0.001"));
+      rows.push(numRow("center open 세로 (µm)",d,"center_gap_y_um","0.001"));
       rows.push(h("p",{class:"hint"},["intra-quad 트렌치 팔이 중앙 못 미쳐 끊김(가로/세로 open 길이) → 4픽셀 Si 가 직각 클로버로 연결. 식각면(사이드월+팔 끝벽)에 라이너 → 나머지 채움."]));
     } else rows.push(h("p",{class:"hint"},["식각 → 표면 라이너 → 채움. depth 는 Si 두께 전체."]));
     return rows; }},
- {t:"4 · BARL stack", d:"전면 다층 AR (개수·물질·두께)", body:()=>[ h("p",{class:"hint"},["아래→위 순서. 각 층 물질(폴더 연동)·두께."]), subEditor(S.stack.barl,[["material","material","mat"],["thickness","thickness_um","num"]]) ]},
+ {t:"4 · BARL stack", d:"전면 다층 AR (개수·물질·두께)", body:()=>[ h("p",{class:"hint"},["아래→위 순서. 각 층 물질(폴더 연동)·두께."]), subEditor(S.stack.barl,[["material","material","mat"],["thickness","thickness_um","num"]],"0.001") ]},
  {t:"5 · Grid", d:"n×n 배열·width·물질 stack(각 height)·표면 코팅", body:()=>{ const g=S.stack.grid; const pt=h("select",{}); [["1","1×1 (pixel)"],["2","2×2 (quad)"]].forEach(([v,tx])=>{const o=h("option",{value:v},[tx]); if(String(g.pitch||1)===v)o.selected=true; pt.appendChild(o);}); pt.onchange=()=>{g.pitch=parseInt(pt.value); renderViews();};
     const cc=h("input",{type:"checkbox"}); cc.checked=g.coat_on!==false; cc.onchange=()=>{g.coat_on=cc.checked; renderStep();};
     if(g.top_ratio==null)g.top_ratio=1.0;
-    const rows=[ h("div",{class:"row"},[h("label",{},["grid 배열"]),pt]), numRow("width 하부 (µm)",g,"width_um"),
-      numRow("top/bottom 비율 (0.8~1)",g,"top_ratio","0.05"),
-      h("div",{class:"seclbl"},["물질 stack (아래→위, 각 height) · 동일물질 연결"]), subEditor(g.stack,[["material","material","mat"],["height","height_um","num"]]),
+    const rows=[ h("div",{class:"row"},[h("label",{},["grid 배열"]),pt]), numRow("width 하부 (µm)",g,"width_um","0.001"),
+      numRow("top/bottom 비율 (0~1)",g,"top_ratio","0.1"),
+      h("div",{class:"seclbl"},["물질 stack (아래→위, 각 height) · 동일물질 연결"]), subEditor(g.stack,[["material","material","mat"],["height","height_um","num"]],"0.001"),
       h("div",{class:"seclbl"},["표면 코팅 (옆면+윗면)"]), h("div",{class:"row"},[h("label",{},["코팅 사용"]),cc]) ];
-    if(g.coat_on!==false){ rows.push(matRow("코팅 물질",g,"coat_material")); rows.push(numRow("코팅 두께 (µm)",g,"coat_um")); }
+    if(g.coat_on!==false){ rows.push(matRow("코팅 물질",g,"coat_material")); rows.push(numRow("코팅 두께 (µm)",g,"coat_um","0.001")); }
     return rows; }},
  {t:"6 · Color Filter", d:"CF array(Bayer/Tetra) + 컬러별 물질·두께·곡률 (표)", body:()=>{
     if(!S.cf_array)S.cf_array="bayer";
@@ -410,12 +436,12 @@ const STEPS=[
           i.oninput=()=>{f[key]=parseFloat(i.value)||0; renderViews();}; tr.appendChild(h("td",{},[i])); } });
       return tr; };
     tbl.appendChild(mkRow("물질","material"));
-    tbl.appendChild(mkRow("두께 µm","thickness_um"));
-    tbl.appendChild(mkRow("곡률 µm","curvature_um"));
+    tbl.appendChild(mkRow("두께 µm","thickness_um","0.001"));
+    tbl.appendChild(mkRow("곡률 µm","curvature_um","0.001"));
     return [ h("div",{class:"row"},[h("label",{},["CF array"]),arr]), tbl,
       h("p",{class:"hint"},["grid 울타리 셀 안 채움. 두께=벽에서의 높이, 곡률=셀 중앙 offset (+볼록/−오목 메니스커스)."]) ]; }},
  {t:"7 · Microlens", d:"풍선(balloon) 모델 — footprint(원/타원) 만 정하면 높이·곡률 자동", body:()=>{ const m=S.stack.ml; if(m.hr==null)m.hr=0.55;
-    const rows=[ matRow("ML 물질",m,"material"), numRow("평탄층 두께 (µm)",m,"planar_um"), numRow("h/r 비율 (0~1)",m,"hr") ];
+    const rows=[ matRow("ML 물질",m,"material"), numRow("평탄층 두께 (µm)",m,"planar_um","0.001"), numRow("h/r 비율 (0~1)",m,"hr") ];
     rows.push(h("p",{class:"hint"},["높이 = h/r × min(반경). 렌즈가 겹치면 교선에서 '찌부'(풍선 접촉) — 자동."]));
     rows.push(h("div",{class:"seclbl"},["quad 템플릿 (shape · scale)"]));
     const SH=[["2x2","2×2"],["2x1h","2×1 가로"],["2x1v","2×1 세로"],["1x1","1×1"]];
@@ -433,7 +459,7 @@ const STEPS=[
       h("span",{class:"hint",id:"mlInfo"},[""])]));
     setTimeout(()=>{drawMLedit(); wireMLedit();},0);
     return rows; }},
- {t:"8 · ARL top", d:"air→ML 사이 AR (물질·두께)", body:()=>[ matRow("ARL 물질",S.stack.arl_top,"material"), numRow("thickness (µm)",S.stack.arl_top,"thickness_um"),
+ {t:"8 · ARL top", d:"air→ML 사이 AR (물질·두께)", body:()=>[ matRow("ARL 물질",S.stack.arl_top,"material"), numRow("thickness (µm)",S.stack.arl_top,"thickness_um","0.001"),
     h("p",{class:"hint"},["여기까지가 구조 셋업. 우측에서 3D 확인 후 상단 '⤓ Generate .npy'."]) ]},
 ];
 function buildSteps(){ const st=el("steps"); st.innerHTML=""; STEPS.forEach((s,i)=>{ const c=h("div",{class:"schip"+(i===curStep?" on":(i<curStep?" done":"")),onclick:()=>{curStep=i; renderStep();}},[String(i+1)]); st.appendChild(c); }); }

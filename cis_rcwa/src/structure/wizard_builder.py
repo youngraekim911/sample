@@ -171,7 +171,7 @@ class WizardBuilder:
         dg = np.minimum(np.abs(self.X - np.round(self.X / per) * per),
                         np.abs(self.Y - np.round(self.Y / per) * per))
         W = float(g["width_um"])
-        ratio = min(1.0, max(0.8, float(g.get("top_ratio", 1) or 1)))   # 상부/하부 폭 비율
+        ratio = min(1.0, max(0.0, float(g.get("top_ratio", 1) or 0)))   # 상부/하부 폭 비율 (0~1)
         coat_id = self._id(g.get("coat_material", "oxide")) if cw > 0 else 0
         gbounds = []
         acc = 0.0
