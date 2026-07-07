@@ -57,6 +57,9 @@
   <div class="brand"><h1>CIS Structure Wizard</h1><span class="sub">step by step → 3D → npy</span></div>
   <div class="spacer"></div>
   <input id="prodName" type="text" placeholder="product name" style="width:150px">
+  <select id="viewQ" title="viewer 해상도 (npy 해상도는 step1 dxy/dz)" style="font-size:12px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px">
+    <option value="1">뷰 보통</option><option value="2" selected>뷰 고품질</option>
+  </select>
   <button class="btn ghost" id="themeBtn">◐</button>
   <button class="btn ghost" id="matBtn">📁 Materials</button>
   <button class="btn ghost" id="importBtn">⤒ Import</button>
@@ -100,6 +103,7 @@
 const DEFAULT = {
   product:"qcell_demo",
   grid:{ pixel_pitch_um:1.0, n_pixels:4, dxy_um:0.02, dz_um:0.02, air_margin_um:0.20 },
+  cf_array:"bayer",
   bayer:[["R","G","R","G"],["G","B","G","B"],["R","G","R","G"],["G","B","G","B"]],
   materials:{ air:{n:1,k:0}, si:{n:4.08,k:0.028}, oxide:{n:1.46,k:0}, arl_hi:{n:2.2,k:0}, arl_lo:{n:1.46,k:0},
     grid_metal:{n:0.4,k:3.4}, cf_red:{n:1.65,k:0.02}, cf_green:{n:1.65,k:0.02}, cf_blue:{n:1.65,k:0.02}, ml:{n:1.6,k:0}, ml_arl:{n:1.25,k:0} },
@@ -129,6 +133,12 @@ function parseNK(txt){ const rows=[]; txt.split(/\r?\n/).forEach(l=>{l=l.trim();
 function matColor(name){ const M={air:"#e9f1fb",si:"#3b3b3b",oxide:"#bcd4e6",grid_metal:"#141414",arl_hi:"#8b6fd0",arl_lo:"#a9c7d6",cf_red:"#e24a4a",cf_green:"#3fb34f",cf_blue:"#3f6fd0",ml:"#f2c14e",ml_arl:"#d9b3ff"};
   if(M[name])return M[name]; if(/red/.test(name))return"#e24a4a"; if(/green/.test(name))return"#3fb34f"; if(/blue/.test(name))return"#3f6fd0"; if(/metal/.test(name))return"#141414"; if(/oxide|arl_lo/.test(name))return"#bcd4e6"; if(/arl/.test(name))return"#8b6fd0"; if(/ml/.test(name))return"#f2c14e"; if(/si/.test(name))return"#3b3b3b"; return"#9aa"; }
 function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+const _rgbCache={};
+function rgbOf(name){ if(_rgbCache[name])return _rgbCache[name];
+  let h=matColor(name).replace('#',''); if(h.length===3)h=h.split('').map(c=>c+c).join('');
+  const n=parseInt(h,16); return _rgbCache[name]=[(n>>16)&255,(n>>8)&255,n&255]; }
+function rgbCss(v){ let h=css(v).trim().replace('#',''); if(h.length===3)h=h.split('').map(c=>c+c).join('');
+  const n=parseInt(h,16); return [(n>>16)&255,(n>>8)&255,n&255]; }
 
 // ============================ 구조 지오메트리 (xy 패턴 함수) ============================
 const P=()=>+S.grid.pixel_pitch_um, NP=()=>+S.grid.n_pixels;
@@ -137,6 +147,14 @@ function gridCoat(){ const g=S.stack.grid; return (g.coat_on!==false)?+(g.coat_u
 function gridTotalH(){ return gridStackH()+gridCoat(); }   // 코팅 top cap 포함
 function cfMaxH(){ return Math.max(S.stack.cf.R.thickness_um,S.stack.cf.G.thickness_um,S.stack.cf.B.thickness_um); }
 function colorRole(c){ return {R:"cf_red",G:"cf_green",B:"cf_blue"}[c]; }
+// CF array 패턴 생성: bayer(RGGB 픽셀) / tetra(2x2 quad 동일색, quad 단위 bayer)
+function setBayer(type){ const np=NP(), rows=[];
+  for(let r=0;r<np;r++){ const row=[];
+    for(let c=0;c<np;c++){ let rr=r,cc=c;
+      if(type==="tetra"){ rr=Math.floor(r/2); cc=Math.floor(c/2); }
+      row.push((rr%2===0)?((cc%2===0)?"R":"G"):((cc%2===0)?"G":"B")); }
+    rows.push(row); }
+  S.bayer=rows; }
 function bandH(){ return Math.max(cfMaxH(), gridTotalH()); }
 // DTI: 물질명|null(Si)  (center 안 뚫음=Si, 트렌치=oxide 라이너 + fill). ol <= W/2
 // DTI 모드: "1x1"(전체 격자) | "2x2"(quad 경계만) | "2x2_open"(클로버: intra-quad 팔이 중앙 못미쳐 끊김)
@@ -239,10 +257,12 @@ function _renderViews(){ _raf=null;
   build3D();
   // 미니 2D 패널: Front(좌하) · Top(중앙하) · Side(우하)
   const m=el("mini"); m.innerHTML="";
+  const q=+(el("viewQ")?el("viewQ").value:2), s2=q>=2?2:1.4;
   [["front","Front (XZ)"],["top","Top-down"],["side","Side (YZ)"]].forEach(([mode,lbl])=>{
     const box=document.createElement("div"); box.style.cssText="pointer-events:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px";
     const cap=document.createElement("div"); cap.className="hint"; cap.style.fontSize="10px"; cap.textContent=lbl;
-    const c=document.createElement("canvas"); c.width=220; c.height=150;
+    const c=document.createElement("canvas"); c.width=Math.round(250*s2); c.height=Math.round(170*s2);
+    c.style.width="250px"; c.style.height="170px";                 // 내부 고해상도, 표시 축소 -> 얇은층 선명
     box.appendChild(cap); box.appendChild(c); m.appendChild(box);
     if(mode==="top") drawTopDown(c); else drawSection(c, mode==="front"?"x":"y");
   });
@@ -250,29 +270,34 @@ function _renderViews(){ _raf=null;
   el("status").innerHTML=`step ${curStep+1}/8 · pitch ${P()}µm · ${NP()}×${NP()} · total ${totalH().toFixed(2)}µm · npy ${nx}×${nx}×${Math.round(totalH()/S.grid.dz_um)}`;
   save();
 }
-// top-down: 위에서 본 최상단 non-air 물질
+// top-down: 위에서 본 최상단 non-air 물질 (ImageData 1px — nm급 특징 표현)
 function drawTopDown(cv){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height,p=P(),span=p*NP(),pad=6; ctx.clearRect(0,0,W,H);
-  const sc=Math.min(W-2*pad,H-2*pad)/span,ox=(W-span*sc)/2,oy=(H-span*sc)/2,Ht=totalH(),B=2;
-  const N=Math.round(span*sc);
-  for(let px=0;px<N;px+=B)for(let py=0;py<N;py+=B){ const x=(px+B/2)/sc,y=span-(py+B/2)/sc;
-    let col=null; for(let zc=Ht-0.01; zc>0; zc-=Math.max(0.02,Ht/60)){ const mm=matAt(x,y,zc,curStep); if(mm!=="air"){col=matColor(mm);break;} }
-    if(col){ctx.fillStyle=col; ctx.fillRect(ox+px,oy+py,B,B);} }
-  ctx.strokeStyle=css("--line"); ctx.strokeRect(ox,oy,span*sc,span*sc);
+  const sc=Math.min(W-2*pad,H-2*pad)/span,ox=Math.round((W-span*sc)/2),oy=Math.round((H-span*sc)/2),Ht=totalH();
+  const N=Math.round(span*sc), bg=rgbCss("--panel"), img=ctx.createImageData(N,N), D=img.data;
+  const zstep=Math.max(0.01,Ht/90);
+  for(let py=0;py<N;py++){ const y=span-(py+0.5)/sc;
+    for(let px=0;px<N;px++){ const x=(px+0.5)/sc; let c=bg;
+      for(let zc=Ht-0.005; zc>0; zc-=zstep){ const mm=matAt(x,y,zc,curStep); if(mm!=="air"){c=rgbOf(mm);break;} }
+      const o=(py*N+px)*4; D[o]=c[0];D[o+1]=c[1];D[o+2]=c[2];D[o+3]=255; } }
+  ctx.putImageData(img,ox,oy);
+  ctx.strokeStyle=css("--line"); ctx.strokeRect(ox,oy,N,N);
 }
 function mkCanvas(w,h){ const wrap=document.createElement("div"); const cv=document.createElement("canvas"); cv.width=w; cv.height=h; wrap.appendChild(cv); return {wrap,cv}; }
 function usedMats(){ const u=new Set(["air",S.stack.si.material,S.stack.dti.liner,S.stack.dti.fill]); S.stack.barl.forEach(l=>u.add(l.material)); u.add(S.stack.grid.coat_material); S.stack.grid.stack.forEach(l=>u.add(l.material)); ["R","G","B"].forEach(c=>u.add(S.stack.cf[c].material)); u.add(S.stack.ml.material); u.add(S.stack.arl_top.material); return [...u]; }
 
-// 단면 (axis 'x'=front XZ / 'y'=side YZ). matAt 를 rasterize, curStep 까지만.
+// 단면 (axis 'x'=front XZ / 'y'=side YZ). ImageData 1px — 얇은 라이너/BARL 표현.
 function drawSection(cv, axis){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height; ctx.clearRect(0,0,W,H); ctx.fillStyle=css("--panel"); ctx.fillRect(0,0,W,H);
-  const p=P(),span=p*NP(),Ht=totalH(),padL=40,padB=22,padT=8,padR=8;
-  const sx=(W-padL-padR)/span, sz=(H-padB-padT)/Ht, cut=+el("cutY").value, B=2;   // 2px 블록(성능)
+  const p=P(),span=p*NP(),Ht=totalH(),padL=28,padB=16,padT=6,padR=6;
   const wpx=W-padL-padR, hpx=H-padB-padT;
-  for(let px=0;px<wpx;px+=B){ const u=(px+B/2)/sx;
-    for(let pz=0;pz<hpx;pz+=B){ const zc=(hpx-(pz+B/2))/sz; const x=axis==="x"?u:cut, y=axis==="x"?cut:u;
-      const m=matAt(x,y,zc,curStep); if(m==="air")continue; ctx.fillStyle=matColor(m); ctx.fillRect(padL+px,padT+pz,B,B); } }
-  ctx.strokeStyle=css("--line"); ctx.strokeRect(padL,padT,W-padL-padR,H-padB-padT);
-  ctx.fillStyle=css("--ink-faint"); ctx.font="10px "+css("--mono"); for(let t=0;t<=span+1e-6;t+=p)ctx.fillText(t.toFixed(0),padL+t*sx-3,H-8);
-  ctx.fillText((axis==="x"?"x":"y")+" [µm] · z↑ · cut "+(axis==="x"?"y":"x")+"="+cut.toFixed(2),W-150,16);
+  const sx=wpx/span, sz=hpx/Ht, cut=+el("cutY").value;
+  const bg=rgbCss("--panel"), img=ctx.createImageData(wpx,hpx), D=img.data;
+  for(let pz=0;pz<hpx;pz++){ const zc=(hpx-(pz+0.5))/sz;
+    for(let px=0;px<wpx;px++){ const u=(px+0.5)/sx; const x=axis==="x"?u:cut, y=axis==="x"?cut:u;
+      const m=matAt(x,y,zc,curStep); const c=(m==="air")?bg:rgbOf(m);
+      const o=(pz*wpx+px)*4; D[o]=c[0];D[o+1]=c[1];D[o+2]=c[2];D[o+3]=255; } }
+  ctx.putImageData(img,padL,padT);
+  ctx.strokeStyle=css("--line"); ctx.strokeRect(padL,padT,wpx,hpx);
+  ctx.fillStyle=css("--ink-faint"); ctx.font="9px "+css("--mono"); for(let t=0;t<=span+1e-6;t+=p)ctx.fillText(t.toFixed(0),padL+t*sx-3,H-5);
 }
 function drawTop(cv,which){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height,p=P(),np=NP(),span=p*np,pad=6; ctx.clearRect(0,0,W,H);
   const sc=Math.min(W-2*pad,H-2*pad)/span,ox=(W-span*sc)/2,oy=(H-span*sc)/2;
@@ -290,12 +315,14 @@ function shadeHex(hex,d){ hex=(hex||"#888").replace('#',''); if(hex.length===3)h
 let iso={faces:[],span:1,Ht:1};
 function build3D(){ const span=P()*NP(), Ht=totalH();
   if(curStep<1){ iso={faces:[],span,Ht}; redraw3D(); return; }
-  const nvx=38, dv=span/nvx, nvz=Math.max(12,Math.round(Ht/(Math.max(span,Ht)/56))), dvz=Ht/nvz;
-  const cutX=span*0.5, cutY=span*0.5;   // 한 사분면 잘라내어 내부 단면 노출
+  const q=+(el("viewQ")?el("viewQ").value:2);
+  const nvx=q>=2?64:44, dv=span/nvx, nvz=Math.max(16,Math.round(Ht/(Math.max(span,Ht)/(q>=2?92:60)))), dvz=Ht/nvz;
+  const cutOn=curStep>=2;                                // step2(Si만)는 내부 없음 -> 절단 안함
+  const cutX=span*0.5, cutY=span*0.5;
   const grid=[];
   for(let k=0;k<nvz;k++){ const pk=[]; const z=(k+0.5)*dvz;
     for(let j=0;j<nvx;j++){ const pj=[]; const y=(j+0.5)*dv;
-      for(let i=0;i<nvx;i++){ const x=(i+0.5)*dv; let m; if(x>cutX&&y>cutY)m="cut"; else { m=matAt(x,y,z,curStep); if(m==="air")m=null; } pj.push(m); }
+      for(let i=0;i<nvx;i++){ const x=(i+0.5)*dv; let m; if(cutOn&&x>cutX&&y>cutY)m="cut"; else { m=matAt(x,y,z,curStep); if(m==="air")m=null; } pj.push(m); }
       pk.push(pj);} grid.push(pk); }
   const cell=(i,j,k)=> (i<0||j<0||k<0||i>=nvx||j>=nvx||k>=nvz)?null:grid[k][j][i];
   const faces=[]; const dirs=[[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
@@ -319,7 +346,8 @@ function redraw3D(){ const cv=el("iso3d"); if(!cv)return; const ctx=cv.getContex
     const pj=f.c.map(q=>pr(q[0],q[1],q[2])); draw.push({pj,depth:(pj[0][2]+pj[1][2]+pj[2][2]+pj[3][2])/4,col:f.col,yn}); }
   draw.sort((a,b)=>b.depth-a.depth);
   for(const d of draw){ ctx.beginPath(); d.pj.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1])); ctx.closePath();
-    ctx.fillStyle=shadeHex(d.col, Math.round(-d.yn*34)); ctx.fill(); ctx.strokeStyle="rgba(0,0,0,.14)"; ctx.lineWidth=0.5; ctx.stroke(); }
+    const c=shadeHex(d.col, Math.round(-d.yn*34)); ctx.fillStyle=c; ctx.fill();
+    ctx.strokeStyle=c; ctx.lineWidth=0.75; ctx.stroke(); }   // 동일색 스트로크로 이음새 제거(마인크래프트 격자선 X)
   ctx.fillStyle=css("--ink-faint"); ctx.font="11px "+css("--mono"); ctx.fillText("3D cutaway · drag=rotate · wheel=zoom",12,18);
 }
 
@@ -366,11 +394,26 @@ const STEPS=[
       h("div",{class:"seclbl"},["표면 코팅 (옆면+윗면)"]), h("div",{class:"row"},[h("label",{},["코팅 사용"]),cc]) ];
     if(g.coat_on!==false){ rows.push(matRow("코팅 물질",g,"coat_material")); rows.push(numRow("코팅 두께 (µm)",g,"coat_um")); }
     return rows; }},
- {t:"6 · Color Filter", d:"grid 울타리 셀 안에 채움. 컬러별 물질·두께·상부 곡률", body:()=>[
-    h("p",{class:"hint"},["두께=벽(울타리)에서의 높이. 곡률=셀 중앙 offset (+볼록 / −오목 메니스커스) — RCWA 에 반영됨."]),
-    h("div",{class:"seclbl"},["Red"]), matRow("R 물질",S.stack.cf.R,"material"), numRow("R 두께 (µm)",S.stack.cf.R,"thickness_um"), numRow("R 곡률 (µm)",S.stack.cf.R,"curvature_um"),
-    h("div",{class:"seclbl"},["Green"]), matRow("G 물질",S.stack.cf.G,"material"), numRow("G 두께 (µm)",S.stack.cf.G,"thickness_um"), numRow("G 곡률 (µm)",S.stack.cf.G,"curvature_um"),
-    h("div",{class:"seclbl"},["Blue"]), matRow("B 물질",S.stack.cf.B,"material"), numRow("B 두께 (µm)",S.stack.cf.B,"thickness_um"), numRow("B 곡률 (µm)",S.stack.cf.B,"curvature_um") ]},
+ {t:"6 · Color Filter", d:"CF array(Bayer/Tetra) + 컬러별 물질·두께·곡률 (표)", body:()=>{
+    if(!S.cf_array)S.cf_array="bayer";
+    const arr=h("select",{}); [["bayer","Bayer (RGGB)"],["tetra","Tetra (2×2 동일색)"]].forEach(([v,t])=>{const o=h("option",{value:v},[t]); if(S.cf_array===v)o.selected=true; arr.appendChild(o);});
+    arr.onchange=()=>{ S.cf_array=arr.value; setBayer(arr.value); renderViews(); };
+    const tbl=h("table",{});
+    const cols=["G","B","R"], names={G:"Green",B:"Blue",R:"Red"};
+    tbl.appendChild(h("tr",{},[h("th",{},[""]),...cols.map(c=>h("th",{},[names[c]]))]));
+    const mkRow=(lb,key,step)=>{ const tr=h("tr",{},[h("td",{},[lb])]);
+      cols.forEach(c=>{ const f=S.stack.cf[c];
+        if(key==="material"){ const sel=h("select",{}); sel.style.width="100%";
+          Object.keys(S.materials).forEach(mn=>{const o=h("option",{value:mn},[mn]); if(f.material===mn)o.selected=true; sel.appendChild(o);});
+          sel.onchange=()=>{f.material=sel.value; renderViews();}; tr.appendChild(h("td",{},[sel])); }
+        else { const i=h("input",{type:"number",step:step||"0.01",value:f[key]!=null?f[key]:0}); i.style.width="100%";
+          i.oninput=()=>{f[key]=parseFloat(i.value)||0; renderViews();}; tr.appendChild(h("td",{},[i])); } });
+      return tr; };
+    tbl.appendChild(mkRow("물질","material"));
+    tbl.appendChild(mkRow("두께 µm","thickness_um"));
+    tbl.appendChild(mkRow("곡률 µm","curvature_um"));
+    return [ h("div",{class:"row"},[h("label",{},["CF array"]),arr]), tbl,
+      h("p",{class:"hint"},["grid 울타리 셀 안 채움. 두께=벽에서의 높이, 곡률=셀 중앙 offset (+볼록/−오목 메니스커스)."]) ]; }},
  {t:"7 · Microlens", d:"풍선(balloon) 모델 — footprint(원/타원) 만 정하면 높이·곡률 자동", body:()=>{ const m=S.stack.ml; if(m.hr==null)m.hr=0.55;
     const rows=[ matRow("ML 물질",m,"material"), numRow("평탄층 두께 (µm)",m,"planar_um"), numRow("h/r 비율 (0~1)",m,"hr") ];
     rows.push(h("p",{class:"hint"},["높이 = h/r × min(반경). 렌즈가 겹치면 교선에서 '찌부'(풍선 접촉) — 자동."]));
@@ -411,6 +454,7 @@ el("nextBtn").onclick=()=>{ if(curStep<STEPS.length-1){curStep++; renderStep();}
 })();
 el("resetView").onclick=()=>{ v3.yaw=-0.7; v3.pitch=0.55; v3.zoom=1; redraw3D(); };
 el("cutY").oninput=()=>renderViews();
+el("viewQ").onchange=()=>renderViews();
 el("themeBtn").onclick=()=>{ const r=document.documentElement,cur=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); r.setAttribute("data-theme",cur==="dark"?"light":"dark"); renderViews(); };
 el("matBtn").onclick=()=>el("matFolder").click();
 el("matFolder").onchange=async e=>{ let n=0; for(const f of [...e.target.files]){ if(!/\.txt$/i.test(f.name))continue; let t; try{t=await f.text();}catch(_){continue;} const nk=parseNK(t); if(!nk)continue; folderLib[f.name.replace(/\.txt$/i,"")]=nk; n++; }
@@ -429,38 +473,53 @@ function currentMLexport(){ return {schema:"cis_ml_shapes/2", quads:S.stack.ml.q
 // ===== step7 인라인 풍선 에디터 =====
 let mlDrag=null;
 function _mlScale(cv){ const span=P()*NP(),pad=10; const sc=(cv.width-2*pad)/span; return {sc,pad,span}; }
+function _mlSagOf(L,x,y,hr){ const u=(x-L.cx)/L.ax,v=(y-L.cy)/L.ay,r2=u*u+v*v;
+  return r2<1? hr*Math.min(L.ax,L.ay)*Math.sqrt(1-r2) : 0; }
 function drawMLedit(){ const cv=el("mlEdit"); if(!cv)return; const ctx=cv.getContext("2d"); const {sc,pad,span}=_mlScale(cv);
   const X=x=>pad+x*sc, Y=y=>cv.height-pad-y*sc;
   ctx.clearRect(0,0,cv.width,cv.height); ctx.fillStyle=css("--panel"); ctx.fillRect(0,0,cv.width,cv.height);
-  // sag heatmap (찌부 접촉선이 자연스럽게 보임)
-  const M=88,hmax=Math.max(mlMaxH(),1e-9);
-  for(let i=0;i<M;i++)for(let j=0;j<M;j++){ const x=span*(i+.5)/M,y=span*(j+.5)/M,s=mlSag(x,y); if(s<=0)continue;
-    ctx.fillStyle=`rgba(242,193,78,${0.12+0.88*s/hmax})`; ctx.fillRect(X(span*i/M),Y(span*(j+1)/M),span/M*sc+1,span/M*sc+1); }
-  // pixel grid
+  const Ls=mlLenses(), hr=mlHR(), hmax=Math.max(mlMaxH(),1e-9);
+  // 1) sag heatmap + 승자(id) 맵
+  const M=110, idm=new Int16Array(M*M);
+  for(let j=0;j<M;j++)for(let i=0;i<M;i++){ const x=span*(i+.5)/M,y=span*(j+.5)/M;
+    let best=0,bi=-1; for(let k=0;k<Ls.length;k++){ const s=_mlSagOf(Ls[k],x,y,hr); if(s>best){best=s;bi=k;} }
+    idm[j*M+i]=bi;
+    if(best>0){ ctx.fillStyle=`rgba(242,193,78,${0.10+0.85*best/hmax})`;
+      ctx.fillRect(X(span*i/M),Y(span*(j+1)/M),span/M*sc+1,span/M*sc+1); } }
+  // 2) 접촉선(찌부): 승자 id 가 바뀌는 경계
+  ctx.fillStyle=css("--accent");
+  for(let j=0;j<M-1;j++)for(let i=0;i<M-1;i++){ const a=idm[j*M+i]; if(a<0)continue;
+    const r=idm[j*M+i+1], d=idm[(j+1)*M+i];
+    if((r>=0&&r!==a)||(d>=0&&d!==a)) ctx.fillRect(X(span*i/M),Y(span*(j+1)/M),1.6,1.6); }
+  // 3) pixel grid
   ctx.strokeStyle=css("--line"); ctx.lineWidth=1; const p=P();
   for(let t=0;t<=span+1e-6;t+=p){ ctx.beginPath();ctx.moveTo(X(t),Y(0));ctx.lineTo(X(t),Y(span));ctx.stroke(); ctx.beginPath();ctx.moveTo(X(0),Y(t));ctx.lineTo(X(span),Y(t));ctx.stroke(); }
-  // lens 외곽 + 중심
-  const hr=mlHR();
-  mlLenses().forEach((L,i)=>{ ctx.beginPath(); ctx.ellipse(X(L.cx),Y(L.cy),L.ax*sc,L.ay*sc,0,0,2*Math.PI);
-    ctx.strokeStyle=css("--accent"); ctx.lineWidth=(mlDrag&&mlDrag.i===i)?2.5:1.4; ctx.stroke();
+  // 4) 윤곽선: 이웃 풍선에 먹힌 구간은 제외(찌부된 자유호만) -> 겹쳐 보이지 않음
+  Ls.forEach((L,li)=>{ ctx.strokeStyle=css("--accent"); ctx.lineWidth=(mlDrag&&mlDrag.i===li)?2.4:1.4;
+    ctx.beginPath(); let pen=false; const NA=180;
+    for(let a=0;a<=NA;a++){ const t=2*Math.PI*a/NA, bx=L.cx+L.ax*Math.cos(t), by=L.cy+L.ay*Math.sin(t);
+      let cov=false; for(let k=0;k<Ls.length;k++){ if(k===li)continue; if(_mlSagOf(Ls[k],bx,by,hr)>1e-9){cov=true;break;} }
+      if(cov){ pen=false; continue; }
+      if(!pen){ ctx.moveTo(X(bx),Y(by)); pen=true; } else ctx.lineTo(X(bx),Y(by)); }
+    ctx.stroke();
     ctx.beginPath(); ctx.arc(X(L.cx),Y(L.cy),3,0,2*Math.PI); ctx.fillStyle=css("--accent"); ctx.fill(); });
-  const info=el("mlInfo"); if(info){ const n=mlLenses().length; info.textContent=`${n} lenses · h/r=${hr.toFixed(2)} · max h=${mlMaxH().toFixed(3)}µm`; }
+  const info=el("mlInfo"); if(info) info.textContent=`${Ls.length} lenses · h/r=${hr.toFixed(2)} · max h=${mlMaxH().toFixed(3)}µm`;
 }
 function wireMLedit(){ const cv=el("mlEdit"); if(!cv||cv._wired)return; cv._wired=true;
   const um=ev=>{ const r=cv.getBoundingClientRect(); const {sc,pad,span}=_mlScale(cv);
     return [ (ev.clientX-r.left-pad)/sc, span-(ev.clientY-r.top-pad)/sc ]; };
+  const matz=()=>{ if(!S.stack.ml.lenses||!S.stack.ml.lenses.length) S.stack.ml.lenses=mlTemplateLenses().map(L=>({...L})); };
   cv.addEventListener("pointerdown",ev=>{ const [x,y]=um(ev); const Ls=mlLenses(); const p=P();
     for(let i=Ls.length-1;i>=0;i--){ const L=Ls[i]; const u=(x-L.cx)/L.ax,v=(y-L.cy)/L.ay,r=Math.hypot(u,v);
-      if(Math.abs(r-1)*Math.min(L.ax,L.ay)<0.09*p){ matz(); mlDrag={i,mode:"size"}; break; }
-      if(r<0.55){ matz(); mlDrag={i,mode:"move",dx:x-L.cx,dy:y-L.cy}; break; } }
-    function matz(){ if(!S.stack.ml.lenses||!S.stack.ml.lenses.length) S.stack.ml.lenses=mlTemplateLenses().map(L=>({...L})); }
+      if(r<1&&Math.abs(r-1)*Math.min(L.ax,L.ay)<0.07*p){ matz(); mlDrag={i,mode:"size"}; break; }   // 가장자리 얇은 밴드=크기
+      if(r<1){ matz(); mlDrag={i,mode:"move",dx:x-L.cx,dy:y-L.cy}; break; } }                        // 내부 어디든=이동
     if(mlDrag)cv.setPointerCapture(ev.pointerId); });
   cv.addEventListener("pointermove",ev=>{ if(!mlDrag)return; const [x,y]=um(ev); const L=S.stack.ml.lenses[mlDrag.i]; const p=P();
     if(mlDrag.mode==="move"){ L.cx=x-mlDrag.dx; L.cy=y-mlDrag.dy; }
     else { const dx=Math.abs(x-L.cx),dy=Math.abs(y-L.cy);
       if(dx>dy) L.ax=Math.min(2.2*p,Math.max(0.12*p,dx)); else L.ay=Math.min(2.2*p,Math.max(0.12*p,dy)); }
-    drawMLedit(); renderViews(); });
-  cv.addEventListener("pointerup",()=>{ mlDrag=null; drawMLedit(); save(); });
+    drawMLedit(); save(); });                                    // 드래그 중: 2D 찌부만 실시간
+  cv.addEventListener("pointerup",()=>{ mlDrag=null; drawMLedit(); renderViews(); save(); });  // 놓으면 3D 반영
 }
 window.addEventListener("message",e=>{ const d=e.data;
   if(d&&d.type==="ml_request"){ try{ (e.source||mlWin).postMessage(currentMLexport(),"*"); }catch(_){} }
