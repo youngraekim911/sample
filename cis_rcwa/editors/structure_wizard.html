@@ -382,21 +382,19 @@ function npyHeader(shape){ const hdr=`{'descr': '|u1', 'fortran_order': False, '
 function npyU8(arr,shape){ const h=npyHeader(shape);
   const out=new Uint8Array(h.length+arr.length); out.set(h,0); out.set(arr,h.length); return out; }
 // 4GB 초과 npy: 디스크로 슬랩(z단면)별 스트리밍 저장 (File System Access API, Chrome/Edge)
-async function exportNpyStream(onProg){
-  const Pp=await buildVoxPrep(); const {nx,ny,nz,nP,names,dxy,dz,fillSlab}=Pp;
-  const handle=await window.showSaveFilePicker({
-    suggestedName:pname()+"_matid.npy",
-    types:[{description:"NumPy array",accept:{"application/octet-stream":[".npy"]}}]});
+// handle 은 클릭 핸들러에서 미리 획득 (picker 는 user gesture 중에만 열림 — 프리컴퓨트 후엔 만료)
+async function exportNpyStream(handle,onProg){
   const w=await handle.createWritable();
   try{
+    const {nx,ny,nz,nP,names,dxy,dz,fillSlab}=await buildVoxPrep();
     await w.write(npyHeader([nz,ny,nx]));
     const slab=new Uint8Array(nP);
     for(let zi=0;zi<nz;zi++){ fillSlab(zi,slab,0);
       await w.write(slab.slice());                       // write 는 버퍼 소유 -> 복사본 전달
       if(onProg&&(zi&7)===0) onProg(zi/nz); }
     await w.close();
+    return {shape:[nz,ny,nx],names,dxy,dz,bytes:nz*nP};
   }catch(err){ try{await w.abort();}catch(_){} throw err; }
-  return {shape:[nz,ny,nx],names,dxy,dz,bytes:nz*nP};
 }
 
 // ============================ 렌더 ============================
@@ -441,12 +439,35 @@ function drawTopDown(cv){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height,p
   const zstep=Math.max(0.01,Ht/90);
   for(let py=0;py<N;py++){ const y=span-(py+0.5)/sc;
     for(let px=0;px<N;px++){ const x=(px+0.5)/sc; let c=bg;
-      for(let zc=Ht-0.005; zc>0; zc-=zstep){ const mm=matFast(x,y,zc,curStep); if(mm!=="air"){c=rgbOf(mm);break;} }
+      for(let zc=Ht-0.005; zc>0; zc-=zstep){ if(matFast(x,y,zc,curStep)!=="air"){
+          // 표면 정련: zstep(~40nm)이 얇은 top 코팅(20nm)을 건너뛰고 내부(metal)를 칠하는 것 방지
+          let lo=zc,hi=Math.min(Ht,zc+zstep);
+          for(let t=0;t<6;t++){ const mid=(lo+hi)/2; if(matFast(x,y,mid,curStep)!=="air")lo=mid; else hi=mid; }
+          c=rgbOf(matFast(x,y,Math.max(1e-4,lo-1e-4),curStep)); break; } }
       const o=(py*N+px)*4; D[o]=c[0];D[o+1]=c[1];D[o+2]=c[2];D[o+3]=255; } }
   ctx.putImageData(img,ox,oy);
   ctx.strokeStyle=css("--line"); ctx.strokeRect(ox,oy,N,N);
 }
 function mkCanvas(w,h){ const wrap=document.createElement("div"); const cv=document.createElement("canvas"); cv.width=w; cv.height=h; wrap.appendChild(cv); return {wrap,cv}; }
+// 물질별 '최소 특성 두께'(µm) — 혼합 픽셀에서 '더 얇은 층' 우선 표시용.
+// (기존 '샘플 최소빈도' 투표는 벽 머리처럼 bulk(metal)가 국소적으로 더 드문 곳에서
+//  20nm top 코팅을 metal 로 덮어버리는 정렬 의존 버그가 있었음 -> 결정적 rank 로 교체)
+function matRanks(){ const s=S.stack, r={};
+  const put=(m,t)=>{ if(!m)return; t=+t||0; if(t<=0)t=1e-3; r[m]=Math.min(r[m]!=null?r[m]:1e9, t); };
+  put(s.si.material,+s.si.thickness_um);
+  put(s.dti.liner,+s.dti.oxide_liner_um);
+  put(s.dti.fill,+s.dti.width_um);
+  for(const l of s.barl) put(l.material,+l.thickness_um);
+  const g=s.grid; for(const l of g.stack) put(l.material,Math.min(+l.height_um,+g.width_um));
+  if(gridCoat()>0) put(g.coat_material||"oxide",gridCoat());
+  for(const c of ["R","G","B"]) put(s.cf[c].material,+s.cf[c].thickness_um);
+  put(s.ml.material,+(s.ml.planar_um||0.3));
+  put(s.arl_top.material,+s.arl_top.thickness_um);
+  return r; }
+// 혼합 픽셀 대표색: 비-air 중 rank(특성 두께) 최소 물질. 동률이면 샘플 수 적은 쪽(경계 얇은층)
+function pickThin(cnt,RANK){ let best=null,br=1e18,bc=1e9;
+  for(const k in cnt){ if(k==="air")continue; const rk=(RANK[k]!=null?RANK[k]:1);
+    if(rk<br||(rk===br&&cnt[k]<bc)){br=rk;bc=cnt[k];best=k;} } return best; }
 function usedMats(){ const u=new Set(["air",S.stack.si.material,S.stack.dti.liner,S.stack.dti.fill]); S.stack.barl.forEach(l=>u.add(l.material)); u.add(S.stack.grid.coat_material); S.stack.grid.stack.forEach(l=>u.add(l.material)); ["R","G","B"].forEach(c=>u.add(S.stack.cf[c].material)); u.add(S.stack.ml.material); u.add(S.stack.arl_top.material); return [...u]; }
 
 // 단면 (axis 'x'=front XZ / 'y'=side YZ). ImageData 1px — 얇은 라이너/BARL 표현.
@@ -455,8 +476,8 @@ function drawSection(cv, axis){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.he
   const wpx=W-padL-padR, hpx=H-padB-padT;
   const sx=wpx/span, sz=hpx/Ht, cut=+el("cutY").value;
   const bg=rgbCss("--panel"), img=ctx.createImageData(wpx,hpx), D=img.data;
-  // 픽셀당 5점 샘플: 전부 같으면 그 값, 다르면 '가장 드문' 물질(=얇은층: 1nm 라이너/BARL) 표시
-  const OFF=[[0.5,0.5],[0.12,0.12],[0.88,0.12],[0.12,0.88],[0.88,0.88]];
+  // 픽셀당 5점 샘플: 전부 같으면 그 값, 다르면 '특성 두께가 가장 얇은' 물질(라이너/코팅/BARL) 우선
+  const OFF=[[0.5,0.5],[0.12,0.12],[0.88,0.12],[0.12,0.88],[0.88,0.88]], RANK=matRanks();
   for(let pz=0;pz<hpx;pz++){
     for(let px=0;px<wpx;px++){
       let m0=null,all=true; const cnt={};
@@ -466,9 +487,7 @@ function drawSection(cv, axis){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.he
         if(m0===null)m0=m; else if(m!==m0)all=false;
         cnt[m]=(cnt[m]||0)+1; }
       let m=m0;
-      if(!all){ let best=null,bc=99;
-        for(const k in cnt){ if(k==="air")continue; if(cnt[k]<bc){bc=cnt[k];best=k;} }
-        m=best||m0; }
+      if(!all) m=pickThin(cnt,RANK)||m0;
       const c=(m==="air")?bg:rgbOf(m);
       const o=(pz*wpx+px)*4; D[o]=c[0];D[o+1]=c[1];D[o+2]=c[2];D[o+3]=255; } }
   ctx.putImageData(img,padL,padT);
@@ -492,14 +511,14 @@ let iso3={valid:false};
 function sectionImage(axis,cutPos,W0,H0){ const span=P()*NP(), Ht=totalH();
   const cnv=document.createElement("canvas"); cnv.width=W0; cnv.height=H0;
   const c2=cnv.getContext("2d"); const img=c2.createImageData(W0,H0), D=img.data;
-  const OFF=[[0.5,0.5],[0.15,0.15],[0.85,0.15],[0.15,0.85],[0.85,0.85]];
+  const OFF=[[0.5,0.5],[0.15,0.15],[0.85,0.15],[0.15,0.85],[0.85,0.85]], RANK=matRanks();
   const sx=W0/span, sz=H0/Ht;
   for(let pz=0;pz<H0;pz++){ for(let px=0;px<W0;px++){
     let m0=null,all=true; const cnt={};
     for(const [ou,oz] of OFF){ const u=(px+ou)/sx, zc=(H0-(pz+oz))/sz;
       const x=axis==="x"?u:cutPos, y=axis==="x"?cutPos:u;
       const m=matFast(x,y,zc,curStep); if(m0===null)m0=m; else if(m!==m0)all=false; cnt[m]=(cnt[m]||0)+1; }
-    let m=m0; if(!all){ let best=null,bc=99; for(const k in cnt){ if(k==="air")continue; if(cnt[k]<bc){bc=cnt[k];best=k;} } m=best||m0; }
+    let m=m0; if(!all) m=pickThin(cnt,RANK)||m0;
     const o=(pz*W0+px)*4;
     if(m!=="air"){ const c=rgbOf(m); D[o]=c[0];D[o+1]=c[1];D[o+2]=c[2];D[o+3]=255; } } }
   c2.putImageData(img,0,0); return cnv; }
@@ -508,7 +527,7 @@ function build3D(){ const span=P()*NP(), Ht=totalH();
   const q=+(el("viewQ")?el("viewQ").value:2);
   const N=q>=2?116:80, SW=q>=2?440:300, SH=Math.max(70,Math.round(SW*Ht/span));
   const cutOn=!!(el("cutChk")&&el("cutChk").checked), cx=span/2, cyv=span/2;
-  const Hf=new Float32Array(N*N), Cf=new Array(N*N).fill(null), dxy=span/N, zStep=Ht/150;
+  const Hf=new Float32Array(N*N), Cf=new Array(N*N).fill(null), dxy=span/N, zStep=Ht/150, RANK=matRanks();
   for(let j=0;j<N;j++){ const y=(j+0.5)*dxy;
     for(let i=0;i<N;i++){ const x=(i+0.5)*dxy;
       if(cutOn&&x>cx&&y>cyv) continue;
@@ -522,7 +541,7 @@ function build3D(){ const span=P()*NP(), Ht=totalH();
       if(bestZ<0) continue;
       let lo=bestZ,hi=Math.min(Ht,bestZ+zStep);
       for(let t=0;t<6;t++){ const mid=(lo+hi)/2; if(matFast(bestX,bestY,mid,curStep)!=="air")lo=mid; else hi=mid; }
-      // 윗면 색: 9점 샘플 -> 섞이면 '최소 빈도' 비-air 물질(얇은 라이너/트렌치) 우선
+      // 윗면 색: 9점 샘플 -> 섞이면 '특성 두께 최소' 비-air 물질(얇은 라이너/코팅/트렌치) 우선
       const zc0=Math.max(1e-4,lo-1e-4), cnt={}; let m0=null, mixed=false;
       for(const [ox,oy] of [[0,0],[-0.45,0],[0.45,0],[0,-0.45],[0,0.45],[-0.45,-0.45],[0.45,-0.45],[-0.45,0.45],[0.45,0.45]]){
         const xs=Math.min(span-1e-6,Math.max(1e-6,x+ox*dxy)), ys=Math.min(span-1e-6,Math.max(1e-6,y+oy*dxy));
@@ -530,7 +549,7 @@ function build3D(){ const span=P()*NP(), Ht=totalH();
         if(m0===null)m0=cc; else if(cc!==m0)mixed=true;
         cnt[cc]=(cnt[cc]||0)+1; }
       let col=m0;
-      if(mixed){ let best=null,bc=99; for(const k in cnt){ if(k==="air")continue; if(cnt[k]<bc){bc=cnt[k];best=k;} } col=best||m0; }
+      if(mixed) col=pickThin(cnt,RANK)||m0;
       if(col==="air")col=matFast(bestX,bestY,zc0,curStep);
       Hf[j*N+i]=lo; Cf[j*N+i]=col; } }
   const eps=Math.min(0.003,span/1500);
@@ -817,13 +836,17 @@ el("npyBtn").onclick=async()=>{ const btn=el("npyBtn"), t0=btn.textContent;
     if(!isFinite(bytes)||bytes>4.0e9){
       const gb=(bytes/1e9).toFixed(1);
       if(window.showSaveFilePicker){
-        // 메모리에 다 안 올라가는 크기 -> 디스크로 z-슬랩 스트리밍 저장
-        if(!confirm(`npy ${nx}×${nx}×${nz} ≈ ${gb} GB — 메모리 한계(4GB) 초과라\n`+
-                    `디스크로 직접 스트리밍 저장합니다 (저장 위치 선택 창이 뜸).\n`+
-                    `meta.json / yaml 은 함께 다운로드됩니다. 진행할까요?`)) return;
+        // 메모리에 다 안 올라가는 크기 -> 디스크로 z-슬랩 스트리밍 저장.
+        // picker 는 클릭 제스처 안에서 '가장 먼저' 호출 (confirm/프리컴퓨트 후엔 gesture 만료).
+        // 저장 위치 선택 창 자체가 확인 역할 (취소 = 중단).
+        let handle;
+        try{ handle=await window.showSaveFilePicker({
+               suggestedName:pname()+"_matid.npy",
+               types:[{description:"NumPy array",accept:{"application/octet-stream":[".npy"]}}]}); }
+        catch(err){ return; }                                  // 사용자가 취소(AbortError)
         btn.disabled=true;
         try{
-          const v=await exportNpyStream(f=>{btn.textContent="스트리밍 "+Math.round(f*100)+"%";});
+          const v=await exportNpyStream(handle,f=>{btn.textContent="스트리밍 "+Math.round(f*100)+"% ("+gb+"GB)";});
           const nm=pname();
           const leg={product:S.product,shape_zyx:v.shape,voxel_um:{dz:v.dz,dy:v.dxy,dx:v.dxy},
             materials:v.names.map((n,i)=>({id:i,name:n,...matNK(n)}))};
