@@ -407,12 +407,16 @@ function build3D(){ const span=P()*NP(), Ht=totalH();
       if(bestZ<0) continue;
       let lo=bestZ,hi=Math.min(Ht,bestZ+zStep);
       for(let t=0;t<6;t++){ const mid=(lo+hi)/2; if(matAt(bestX,bestY,mid,curStep)!=="air")lo=mid; else hi=mid; }
-      let col=matAt(bestX,bestY,Math.max(1e-4,lo-1e-4),curStep);
-      // 윗면 얇은 피처(라이너/트렌치 fill): 8점 색 샘플, 중심과 다른 비-air 우선
-      for(const [ox,oy] of [[-0.45,0],[0.45,0],[0,-0.45],[0,0.45],[-0.45,-0.45],[0.45,-0.45],[-0.45,0.45],[0.45,0.45]]){
+      // 윗면 색: 9점 샘플 -> 섞이면 '최소 빈도' 비-air 물질(얇은 라이너/트렌치) 우선
+      const zc0=Math.max(1e-4,lo-1e-4), cnt={}; let m0=null, mixed=false;
+      for(const [ox,oy] of [[0,0],[-0.45,0],[0.45,0],[0,-0.45],[0,0.45],[-0.45,-0.45],[0.45,-0.45],[-0.45,0.45],[0.45,0.45]]){
         const xs=Math.min(span-1e-6,Math.max(1e-6,x+ox*dxy)), ys=Math.min(span-1e-6,Math.max(1e-6,y+oy*dxy));
-        const cc=matAt(xs,ys,Math.max(1e-4,lo-1e-4),curStep);
-        if(cc!=="air"&&cc!==col){ col=cc; break; } }
+        const cc=matAt(xs,ys,zc0,curStep);
+        if(m0===null)m0=cc; else if(cc!==m0)mixed=true;
+        cnt[cc]=(cnt[cc]||0)+1; }
+      let col=m0;
+      if(mixed){ let best=null,bc=99; for(const k in cnt){ if(k==="air")continue; if(cnt[k]<bc){bc=cnt[k];best=k;} } col=best||m0; }
+      if(col==="air")col=matAt(bestX,bestY,zc0,curStep);
       Hf[j*N+i]=lo; Cf[j*N+i]=col; } }
   const eps=Math.min(0.003,span/1500);
   const walls={ f:sectionImage("x",eps,SW,SH), b:sectionImage("x",span-eps,SW,SH),
