@@ -122,6 +122,11 @@ const DEFAULT = {
 let refLambda=0.55, folderLib={}, curStep=0, viewMode="iso";
 let S=(function(){ try{const j=localStorage.getItem("cis_wizard_v3"); if(j){const d=JSON.parse(j);
   if(d.refLambda)refLambda=d.refLambda; if(d.folderLib)folderLib=d.folderLib; if(d.S)return d.S;} }catch(e){} return structuredClone(DEFAULT); })();
+// voxel 해상도 가드: 0.01~0.02µm (최소 피처 20nm 보존, nm급은 npy 용량만 세제곱 폭발)
+function clampRes(){ const g=S.grid;
+  g.dxy_um=Math.min(0.02,Math.max(0.01,+g.dxy_um||0.02));
+  g.dz_um =Math.min(0.02,Math.max(0.01,+g.dz_um ||0.02)); }
+clampRes();
 function save(){ try{localStorage.setItem("cis_wizard_v3",JSON.stringify({S,refLambda,folderLib}));}catch(e){} }
 
 // ============================ 물질 ============================
@@ -649,7 +654,8 @@ function subEditor(arr, fields, st){ // fields: [['material','mat'],['두께','t
 }
 const STEPS=[
  {t:"1 · Pixel array", d:"pitch 와 n×n 배열", body:()=>[ numRow("pixel pitch (µm)",S.grid,"pixel_pitch_um","0.01"), numRow("n × n",S.grid,"n_pixels","1"),
-    h("div",{class:"seclbl"},["voxel 해상도"]), numRow("dxy (µm)",S.grid,"dxy_um","0.001"), numRow("dz (µm)",S.grid,"dz_um","0.001"), numRow("air margin (µm)",S.grid,"air_margin_um","0.01") ]},
+    h("div",{class:"seclbl"},["voxel 해상도 (0.01~0.02 — 최소 피처 20nm 보존, nm급은 용량만 커짐)"]),
+    numRow("dxy (µm) 0.01~0.02",S.grid,"dxy_um","0.001",0.01,0.02), numRow("dz (µm) 0.01~0.02",S.grid,"dz_um","0.001",0.01,0.02), numRow("air margin (µm)",S.grid,"air_margin_um","0.01") ]},
  {t:"2 · Si substrate", d:"물질(n,k 폴더 연동) 과 두께. DTI depth = 이 두께", body:()=>[ matRow("Si 물질",S.stack.si,"material"), numRow("thickness (µm)",S.stack.si,"thickness_um","0.1") ]},
  {t:"3 · DTI", d:"Si 식각 → 판 표면 oxide 라이너 → 채움. depth = Si 두께", body:()=>{ const d=S.stack.dti;
     const cur=dtiMode();
@@ -901,7 +907,7 @@ function parseYAML(text){ const lines=text.replace(/\t/g,"  ").split("\n").map(l
     if(s[j]==="{"){j++;const o={};ws();if(s[j]==="}"){j++;return o;} while(true){ws();let k="";while(j<s.length&&s[j]!==":"){k+=s[j++];}j++;o[k.trim()]=val();ws();if(s[j]===","){j++;continue;}if(s[j]==="}"){j++;break;}break;}return o;}
     if(s[j]==='"'){let k=j+1,str="";while(k<s.length&&s[k]!=='"'){str+=s[k++];}j=k+1;return str;} let t="";while(j<s.length&&!/[,\]}]/.test(s[j])){t+=s[j++];} return sc(t.trim()); } return val(); }
   function sc(s){ if(s===""||s==null)return null; if(s[0]==='"'&&s[s.length-1]==='"')return JSON.parse(s); if(s==="true")return true; if(s==="false")return false; if(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s))return parseFloat(s); return s; } }
-function loadStruct(obj){ S=Object.assign(structuredClone(DEFAULT),obj); if(obj.stack)S.stack=Object.assign(structuredClone(DEFAULT.stack),obj.stack); if(obj.materials)S.materials=Object.assign(structuredClone(DEFAULT.materials),obj.materials); prod.value=S.product||""; curStep=0; renderStep(); }
+function loadStruct(obj){ S=Object.assign(structuredClone(DEFAULT),obj); if(obj.stack)S.stack=Object.assign(structuredClone(DEFAULT.stack),obj.stack); if(obj.materials)S.materials=Object.assign(structuredClone(DEFAULT.materials),obj.materials); clampRes(); prod.value=S.product||""; curStep=0; renderStep(); }
 
 // ============================ init ============================
 renderStep();
