@@ -212,8 +212,9 @@ function totalH(){ const s=S.stack; return +s.si.thickness_um + s.barl.reduce((a
 // ============================ npy voxel 빌드 ============================
 // planar band 높이: 평탄층 두께는 '최저 CF top' 기준. (tall CF/grid 는 덮도록 max)
 function cfMinH(){ return Math.min(S.stack.cf.R.thickness_um,S.stack.cf.G.thickness_um,S.stack.cf.B.thickness_um); }
-function cfTopMax(){ return Math.max(...["R","G","B"].map(c=>{const f=S.stack.cf[c];return +f.thickness_um+Math.max(0,+(f.curvature_um||0));})); }
-function cfTopMin(){ return Math.min(...["R","G","B"].map(c=>{const f=S.stack.cf[c];return +f.thickness_um+Math.min(0,+(f.curvature_um||0));})); }
+// 응집 프로파일 극값: k>0 -> max=t+2k/3(중앙), min=t-4k/3(코너) / k<0 반대
+function cfTopMax(){ return Math.max(...["R","G","B"].map(c=>{const f=S.stack.cf[c],k=+(f.curvature_um||0);return +f.thickness_um+Math.max(2*k/3,-4*k/3);})); }
+function cfTopMin(){ return Math.min(...["R","G","B"].map(c=>{const f=S.stack.cf[c],k=+(f.curvature_um||0);return Math.max(0.002,+f.thickness_um+Math.min(2*k/3,-4*k/3));})); }
 function planarSpan(){ return Math.max(cfTopMin()+ +S.stack.ml.planar_um, cfTopMax(), gridTotalH()); }
 // 임의 점 (x,y,zc[um]) 의 물질 — upto: 표시할 최대 단계(=curStep, 99=전체)
 function matAt(x,y,zc,upto){ if(upto==null)upto=99; const s=S.stack,p=P(),np=NP();
@@ -225,9 +226,9 @@ function matAt(x,y,zc,upto){ if(upto==null)upto=99; const s=S.stack,p=P(),np=NP(
     const gm=(upto>=4)?gridAt(x,y,zabs):null; if(gm)return gm;            // grid 울타리
     if(upto>=5){ const pr=Math.min(np-1,Math.floor(y/p)),pc=Math.min(np-1,Math.floor(x/p)),col=colorRole(S.bayer[pr][pc]);
       const cfc=s.cf[{cf_red:"R",cf_green:"G",cf_blue:"B"}[col]];
-      // 액체 메니스커스: CF array 단위 셀(bayer=1x1, tetra=2x2), 원형(radial) 프로파일
+      // 응집(cohesion) 모델: 셀 평균두께 = thickness (볼륨 보존). k>0 중앙 응집/k<0 벽 젖음
       const per=((S.cf_array==="tetra")?2:1)*p, u=(x-(Math.floor(x/per)+0.5)*per)/(per/2), v=(y-(Math.floor(y/per)+0.5)*per)/(per/2);
-      const zTop=+cfc.thickness_um + (+(cfc.curvature_um||0))*(1-Math.min(1,u*u+v*v));
+      const zTop=Math.max(0.002, +cfc.thickness_um + (+(cfc.curvature_um||0))*(2/3-(u*u+v*v)));
       if(zabs<=zTop)return col; }  // 울타리 안 CF (곡면 top)
     if(upto>=6)return s.ml.material;    // 평탄화 fill
     return "air"; }
@@ -253,7 +254,7 @@ async function buildGC(){ const gen=++GCgen;
       gD[k]=Math.min(Math.abs(x-Math.round(x/per)*per), Math.abs(y-Math.round(y/per)*per));
       const pr=Math.min(np-1,Math.floor(y/p)), pc=Math.min(np-1,Math.floor(x/p)), col=S.bayer[pr][pc];
       const u=(x-(Math.floor(x/cfPer)+0.5)*cfPer)/(cfPer/2), v=(y-(Math.floor(y/cfPer)+0.5)*cfPer)/(cfPer/2);
-      cfT[k]=th[col]+cvv[col]*(1-Math.min(1,u*u+v*v));
+      cfT[k]=Math.max(0.002, th[col]+cvv[col]*(2/3-(u*u+v*v)));
       cfI[k]=cfIds[col]; }
     if((j&63)===63){ if(gen!==GCgen)return null; await new Promise(r=>setTimeout(r,0)); if(gen!==GCgen)return null; } }
   // sag: 렌즈별 bbox 만 순회 (per-cell 16렌즈 루프 대비 ~16x 고속)
@@ -275,6 +276,26 @@ async function buildGC(){ const gen=++GCgen;
       mlName:st.ml.material, arlName:st.arl_top.material, arlT:+st.arl_top.thickness_um};
   return GC; }
 // matAt 과 동일 결과, 캐시 조회 기반 (뷰 전용 고속 경로)
+// fence 단면 확대 (벡터: 실제 nm 스케일 확대 표시)
+function drawFenceZoom(cv){ if(!cv)return; const ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  const g=S.stack.grid, gw=+g.width_um, ratio=Math.min(1,Math.max(0,+(g.top_ratio!=null?g.top_ratio:1)||0));
+  const cw=gridCoat(), gH=gridStackH(); if(gH<=0)return;
+  const scX=(W*0.55)/(gw+2*cw), scZ=(H-30)/(gH+cw), cx=W/2, z0=H-18;
+  const X=x=>cx+x*scX, Z=z=>z0-z*scZ;
+  if(cw>0){ ctx.fillStyle=matColor(g.coat_material||"oxide"); ctx.beginPath();
+    ctx.moveTo(X(-gw/2-cw),Z(0)); ctx.lineTo(X(gw/2+cw),Z(0)); ctx.lineTo(X(gw*ratio/2+cw),Z(gH+cw));
+    ctx.lineTo(X(-gw*ratio/2-cw),Z(gH+cw)); ctx.closePath(); ctx.fill(); }
+  let acc=0;
+  for(const l of g.stack){ const z1=acc, z2=acc+ +l.height_um;
+    const w1=gw*(1-(1-ratio)*z1/gH), w2=gw*(1-(1-ratio)*z2/gH);
+    ctx.fillStyle=matColor(l.material); ctx.beginPath();
+    ctx.moveTo(X(-w1/2),Z(z1)); ctx.lineTo(X(w1/2),Z(z1)); ctx.lineTo(X(w2/2),Z(z2)); ctx.lineTo(X(-w2/2),Z(z2)); ctx.closePath(); ctx.fill();
+    acc=z2; }
+  ctx.strokeStyle=css("--ink-faint"); ctx.strokeRect(0.5,0.5,W-1,H-1);
+  ctx.fillStyle=css("--ink-faint"); ctx.font="10px "+css("--mono");
+  ctx.fillText(`bottom ${(gw*1000).toFixed(0)}nm -> top ${(gw*ratio*1000).toFixed(0)}nm  (H=${(gH*1000).toFixed(0)}nm)`,8,12);
+}
 function matFast(x,y,zc,upto){ const g=GC; if(!g)return matAt(x,y,zc,upto);
   if(upto==null)upto=99;
   let i=(x/g.d)|0, j=(y/g.d)|0; i=i<0?0:(i>=g.N?g.N-1:i); j=j<0?0:(j>=g.N?g.N-1:j); const k=j*g.N+i;
@@ -316,7 +337,7 @@ async function buildVoxels(onProg){
       gD[k]=Math.min(Math.abs(x-Math.round(x/per)*per), Math.abs(y-Math.round(y/per)*per));
       const pr=Math.min(np-1,Math.floor(y/p)), pc=Math.min(np-1,Math.floor(x/p)), col=S.bayer[pr][pc];
       const u=(x-(Math.floor(x/cfPer)+0.5)*cfPer)/(cfPer/2), v=(y-(Math.floor(y/cfPer)+0.5)*cfPer)/(cfPer/2);
-      cfTopM[k]=th[col]+cvv[col]*(1-Math.min(1,u*u+v*v));
+      cfTopM[k]=Math.max(0.002, th[col]+cvv[col]*(2/3-(u*u+v*v)));
       cfIdM[k]=cfIds[col];
       sagM[k]=mlSag(x,y); } }
   // ---- z 밴드 ----
@@ -384,6 +405,7 @@ function _render2D(){
     box.appendChild(cap); box.appendChild(c); m.appendChild(box);
     if(mode==="top") drawTopDown(c); else drawSection(c, mode==="front"?"x":"y");
   });
+  if(window._fenceZoom&&window._fenceZoom.isConnected) drawFenceZoom(window._fenceZoom);
   const nx=Math.round(P()*NP()/S.grid.dxy_um);
   el("status").innerHTML=`step ${curStep+1}/8 · pitch ${P()}µm · ${NP()}×${NP()} · total ${totalH().toFixed(2)}µm · npy ${nx}×${nx}×${Math.round(totalH()/S.grid.dz_um)}`;
   save();
@@ -612,6 +634,9 @@ const STEPS=[
       h("div",{class:"seclbl"},["물질 stack (아래→위, 각 height) · 동일물질 연결"]), subEditor(g.stack,[["material","material","mat"],["height","height_um","num"]],"0.001"),
       numRow("width 하부 (µm) ≤0.02",g,"width_um","0.001",0.002,0.02),
       slid,
+      (()=>{ const cv=h("canvas",{width:300,height:120}); cv.style.cssText="background:var(--panel-2);border:1px solid var(--line);border-radius:6px";
+        setTimeout(()=>drawFenceZoom(cv),0); const cap=h("p",{class:"hint"},["fence 단면 확대 (taper·코팅 스케일 표시)"]);
+        const box=h("div",{},[cap,cv]); box._zoom=cv; window._fenceZoom=cv; return box; })(),
       h("div",{class:"seclbl"},["표면 코팅 (옆면+윗면)"]), h("div",{class:"row"},[h("label",{},["코팅 사용"]),cc]) ];
     if(g.coat_on!==false){ rows.push(matRow("코팅 물질",g,"coat_material")); rows.push(numRow("코팅 두께 (µm)",g,"coat_um","0.001")); }
     return rows; }},
@@ -632,9 +657,9 @@ const STEPS=[
       return tr; };
     tbl.appendChild(mkRow("물질","material"));
     tbl.appendChild(mkRow("두께 µm","thickness_um","0.001"));
-    tbl.appendChild(mkRow("곡률 µm","curvature_um","0.001"));
+    tbl.appendChild(mkRow("응집 κ µm","curvature_um","0.001"));
     return [ h("div",{class:"row"},[h("label",{},["CF array"]),arr]), tbl,
-      h("p",{class:"hint"},["grid 울타리 셀 안 채움. 두께=벽에서의 높이, 곡률=셀 중앙 offset (+볼록/−오목 메니스커스)."]) ]; }},
+      h("p",{class:"hint"},["grid 울타리 셀 안 채움. 두께=셀 평균두께(볼륨 보존). 응집 κ>0: 열처리로 중앙에 모임(중앙↑·코너↓), κ<0: 벽 젖음. 표면 프로파일 t+κ(2/3−r²)."]) ]; }},
  {t:"7 · Microlens", d:"풍선(balloon) 모델 — footprint(원/타원) 만 정하면 높이·곡률 자동", body:()=>{ const m=S.stack.ml; if(m.hr==null)m.hr=0.55;
     const rows=[ matRow("ML 물질",m,"material"), numRow("평탄층 두께 (µm)",m,"planar_um","0.001"), numRow("h/r 비율 (0~1)",m,"hr"), numRow("돔 높이 h (µm, 0=h/r 자동)",m,"height_um","0.001",0,2) ];
     rows.push(h("p",{class:"hint"},["높이 = h/r × min(반경). 렌즈가 겹치면 교선에서 '찌부'(풍선 접촉) — 자동."]));
@@ -765,14 +790,14 @@ el("npyBtn").onclick=async()=>{ const btn=el("npyBtn"), t0=btn.textContent;
   // 용량 가드: nx*ny*nz 사전 계산 (예: dxy=0.001 -> 71GB 방지)
   { const span=P()*NP(), nx=Math.round(span/S.grid.dxy_um), nz=Math.round(totalH()/S.grid.dz_um);
     const bytes=nx*nx*nz;
-    if(!isFinite(bytes)||bytes>8e8){
+    if(!isFinite(bytes)||bytes>4.0e9){
       const gb=(bytes/1e9).toFixed(1);
-      const sugXY=Math.max(0.002,+(span/800).toFixed(3)), sugZ=Math.max(0.002,+(totalH()/600).toFixed(3));
-      alert(`npy 크기 초과: ${nx}×${nx}×${nz} ≈ ${gb} GB (한계 0.8GB)\n\n`+
-            `dxy/dz 는 '복셀 해상도'입니다 — 1nm 치수 정밀도는 지오메트리에 이미 반영되므로\n`+
-            `복셀은 더 커도 됩니다. step1 에서 dxy ≥ ${sugXY}, dz ≥ ${sugZ} (µm) 권장.`);
+      alert(`npy ${nx}×${nx}×${nz} ≈ ${gb} GB — 브라우저 배열 한계(4GB) 초과.\n\n`+
+            `이 해상도가 필요하면 같은 YAML 로 Python 빌더를 사용하세요:\n`+
+            `PYTHONPATH=. python3 -m src.structure.wizard_builder -c <product>.yaml -o out\n`+
+            `(YAML 버튼으로 저장한 파일 그대로 사용)`);
       return; }
-    if(bytes>2.5e8 && !confirm(`npy ${nx}×${nx}×${nz} ≈ ${(bytes/1e6).toFixed(0)} MB — 생성할까요?`)) return; }
+    if(bytes>8e8 && !confirm(`npy ${nx}×${nx}×${nz} ≈ ${(bytes/1e9).toFixed(2)} GB — 메모리 여유가 필요합니다. 생성할까요?`)) return; }
   btn.disabled=true;
   let v; try{ v=await buildVoxels(f=>{btn.textContent="생성중 "+Math.round(f*100)+"%";}); }
   catch(err){ btn.disabled=false; btn.textContent=t0; alert("npy 생성 오류: "+err.message); return; }

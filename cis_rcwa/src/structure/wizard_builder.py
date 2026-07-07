@@ -159,8 +159,8 @@ class WizardBuilder:
         cf = s["cf"]
         th = np.array([float(cf[c]["thickness_um"]) for c in "RGB"])
         cv = np.array([float(cf[c].get("curvature_um", 0) or 0) for c in "RGB"])
-        cfTopMax = float(np.max(th + np.maximum(0, cv)))
-        cfTopMin = float(np.min(th + np.minimum(0, cv)))
+        cfTopMax = float(np.max(th + np.maximum(2 * cv / 3, -4 * cv / 3)))
+        cfTopMin = float(max(0.002, np.min(th + np.minimum(2 * cv / 3, -4 * cv / 3))))
         planar = max(cfTopMin + float(s["ml"]["planar_um"]), cfTopMax, gridTot)
         sag = self._ml_sag()
         sagH = self._ml_maxh()                 # 풍선 모델: hr*min(반경) 최대
@@ -194,8 +194,9 @@ class WizardBuilder:
         cf_per = (2 if (self.cfg.get("cf_array") == "tetra") else 1) * p   # CF array 단위 셀
         u = (self.X - (np.floor(self.X / cf_per) + 0.5) * cf_per) / (cf_per / 2)
         v = (self.Y - (np.floor(self.Y / cf_per) + 0.5) * cf_per) / (cf_per / 2)
-        pin = 1 - np.minimum(1.0, u * u + v * v)        # 원형(radial) 메니스커스, 벽=0 중앙=1
-        zTop = th[colcode] + cv[colcode] * pin
+        # 응집(cohesion, 볼륨 보존): 셀 평균=thickness. k>0 중앙 응집 / k<0 벽 젖음
+        pin = (2.0 / 3.0) - (u * u + v * v)
+        zTop = np.maximum(0.002, th[colcode] + cv[colcode] * pin)
         cf_ids = np.array([self._id(cf[c]["material"]) for c in "RGB"], dtype=np.uint8)
         cf_map = cf_ids[colcode]
         ml_id = self._id(s["ml"]["material"])
