@@ -235,6 +235,66 @@ function matAt(x,y,zc,upto){ if(upto==null)upto=99; const s=S.stack,p=P(),np=NP(
   if(upto>=7){ const arlT=+s.arl_top.thickness_um; if(zc<=surf+arlT)return s.arl_top.material; }  // ARL conformal(ALD)
   return "air"; }
 
+// ===== 지오메트리 캐시: 무거운 2D 맵(dti/fence/cf/sag)을 1회 계산 -> 모든 뷰 O(1) 조회 =====
+let GC=null, GCgen=0;
+async function buildGC(){ const gen=++GCgen;
+  const p=P(),np=NP(),span=p*np,st=S.stack;
+  const N=1000, d=span/N, nP=N*N;
+  const siM=new Uint8Array(nP), gD=new Float32Array(nP), cfT=new Float32Array(nP),
+        cfI=new Uint8Array(nP), sg=new Float32Array(nP);
+  const names=[]; const nid={}; const idOf=n=>{ if(!(n in nid)){nid[n]=names.length;names.push(n);} return nid[n]; };
+  const g=st.grid, per=(g.pitch||1)*p, cfPer=((S.cf_array==="tetra")?2:1)*p;
+  const th={R:+st.cf.R.thickness_um,G:+st.cf.G.thickness_um,B:+st.cf.B.thickness_um};
+  const cvv={R:+(st.cf.R.curvature_um||0),G:+(st.cf.G.curvature_um||0),B:+(st.cf.B.curvature_um||0)};
+  const cfIds={R:idOf(st.cf.R.material),G:idOf(st.cf.G.material),B:idOf(st.cf.B.material)};
+  for(let j=0;j<N;j++){ const y=(j+0.5)*d;
+    for(let i=0;i<N;i++){ const x=(i+0.5)*d, k=j*N+i;
+      const dm=dtiAt(x,y); siM[k]=idOf(dm||st.si.material);
+      gD[k]=Math.min(Math.abs(x-Math.round(x/per)*per), Math.abs(y-Math.round(y/per)*per));
+      const pr=Math.min(np-1,Math.floor(y/p)), pc=Math.min(np-1,Math.floor(x/p)), col=S.bayer[pr][pc];
+      const u=(x-(Math.floor(x/cfPer)+0.5)*cfPer)/(cfPer/2), v=(y-(Math.floor(y/cfPer)+0.5)*cfPer)/(cfPer/2);
+      cfT[k]=th[col]+cvv[col]*(1-Math.min(1,u*u+v*v));
+      cfI[k]=cfIds[col]; }
+    if((j&63)===63){ if(gen!==GCgen)return null; await new Promise(r=>setTimeout(r,0)); if(gen!==GCgen)return null; } }
+  // sag: 렌즈별 bbox 만 순회 (per-cell 16렌즈 루프 대비 ~16x 고속)
+  { const hu=+(st.ml.height_um||0), hr0=mlHR();
+    for(const L of mlLenses()){ const h=hu>0?hu:hr0*Math.min(L.ax,L.ay);
+      const i0=Math.max(0,Math.floor((L.cx-L.ax)/d)), i1=Math.min(N-1,Math.ceil((L.cx+L.ax)/d));
+      const j0=Math.max(0,Math.floor((L.cy-L.ay)/d)), j1=Math.min(N-1,Math.ceil((L.cy+L.ay)/d));
+      for(let j=j0;j<=j1;j++){ const v=((j+0.5)*d-L.cy)/L.ay, v2=v*v; if(v2>=1)continue; const row=j*N;
+        for(let i=i0;i<=i1;i++){ const u=((i+0.5)*d-L.cx)/L.ax, r2=u*u+v2;
+          if(r2<1){ const t=h*Math.sqrt(1-r2); if(t>sg[row+i])sg[row+i]=t; } } } }
+    if(gen!==GCgen)return null; }
+  const barlB=[]; { let acc=0; for(const l of st.barl){acc+=+l.thickness_um; barlB.push([acc,l.material]);} }
+  const gB=[]; { let acc=0; for(const l of g.stack){acc+=+l.height_um; gB.push([acc,l.material]);} }
+  const zSi=+st.si.thickness_um, barlH=st.barl.reduce((a,l)=>a+ +l.thickness_um,0);
+  GC={gen,N,d,span,names,siM,gD,cfT,cfI,sg,
+      zSi, siName:st.si.material, barlB, barlTop:zSi+barlH, plTop:zSi+barlH+planarSpan(),
+      gW:+g.width_um, ratio:Math.min(1,Math.max(0,+(g.top_ratio!=null?g.top_ratio:1)||0)),
+      cw:gridCoat(), gH:gridStackH(), coatName:g.coat_material||"oxide", gB,
+      mlName:st.ml.material, arlName:st.arl_top.material, arlT:+st.arl_top.thickness_um};
+  return GC; }
+// matAt 과 동일 결과, 캐시 조회 기반 (뷰 전용 고속 경로)
+function matFast(x,y,zc,upto){ const g=GC; if(!g)return matAt(x,y,zc,upto);
+  if(upto==null)upto=99;
+  let i=(x/g.d)|0, j=(y/g.d)|0; i=i<0?0:(i>=g.N?g.N-1:i); j=j<0?0:(j>=g.N?g.N-1:j); const k=j*g.N+i;
+  if(zc<g.zSi){ if(upto<1)return "air"; if(upto<2)return g.siName; return g.names[g.siM[k]]; }
+  if(zc<g.barlTop){ if(upto<3)return "air"; const zz=zc-g.zSi;
+    for(const e of g.barlB){ if(zz<=e[0])return e[1]; } return g.barlB.length?g.barlB[g.barlB.length-1][1]:"air"; }
+  if(zc<g.plTop){ const zabs=zc-g.barlTop;
+    if(upto>=4){ const wz=g.gH>0? g.gW*(1-(1-g.ratio)*Math.min(zabs/g.gH,1)) : g.gW; const d0=g.gD[k];
+      if(zabs<=g.gH){ if(d0<wz/2){ for(const e of g.gB){ if(zabs<=e[0])return e[1]; } return g.gB.length?g.gB[g.gB.length-1][1]:"grid_metal"; }
+        if(g.cw>0&&d0<wz/2+g.cw)return g.coatName; }
+      else if(g.cw>0&&zabs<=g.gH+g.cw&&d0<wz/2+g.cw)return g.coatName; }
+    if(upto>=5 && zabs<=g.cfT[k]) return g.names[g.cfI[k]];
+    if(upto>=6) return g.mlName;
+    return "air"; }
+  if(upto<6)return "air";
+  const surf=g.plTop+g.sg[k];
+  if(zc<=surf)return g.mlName;
+  if(upto>=7&&zc<=surf+g.arlT)return g.arlName;
+  return "air"; }
+
 // 고속 npy 빌더: 2D 맵 프리컴퓨트 + z 밴드 채움 (비동기 chunk, 진행률 콜백)
 async function buildVoxels(onProg){
   const p=P(),np=NP(),span=p*np,dxy=+S.grid.dxy_um,dz=+S.grid.dz_um,st=S.stack;
@@ -296,12 +356,21 @@ function npyU8(arr,shape){ const hdr=`{'descr': '|u1', 'fortran_order': False, '
 
 // ============================ 렌더 ============================
 function el(id){return document.getElementById(id);}
-let _raf=null,_t3=null;
 const v3={yaw:-0.7, pitch:0.55, zoom:1};
-// 수치 변경 -> 2D(미니)는 즉시, 무거운 3D는 380ms 디바운스
-function renderViews(){ if(_raf)cancelAnimationFrame(_raf); _raf=requestAnimationFrame(_render2D);
-  clearTimeout(_t3); _t3=setTimeout(build3D,380); }
-function _render2D(){ _raf=null;
+// 수치 변경 -> 지오메트리 캐시(비동기 청크) 재생성 -> 2D+3D 모두 고속 조회 렌더.
+// 연타/드래그 시 최신 요청만 반영(트레일링).
+let _rvBusy=false,_rvPend=false;
+async function renderViews(){ if(_rvBusy){ _rvPend=true; return; } _rvBusy=true;
+  try{ do{ _rvPend=false;
+    const g=await buildGC(); if(!g) continue;          // 새 요청으로 대체됨
+    _render2D();                                        // 2D 먼저 즉시 표시
+    if(_rvPend) continue;                               // 연타 중이면 3D 생략(마지막에만)
+    await new Promise(r=>setTimeout(r,0));
+    if(_rvPend) continue;
+    build3D();
+  }while(_rvPend); } finally{ _rvBusy=false; }
+}
+function _render2D(){
   const cv=el("iso3d"), r=cv.parentElement.getBoundingClientRect();
   if(cv.width!==Math.max(50,r.width)||cv.height!==Math.max(50,r.height)){ cv.width=Math.max(50,r.width); cv.height=Math.max(50,r.height); redraw3D(); }
   // 미니 2D 패널: Front(좌하) · Top(중앙하) · Side(우하)
@@ -326,7 +395,7 @@ function drawTopDown(cv){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.height,p
   const zstep=Math.max(0.01,Ht/90);
   for(let py=0;py<N;py++){ const y=span-(py+0.5)/sc;
     for(let px=0;px<N;px++){ const x=(px+0.5)/sc; let c=bg;
-      for(let zc=Ht-0.005; zc>0; zc-=zstep){ const mm=matAt(x,y,zc,curStep); if(mm!=="air"){c=rgbOf(mm);break;} }
+      for(let zc=Ht-0.005; zc>0; zc-=zstep){ const mm=matFast(x,y,zc,curStep); if(mm!=="air"){c=rgbOf(mm);break;} }
       const o=(py*N+px)*4; D[o]=c[0];D[o+1]=c[1];D[o+2]=c[2];D[o+3]=255; } }
   ctx.putImageData(img,ox,oy);
   ctx.strokeStyle=css("--line"); ctx.strokeRect(ox,oy,N,N);
@@ -347,7 +416,7 @@ function drawSection(cv, axis){ const ctx=cv.getContext("2d"),W=cv.width,H=cv.he
       let m0=null,all=true; const cnt={};
       for(const [ou,oz] of OFF){ const u=(px+ou)/sx, zc=(hpx-(pz+oz))/sz;
         const x=axis==="x"?u:cut, y=axis==="x"?cut:u;
-        const m=matAt(x,y,zc,curStep);
+        const m=matFast(x,y,zc,curStep);
         if(m0===null)m0=m; else if(m!==m0)all=false;
         cnt[m]=(cnt[m]||0)+1; }
       let m=m0;
@@ -383,7 +452,7 @@ function sectionImage(axis,cutPos,W0,H0){ const span=P()*NP(), Ht=totalH();
     let m0=null,all=true; const cnt={};
     for(const [ou,oz] of OFF){ const u=(px+ou)/sx, zc=(H0-(pz+oz))/sz;
       const x=axis==="x"?u:cutPos, y=axis==="x"?cutPos:u;
-      const m=matAt(x,y,zc,curStep); if(m0===null)m0=m; else if(m!==m0)all=false; cnt[m]=(cnt[m]||0)+1; }
+      const m=matFast(x,y,zc,curStep); if(m0===null)m0=m; else if(m!==m0)all=false; cnt[m]=(cnt[m]||0)+1; }
     let m=m0; if(!all){ let best=null,bc=99; for(const k in cnt){ if(k==="air")continue; if(cnt[k]<bc){bc=cnt[k];best=k;} } m=best||m0; }
     const o=(pz*W0+px)*4;
     if(m!=="air"){ const c=rgbOf(m); D[o]=c[0];D[o+1]=c[1];D[o+2]=c[2];D[o+3]=255; } } }
@@ -402,21 +471,21 @@ function build3D(){ const span=P()*NP(), Ht=totalH();
       for(const [ox,oy] of [[0,0],[-0.33,-0.33],[0.33,-0.33],[-0.33,0.33],[0.33,0.33]]){
         const xs=Math.min(span-1e-6,Math.max(1e-6,x+ox*dxy)), ys=Math.min(span-1e-6,Math.max(1e-6,y+oy*dxy));
         let zT=-1;
-        for(let z=Ht-zStep*0.5;z>bestZ;z-=zStep){ if(matAt(xs,ys,z,curStep)!=="air"){zT=z;break;} }
+        for(let z=Ht-zStep*0.5;z>bestZ;z-=zStep){ if(matFast(xs,ys,z,curStep)!=="air"){zT=z;break;} }
         if(zT>bestZ){ bestZ=zT; bestX=xs; bestY=ys; } }
       if(bestZ<0) continue;
       let lo=bestZ,hi=Math.min(Ht,bestZ+zStep);
-      for(let t=0;t<6;t++){ const mid=(lo+hi)/2; if(matAt(bestX,bestY,mid,curStep)!=="air")lo=mid; else hi=mid; }
+      for(let t=0;t<6;t++){ const mid=(lo+hi)/2; if(matFast(bestX,bestY,mid,curStep)!=="air")lo=mid; else hi=mid; }
       // 윗면 색: 9점 샘플 -> 섞이면 '최소 빈도' 비-air 물질(얇은 라이너/트렌치) 우선
       const zc0=Math.max(1e-4,lo-1e-4), cnt={}; let m0=null, mixed=false;
       for(const [ox,oy] of [[0,0],[-0.45,0],[0.45,0],[0,-0.45],[0,0.45],[-0.45,-0.45],[0.45,-0.45],[-0.45,0.45],[0.45,0.45]]){
         const xs=Math.min(span-1e-6,Math.max(1e-6,x+ox*dxy)), ys=Math.min(span-1e-6,Math.max(1e-6,y+oy*dxy));
-        const cc=matAt(xs,ys,zc0,curStep);
+        const cc=matFast(xs,ys,zc0,curStep);
         if(m0===null)m0=cc; else if(cc!==m0)mixed=true;
         cnt[cc]=(cnt[cc]||0)+1; }
       let col=m0;
       if(mixed){ let best=null,bc=99; for(const k in cnt){ if(k==="air")continue; if(cnt[k]<bc){bc=cnt[k];best=k;} } col=best||m0; }
-      if(col==="air")col=matAt(bestX,bestY,zc0,curStep);
+      if(col==="air")col=matFast(bestX,bestY,zc0,curStep);
       Hf[j*N+i]=lo; Cf[j*N+i]=col; } }
   const eps=Math.min(0.003,span/1500);
   const walls={ f:sectionImage("x",eps,SW,SH), b:sectionImage("x",span-eps,SW,SH),
