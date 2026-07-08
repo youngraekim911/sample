@@ -1051,14 +1051,19 @@ el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
     t+=(fl?"⚠ ":"  ")+m.name.padEnd(12)+` n=${m.n}  k=${m.k}  [${m.source}]`+
        (m.lam_range?`  λ${m.lam_range[0].toFixed(2)}~${m.lam_range[1].toFixed(2)}µm`:"")+"\n";
     if(fl) for(const f of m.flags) t+="      └ "+f+"\n"; }
-  t+="\n── 경계 투과 프로파일 (air → … → Si) ──\n";
-  t+=`  진입 (1-R)${" ".repeat(30)}T=${(1-d.R).toFixed(4)}\n`;
+  t+="\n── 경계 투과 워터폴 · air=100 기준 (전체 | R·G·B 픽셀 면적당) ──\n";
+  const f100=v=>v==null?"  -- ":String(Math.max(0,Math.round(v*100))).padStart(4)+" ";
+  const rgb3=o=>o?`| R${f100(o.R)}G${f100(o.G)}B${f100(o.B)}`:"";
+  t+=`  air (입사)${" ".repeat(32)} 100  ${d.entry_rgb?"| R  100 G  100 B  100":""}\n`;
+  t+=`  진입 (1-R)`.padEnd(42)+f100(1-d.R)+` ${rgb3(d.entry_rgb)}\n`;
   let worst=null;
   for(const p of d.profile){ if(!worst||p.A>worst.A)worst=p; }
-  for(const p of d.profile){ const tag=`  ${p.mats} (${(p.th_um*1000).toFixed(0)}nm${p.n_sub>1?"×"+p.n_sub:""})`;
-    t+=tag.padEnd(44)+`A=${p.A.toFixed(4)}  →T=${p.T_after.toFixed(4)}`+(p===worst&&p.A>0.05?"   ← 최대 흡수":"")+"\n"; }
-  t+="\n힌트: 특정 층에서 T 가 급락하면 그 층 물질의 k 를 확인하세요.\n"+
-     "흔한 원인: ① k 열에 흡수계수(α)나 % 값이 들어감  ② n/k 열 순서 뒤바뀜  ③ λ 단위 오감지(Å/eV)";
+  for(const p of d.profile){ const tag=`  ↓ ${p.mats} (${(p.th_um*1000).toFixed(0)}nm${p.n_sub>1?"×"+p.n_sub:""})`;
+    t+=tag.padEnd(42)+f100(p.T_after)+` ${rgb3(p.T_rgb)}`+(p===worst&&p.A>0.05?"  ← 최대 흡수(A="+p.A.toFixed(3)+")":"")+"\n"; }
+  t+="\n힌트: 특정 층에서 값이 급락하면 그 층 물질의 k 를 확인하세요.\n"+
+     "흔한 원인: ① k 열에 흡수계수(α)나 % 값이 들어감  ② n/k 열 순서 뒤바뀜  ③ λ 단위 오감지(Å/eV)\n"+
+     "R·G·B = 각 색 픽셀 기둥 면적당 잔존 파워. 금속 격벽처럼 기둥 경계에 흡수가 몰리면\n"+
+     "가로로 흘러든 빛까지 그 기둥에 귀속돼 0 으로 표시될 수 있음 (최종 색별 QE 는 Run 결과가 기준).";
   out.textContent=t; };
 el("qeCsv").onclick=()=>{ const rgb=QE.rows.length&&QE.rows[0].length>=7;
   let t="lambda_um,R,QE_Si_total,A_stack"+(rgb?",QE_R,QE_G,QE_B":"")+"\n"+QE.rows.map(r=>r.join(",")).join("\n");

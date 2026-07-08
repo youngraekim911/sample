@@ -369,6 +369,22 @@ class RCWASolver:
         Sz = 0.5 * (Ex * Hy.conj() - Ey * Hx.conj()).real * calib
         return Sz
 
+    def node_flux_map_raw(self, k, Ny, Nx):
+        """node k 의 하향 net Poynting Sz(x,y) — '비교정' raw (진단용).
+
+        절대 스케일은 신뢰 불가(gap-basis) — 호출측에서 에너지 보존으로 얻은
+        그 경계의 총 투과 T_after 에 평균을 맞춰 재스케일해 사용.
+        (absorption_maps 호출 후 사용 가능)"""
+        N = self.nG
+        a, b = self._diag_node_ab[k]
+        E = a + b
+        H = self.V0 @ (a - b)
+        Ex = fft_funs.field_ifft(E[:N], self.m, self.n, Ny, Nx)
+        Ey = fft_funs.field_ifft(E[N:], self.m, self.n, Ny, Nx)
+        Hx = fft_funs.field_ifft(H[:N], self.m, self.n, Ny, Nx)
+        Hy = fft_funs.field_ifft(H[N:], self.m, self.n, Ny, Nx)
+        return 0.5 * (Ex * Hy.conj() - Ey * Hx.conj()).real
+
     def node_tangential_realspace(self, node_k, Ny, Nx):
         """node_k 접선 필드를 실공간 (Ny,Nx) 로 ifft.  반환 Ex,Ey,Hx,Hy, Sz(x,y)."""
         a, b = self._node_ab[node_k]
@@ -398,6 +414,7 @@ class RCWASolver:
         elems, cumL, cumR = self._cumulative_S()
         node_ab = [self._node_amps(cumL[k], cumR[k + 1])
                    for k in range(len(elems) - 1)]
+        self._diag_node_ab = node_ab                  # 경계 flux 맵(진단)용 캐시
         aE = [a + b for a, b in node_ab]              # W0 = I2 -> node 접선 E
         maps = {}
         total = 0.0

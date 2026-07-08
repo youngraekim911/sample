@@ -383,6 +383,18 @@ class RCWAPlaneWaveSimulator:
                 flags.append(f"λ={lam} 가 테이블 범위({rng[0]:.2f}~{rng[1]:.2f}µm) 밖 -> 경계값 사용")
             mats.append({"name": name, "n": round(n, 4), "k": round(k, 5),
                          "source": src, "lam_range": rng, "flags": flags})
+        # ---- 색 픽셀별 워터폴: 각 색 픽셀 '기둥'의 누적 흡수를 진입값에서 차감 ----
+        # 흡수 밀도 맵(에너지 보존 정합, 검증됨) 기반 — 각 색 픽셀 면적당 입사=1.
+        # (기둥 사이 빛의 가로 이동은 흡수가 일어난 기둥에 귀속되는 근사)
+        cmask = None
+        acc = None
+        if self._pix is not None:
+            pixidx, colors = self._pix["pixidx"], self._pix["colors"]
+            cmask = {c: np.isin(pixidx, [i for i, cc in enumerate(colors) if cc == c])
+                     for c in "RGB" if c in colors}
+            acc = {c: 0.0 for c in cmask}
+        ngrid = self.grid_ny * self.grid_nx
+
         # ---- 경계 투과 프로파일 (같은 물질 조합 연속층 묶음) ----
         prof = []
         Tcur = 1.0 - o["R"]
@@ -391,17 +403,27 @@ class RCWAPlaneWaveSimulator:
             ids = np.unique(np.asarray(m2d)) if not self._eps_direct else []
             nm = "+".join(sorted(self.id2name[int(x)] for x in ids)) if len(ids) else f"layer{i}"
             Tcur -= A[i]
+            if cmask is not None and i in maps:
+                dens = maps[i].detach().cpu().numpy() * C
+                for c, m in cmask.items():
+                    acc[c] += float(dens[m].mean()) * ngrid   # 색 면적당 흡수
+            rgb = ({c: round(1.0 - o["R"] - acc[c], 5) for c in cmask}
+                   if cmask is not None else None)
             if cur and cur["mats"] == nm:
-                cur["th_um"] += th; cur["A"] += A[i]; cur["T_after"] = Tcur; cur["n_sub"] += 1
+                cur["th_um"] += th; cur["A"] += A[i]; cur["T_after"] = Tcur
+                cur["n_sub"] += 1; cur["T_rgb"] = rgb
             else:
-                cur = {"mats": nm, "th_um": th, "A": A[i], "T_after": Tcur, "n_sub": 1}
+                cur = {"mats": nm, "th_um": th, "A": A[i], "T_after": Tcur,
+                       "n_sub": 1, "T_rgb": rgb}
                 prof.append(cur)
+        entry_rgb = ({c: round(1.0 - o["R"], 5) for c in cmask}
+                     if cmask is not None else None)         # 진입(1-R, 균일 근사)
         for p in prof:
             p["th_um"] = round(p["th_um"], 4); p["A"] = round(p["A"], 5)
             p["T_after"] = round(p["T_after"], 5)
         nS = self.n_si_layers
         A_above = sum(A[:M - nS]) if nS else sum(A)
         return {"wavelength": lam, "R": round(o["R"], 5), "materials": mats,
-                "profile": prof,
+                "profile": prof, "entry_rgb": entry_rgb,
                 "T_into_si": round(1.0 - o["R"] - A_above, 5),   # Si 밴드 유입 = 광학 QE
                 "T_deep": round(o["QE"], 5)}                     # 밴드 바닥 통과분
