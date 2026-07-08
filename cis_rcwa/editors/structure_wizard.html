@@ -886,8 +886,12 @@ window.addEventListener("message",e=>{ const d=e.data;
 const prod=el("prodName"); prod.value=S.product||""; prod.oninput=()=>{S.product=prod.value; save();};
 const dlg=el("dlg");
 function pname(){ return (S.product||"structure").trim().replace(/[^\w\-.]/g,"_")||"structure"; }
-function structYAML(){ const exp=structuredClone(S); for(const m in exp.materials){ const at=matNK(m),src=exp.materials[m].src; exp.materials[m]={n:+at.n.toFixed(4),k:+at.k.toFixed(4)}; if(src)exp.materials[m].src=src; }
-  return "# CIS structure · product: "+(S.product||"")+"\n# 파장별 n,k 는 materials 폴더 txt (아래는 λ="+refLambda+"µm 상수)\n"+toYAML(exp); }
+function structYAML(){ const exp=structuredClone(S); const disp={};
+  for(const m in exp.materials){ const at=matNK(m),src=exp.materials[m].src; exp.materials[m]={n:+at.n.toFixed(4),k:+at.k.toFixed(4)}; if(src)exp.materials[m].src=src;
+    // 브라우저에 λ-테이블이 있으면 yaml 에 dispersion 으로 동봉 -> RCWA 가 '이 값 그대로' 사용
+    const t=matTable(m); if(t&&t.length>1) disp[m]=t.map(r=>[+(r[0]).toFixed(4),+(r[1]).toFixed(4),+(r[2]).toFixed(5)]); }
+  if(Object.keys(disp).length) exp.dispersion=disp;
+  return "# CIS structure · product: "+(S.product||"")+"\n# n,k 우선순위: dispersion(브라우저 import 테이블) > materials 폴더 > 아래 상수(λ="+refLambda+"µm)\n"+toYAML(exp); }
 function download(name,text,type){ const blob=new Blob([text],{type:type||"text/yaml"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
 el("yamlBtn").onclick=async()=>{ const text=structYAML();
   if(window.showSaveFilePicker){ // 저장 경로 선택 (취소=중단)
@@ -974,7 +978,10 @@ function parseYAML(text){ const lines=text.replace(/\t/g,"  ").split("\n").map(l
     if(s[j]==="{"){j++;const o={};ws();if(s[j]==="}"){j++;return o;} while(true){ws();let k="";while(j<s.length&&s[j]!==":"){k+=s[j++];}j++;o[k.trim()]=val();ws();if(s[j]===","){j++;continue;}if(s[j]==="}"){j++;break;}break;}return o;}
     if(s[j]==='"'){let k=j+1,str="";while(k<s.length&&s[k]!=='"'){str+=s[k++];}j=k+1;return str;} let t="";while(j<s.length&&!/[,\]}]/.test(s[j])){t+=s[j++];} return sc(t.trim()); } return val(); }
   function sc(s){ if(s===""||s==null)return null; if(s[0]==='"'&&s[s.length-1]==='"')return JSON.parse(s); if(s==="true")return true; if(s==="false")return false; if(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s))return parseFloat(s); return s; } }
-function loadStruct(obj){ S=Object.assign(structuredClone(DEFAULT),obj); if(obj.stack)S.stack=Object.assign(structuredClone(DEFAULT.stack),obj.stack); if(obj.materials)S.materials=Object.assign(structuredClone(DEFAULT.materials),obj.materials); clampRes(); prod.value=S.product||""; curStep=0; renderStep(); }
+function loadStruct(obj){ S=Object.assign(structuredClone(DEFAULT),obj); if(obj.stack)S.stack=Object.assign(structuredClone(DEFAULT.stack),obj.stack); if(obj.materials)S.materials=Object.assign(structuredClone(DEFAULT.materials),obj.materials);
+  // yaml 에 동봉된 dispersion(λ-테이블) 복원 -> 새 브라우저에서도 물질 테이블 유지
+  if(obj.dispersion){ for(const nm in obj.dispersion){ const t=obj.dispersion[nm]; if(Array.isArray(t)&&t.length>1){ folderLib[nm]=t; if(!(nm in S.materials)){ const L=t.map(r=>r[0]); S.materials[nm]={n:+interp1(refLambda,L,t.map(r=>r[1])).toFixed(4),k:+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4)}; } } } }
+  clampRes(); save(); prod.value=S.product||""; curStep=0; renderStep(); }
 
 // ============================ QE 해석 (structure -> RCWA -> QE) ============================
 // 백엔드 블록: python3 app.py 가 띄우는 로컬 서버의 /api/qe (+status/cancel).

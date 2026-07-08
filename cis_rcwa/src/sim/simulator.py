@@ -225,19 +225,26 @@ class RCWAPlaneWaveSimulator:
 
     # -----------------------------------------------------------------
     def _nk_at(self, name, lam):
-        """물질 name 의 (n,k) @ lam(um).  우선순위: materials/ 폴더(src|name) -> dispersion -> 상수."""
+        """물질 name 의 (n,k) @ lam(um).
+
+        우선순위: ① cfg dispersion (위저드가 브라우저 import 테이블을 yaml 에 동봉
+        — 사용자가 화면에서 본 값 그대로) -> ② materials/ 폴더(src|name)
+        -> ③ yaml materials 상수."""
+        disp = self.cfg.get("dispersion", {}) or {}
+        if name in disp:
+            arr = np.array(disp[name], dtype=float)     # [[lam,n,k],...]
+            L = arr[:, 0]
+            if L.max() > 20:                            # nm 단위 테이블 자동 감지
+                L = L / 1000.0
+            n = float(np.interp(lam, L, arr[:, 1]))
+            k = float(np.interp(lam, L, arr[:, 2]))
+            return n, k
         mconf = (self.cfg.get("materials", {}) or {}).get(name, {}) or {}
-        src = mconf.get("src", name)                 # 물질별 n,k 파일 지정(src) 우선
+        src = mconf.get("src", name)                 # 물질별 n,k 파일 지정(src)
         if self.matlib and self.matlib.has(src):
             return self.matlib.nk(src, lam)
         if self.matlib and self.matlib.has(name):
             return self.matlib.nk(name, lam)
-        disp = self.cfg.get("dispersion", {})
-        if name in disp:
-            arr = np.array(disp[name], dtype=float)     # [[lam,n,k],...]
-            n = float(np.interp(lam, arr[:, 0], arr[:, 1]))
-            k = float(np.interp(lam, arr[:, 0], arr[:, 2]))
-            return n, k
         m = self.cfg["materials"][name]
         return float(m["n"]), float(m["k"])
 
