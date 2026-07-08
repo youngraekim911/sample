@@ -691,7 +691,7 @@ function matRow(lb,o,k){ const sel=h("select",{}); Object.keys(S.materials).forE
 function subEditor(arr, fields, st){ // fields: [['material','mat'],['두께','thickness_um']] etc
   const box=h("div",{class:"sublist"}); function rd(){ box.innerHTML="";
     arr.forEach((it,i)=>{ const row=h("div",{class:"subrow"});
-      fields.forEach(([lb,key,kind])=>{ if(kind==="mat"){ const sel=h("select",{}); Object.keys(S.materials).forEach(m=>{const o=h("option",{value:m},[m]); if(it[key]===m)o.selected=true; sel.appendChild(o);}); sel.onchange=()=>{it[key]=sel.value; renderViews();}; row.appendChild(sel); }
+      fields.forEach(([lb,key,kind])=>{ if(kind==="mat"){ const sel=h("select",{}); Object.keys(S.materials).forEach(m=>{const o=h("option",{value:m},[m+(matTable(m)?" ·λ":"")]); if(it[key]===m)o.selected=true; sel.appendChild(o);}); sel.onchange=()=>{it[key]=sel.value; renderViews();}; row.appendChild(sel); }
         else if(kind==="numA"){ const inp=h("input",{type:"number",step:"10",value:Math.round((it[key]||0)*1e4)}); inp.min=0; inp.max=1000;
           inp.oninput=()=>{ let v=parseFloat(inp.value); if(!isNaN(v)){ if(v<0)v=0; if(v>1000)v=1000; it[key]=v/1e4; renderViews(); } };
           row.appendChild(inp); row.appendChild(h("span",{class:"hint"},["Å"])); }
@@ -804,7 +804,19 @@ el("cutChk").onchange=()=>renderViews();
 el("themeBtn").onclick=()=>{ const r=document.documentElement,cur=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); r.setAttribute("data-theme",cur==="dark"?"light":"dark"); renderViews(); };
 el("matBtn").onclick=()=>el("matFolder").click();
 el("matFolder").onchange=async e=>{ let n=0; for(const f of [...e.target.files]){ if(!/\.txt$/i.test(f.name))continue; let t; try{t=await f.text();}catch(_){continue;} const nk=parseNK(t); if(!nk)continue; folderLib[f.name.replace(/\.txt$/i,"")]=nk; n++; }
-  for(const role in S.materials){ if(!S.materials[role].src&&folderLib[role])S.materials[role].src=role; } e.target.value=""; renderStep(); alert(n+" 물질 n,k 로드됨"); };
+  // 기존 역할 물질 <-> 동명 파일 자동 연결
+  for(const role in S.materials){ if(!S.materials[role].src&&folderLib[role])S.materials[role].src=role; }
+  // 폴더의 '새' 물질을 선택 목록(S.materials)에 자동 등록 -> 모든 step 드롭다운
+  // (step2 Si / step3 liner·fill / step4 BARL / step5 grid stack·코팅 / step6 CF RGB / step7 ML / step8 ARL)
+  // 에서 바로 선택 가능. n,k 상수는 현재 λ 기준 fallback (실제 계산은 λ-보간 테이블 사용).
+  let added=0;
+  for(const name in folderLib){ if(!(name in S.materials)){
+      const t=folderLib[name],L=t.map(r=>r[0]);
+      S.materials[name]={n:+interp1(refLambda,L,t.map(r=>r[1])).toFixed(4),
+                         k:+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4)};
+      added++; } }
+  save(); e.target.value=""; renderStep(); renderViews();
+  alert(n+" 물질 n,k 로드됨"+(added?` · 새 물질 ${added}종을 선택 목록에 추가`:"")+"\n모든 step 의 물질 선택창에서 사용 가능 (·λ = 파장 테이블 연동)"); };
 // ML shape editor 직접 열기 (새 창) + Export 시 postMessage 로 자동 반영
 let mlWin=null;
 function openMLeditor(){ try{ mlWin=window.open("ml_shape_editor.html","ml_editor","width=1280,height=820");
