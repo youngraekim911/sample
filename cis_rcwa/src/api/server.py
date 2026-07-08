@@ -51,17 +51,19 @@ def _run_job(jid, cfg_path, p):
             t0 = time.time()
             o_te = sim.run(float(lam), theta=p["theta"], pol_te=1.0, pol_tm=0.0)
             o_tm = sim.run(float(lam), theta=p["theta"], pol_te=0.0, pol_tm=1.0)
-            R = 0.5 * (o_te["R"] + o_tm["R"])
-            QE = 0.5 * (o_te["QE"] + o_tm["QE"])
-            A = 0.5 * (o_te["A_stack"] + o_tm["A_stack"])
+            w = 1.0 if p.get("pol") == "sum" else 0.5    # 평균(비편광 표준) | 합산(참조 호환, x2)
+            R = w * (o_te["R"] + o_tm["R"])
+            QE = w * (o_te["QE"] + o_tm["QE"])
+            A = w * (o_te["A_stack"] + o_tm["A_stack"])
             row = [round(float(lam), 5), round(float(R), 5),
                    round(float(QE), 5), round(float(A), 5)]
             note_rgb = ""
-            if o_te.get("QE_rgb"):                       # 픽셀(색)별 QE: CF 하부 Si 창 기준
+            if o_te.get("QE_rgb"):                       # 픽셀(색)별 QE: CF 하부 Si 창 흡수
                 for c in "RGB":
-                    v = 0.5 * (o_te["QE_rgb"].get(c, 0) + o_tm["QE_rgb"].get(c, 0))
+                    v = w * (o_te["QE_rgb"].get(c, 0) + o_tm["QE_rgb"].get(c, 0))
                     row.append(round(float(v), 5))
                 note_rgb = f"  R/G/B={row[4]:.3f}/{row[5]:.3f}/{row[6]:.3f}"
+                note_rgb += f"  (deep {w*(o_te.get('QE_deep',0)+o_tm.get('QE_deep',0)):.3f} 제외)"
             job["rows"].append(row)
             job["progress"] = (i + 1) / len(lams)
             job["note"] = f"λ={lam*1000:.0f}nm{note_rgb}  ({time.time()-t0:.1f}s/λ, TE+TM)"
@@ -180,7 +182,8 @@ class Handler(BaseHTTPRequestHandler):
                  "n": max(1, int(data.get("n", 7))),
                  "nG": max(9, int(data.get("nG", 101))),
                  "downsample": max(1, int(data.get("downsample", 2))),
-                 "theta": float(data.get("theta", 0.0))}
+                 "theta": float(data.get("theta", 0.0)),
+                 "pol": str(data.get("pol", "avg"))}
             jid = start_job(yaml_text, p)
             self._json({"job": jid})
         elif u.path == "/api/qe/cancel":

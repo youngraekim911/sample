@@ -335,20 +335,17 @@ class RCWAPlaneWaveSimulator:
                     m = (pixidx == pidx) & (~trench)     # 픽셀 1×1 의 순수 Si 창 (라이너 안쪽)
                     pix_abs[pidx] += dens[m].sum()
                 trench_abs += dens[trench].sum()         # DTI(라이너+채움) 내 흡수 = 제외분
-            # 심부(트렌치 바닥 아래) Si: 픽셀 사각형 기준 배분 (DTI 없음)
-            Sz = solver.transmitted_flux_map(self.grid_ny, self.grid_nx).detach().cpu().numpy()
-            for pidx in range(npx * npx):
-                pix_abs[pidx] += Sz[pixidx == pidx].sum() / ngrid
-            qe_top = float(A_band + T_deep)              # Si 밴드 유입 총량 (A_band 는 trench 포함 전체)
+            # ---- QE 정의: '픽셀 Si 창 안에서 실제 흡수된 양'만 (심부 통과분 제외) ----
+            # (Si 밴드 바닥을 통과해 아래로 빠지는 T_deep 은 QE 에 넣지 않고 분리 리포트)
             qe_pix = [float(v * npx * npx) for v in pix_abs]   # 픽셀 면적 정규화
             qe_rgb = {c: float(np.mean([q for q, cc in zip(qe_pix, colors) if cc == c]))
                       for c in "RGB" if c in colors}
-            out["QE"] = qe_top                           # Si 로 들어간 총 파워 (기존 정의 유지)
-            out["A_stack"] = float(1.0 - o["R"] - qe_top)
+            out["QE"] = float(A_band)                    # Si 밴드 총 흡수 (=mean(픽셀QE)+trench)
+            out["A_stack"] = float(1.0 - o["R"] - A_band)  # 상부 흡수 + 트렌치 외 손실 + 심부 통과
             out["QE_pixels"] = qe_pix
             out["QE_rgb"] = qe_rgb
             out["QE_trench"] = float(trench_abs)         # DTI 트렌치 내부 흡수분 (픽셀 제외)
-            out["QE_deep"] = float(T_deep)
+            out["QE_deep"] = float(T_deep)               # Si 바닥 통과분 (QE 미포함, 참고)
         return out
 
     # -----------------------------------------------------------------

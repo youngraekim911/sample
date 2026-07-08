@@ -113,6 +113,8 @@
       <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="Fourier 차수 — metal grid 수렴에 101 이상 권장 (클수록 정확·느림)">nG<input id="qeNG" type="number" step="2" min="9" value="101" style="width:66px"></label>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조 격자 다운샘플 (클수록 빠르고 거침)">downsample<input id="qeDS" type="number" step="1" min="1" value="2" style="width:60px"></label>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px">입사각 θ(°)<input id="qeTH" type="number" step="1" value="0" style="width:56px"></label>
+      <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="비편광 표준=TE/TM 평균 · 합산=참조 도구 호환(값 2배, 합=2)">편광
+        <select id="qePol" style="font-size:12px"><option value="avg" selected>평균(비편광)</option><option value="sum">합산(참조호환)</option></select></label>
       <button class="btn primary" id="qeRun">▶ Run</button>
       <button class="btn" id="qeStop" disabled>■ Stop</button>
       <button class="btn" id="qeDiag" title="QE가 0 등 이상할 때: 물질 n,k 점검 + air→…→Si 경계 투과 프로파일">🔍 진단</button>
@@ -1029,7 +1031,8 @@ el("qeClose").onclick=()=>{ qeDlg.close(); };
 el("qeStop").onclick=async()=>{ if(QE.job) try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
 el("qeRun").onclick=async()=>{ if(QE.running)return;
   const body={ yaml:structYAML(), lam0:+el("qeL0").value, lam1:+el("qeL1").value,
-    n:+el("qeN").value, nG:+el("qeNG").value, downsample:+el("qeDS").value, theta:+el("qeTH").value };
+    n:+el("qeN").value, nG:+el("qeNG").value, downsample:+el("qeDS").value, theta:+el("qeTH").value,
+    pol:el("qePol")?el("qePol").value:"avg" };
   let r; try{ r=await(await fetch(qeApiBase()+"/api/qe",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
   catch(e){ el("qeNote").textContent="요청 실패: "+e.message; return; }
   if(!r.job){ el("qeNote").textContent="오류: "+(r.error||"?"); return; }
@@ -1051,7 +1054,7 @@ el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
   catch(e){ out.textContent="진단 실패: "+e.message+"\n(서버 실행중인지 확인: python3 app.py)"; btn.disabled=false; return; }
   btn.disabled=false;
   if(d.error){ out.textContent="진단 오류: "+d.error+"\n"+(d.trace||""); return; }
-  let t=`[진단 ${WIZ_VERSION}] λ=${(d.wavelength*1000).toFixed(0)}nm   R=${d.R}   Si 유입(=QE)=${d.T_into_si}   밴드 바닥 통과=${d.T_deep}\n`;
+  let t=`[진단 ${WIZ_VERSION}] λ=${(d.wavelength*1000).toFixed(0)}nm   R=${d.R}   Si 유입=${d.T_into_si} (QE=흡수는 이 중 통과분 제외)   밴드 바닥 통과=${d.T_deep}\n`;
   t+="\n── 물질 n,k (실제 계산에 쓰인 값) ──\n";
   for(const m of d.materials){ const fl=m.flags&&m.flags.length;
     t+=(fl?"⚠ ":"  ")+m.name.padEnd(12)+` n=${m.n}  k=${m.k}  [${m.source}]`+
@@ -1144,7 +1147,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v43";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v44";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
