@@ -1057,6 +1057,12 @@ el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
     t+=(fl?"⚠ ":"  ")+m.name.padEnd(12)+` n=${m.n}  k=${m.k}  [${m.source}]`+
        (m.lam_range?`  λ${m.lam_range[0].toFixed(2)}~${m.lam_range[1].toFixed(2)}µm`:"")+"\n";
     if(fl) for(const f of m.flags) t+="      └ "+f+"\n"; }
+  // 표면(1차 계면) Fresnel 예상 vs 총 R -> 내부 반사(금속 grid 등) 몫 분리 표시
+  { const na=matNK(S.ambient||"air").n, ntop=matNK(S.stack.arl_top.thickness_um>0?S.stack.arl_top.material:S.stack.ml.material).n;
+    const rF=Math.pow((na-ntop)/(na+ntop),2);
+    t+=`\n참고: R=${(d.R*100).toFixed(1)}% 는 '스택 전체' 반사 (표면 계면 Fresnel ≈${(rF*100).toFixed(1)}%`+
+       ` + 내부 반사(금속 grid·층 간섭)가 위로 되나온 ≈${((d.R-rF)*100).toFixed(1)}%).\n`+
+       `내부 몫이 크면 grid metal 반사가 원인일 가능성 — grid 물질을 oxide 로 바꿔 진단해 비교.\n`; }
   t+="\n── 경계 투과 워터폴 · air=100 기준 (전체 | R·G·B 픽셀 면적당) ──\n";
   const f100=v=>v==null?"  -- ":String(Math.max(0,Math.round(v*100))).padStart(4)+" ";
   const rgb3=o=>o?`| R${f100(o.R)}G${f100(o.G)}B${f100(o.B)}`:"";
@@ -1138,7 +1144,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v42";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v43";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
