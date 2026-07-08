@@ -381,6 +381,65 @@ class RCWASolver:
         Sz = 0.5 * (Ex * Hy.conj() - Ey * Hx.conj()).real
         return {"Ex": Ex, "Ey": Ey, "Hx": Hx, "Hy": Hy, "Sz": Sz}
 
+    def absorption_maps(self, Ny, Nx, nz_per_um=48, min_nz=4):
+        """모든 '손실 층'의 z-적분 흡수밀도 raw 맵 + 전역 에너지 정합 상수 C.
+
+        층 i 흡수 A_i = C · raw_i.sum(),  Σ_i A_i = 1−R−T (정확한 에너지 보존으로
+        절대 스케일 고정 — gap-basis node flux 공식(WIP)에 의존하지 않음).
+
+        층 내부 E 복원은 위/아래 node 의 '접선 E 만' 사용:
+            cp_j = (ut_j − X_j·ub_j)/(1−X_j²),  cm_j = (ub_j − X_j·ut_j)/(1−X_j²)
+        (X=exp(−lam·k0·th) 감쇠 대각 -> 두꺼운 층도 안정, H/flux 규약 비의존)
+        Ez 는 Ampere 법칙 ez = ERinv(Kx·hy − Ky·hx) 로 포함 (크기만 사용).
+
+        Returns: (maps: {layer_i: (Ny,Nx) float64 raw}, C: float)
+        """
+        N = self.nG
+        elems, cumL, cumR = self._cumulative_S()
+        node_ab = [self._node_amps(cumL[k], cumR[k + 1])
+                   for k in range(len(elems) - 1)]
+        aE = [a + b for a, b in node_ab]              # W0 = I2 -> node 접선 E
+        maps = {}
+        total = 0.0
+        for i, (W, V, lam, th, kind, data) in enumerate(self._modes):
+            if kind == "uniform" or (hasattr(data, "dim") and data.dim() == 0):
+                data = self._uniform_grid(data)
+            if float(data.imag.abs().max()) < 1e-12:
+                continue                              # 무손실층: 흡수 없음
+            ER = fft_funs.conv_matrix(data, self.m, self.n)
+            ERinv = torch.linalg.inv(ER)
+            eps_xy = data
+            if eps_xy.shape != (Ny, Nx):
+                ii = (torch.arange(Ny, device=data.device) * data.shape[0] // Ny)
+                jj = (torch.arange(Nx, device=data.device) * data.shape[1] // Nx)
+                eps_xy = data[ii][:, jj]
+            imeps = eps_xy.imag.to(torch.float64)
+            Winv = torch.linalg.inv(W)
+            ut = Winv @ aE[i]
+            ub = Winv @ aE[i + 1]
+            X = torch.exp(-lam * self.k0 * th)
+            den = 1.0 - X * X
+            den = torch.where(den.abs() < 1e-12, den + 1e-12, den)   # FP 공진 가드
+            cp = (ut - X * ub) / den
+            cm = (ub - X * ut) / den
+            nz = max(min_nz, int(round(th * nz_per_um)))
+            dens = torch.zeros((Ny, Nx), dtype=torch.float64, device=data.device)
+            for k in range(nz):
+                zf = (k + 0.5) / nz
+                ep = torch.exp(-lam * self.k0 * (zf * th))
+                em = torch.exp(-lam * self.k0 * ((1 - zf) * th))
+                Et = W @ (ep * cp + em * cm)
+                Ht = V @ (ep * cp - em * cm)
+                ez = ERinv @ (self.Kx @ Ht[N:] - self.Ky @ Ht[:N])
+                Ex = fft_funs.field_ifft(Et[:N], self.m, self.n, Ny, Nx)
+                Ey = fft_funs.field_ifft(Et[N:], self.m, self.n, Ny, Nx)
+                Ez = fft_funs.field_ifft(ez, self.m, self.n, Ny, Nx)
+                dens += imeps * (Ex.abs()**2 + Ey.abs()**2 + Ez.abs()**2) * (th / nz)
+            maps[i] = dens
+            total += float(dens.sum())
+        C = (1.0 - self._R - self._T) / total if total > 1e-300 else 0.0
+        return maps, C
+
     def layer_internal_fields(self, i, zfracs, Ny, Nx):
         """층 i 내부 depth(zfracs∈[0,1]) 에서 E 접선필드 실공간 재구성.
 

@@ -25,6 +25,11 @@ from ..materials.library import MaterialLibrary
 class RCWAPlaneWaveSimulator:
     def __init__(self, config_path, nG=101, downsample=2, trunc="circular",
                  device=None, dtype=torch.complex128, materials_dir=None):
+        # ---- complex64 eps 텐서 직접 입력 모드 (<name>_eps.npy + <name>_meta.json) ----
+        if str(config_path).endswith(".npy"):
+            self._init_eps_direct(config_path, nG, downsample, trunc, device, dtype)
+            return
+        self._eps_direct = False
         self.cfg = load_config(config_path)
         self.base_dir = os.path.dirname(os.path.abspath(config_path))
         # 물질 폴더(파장별 n,k) 자동 탐색: 지정값 -> conf 옆 materials -> repo data/materials
@@ -74,13 +79,98 @@ class RCWAPlaneWaveSimulator:
                          "colors": colors, "npx": b.npx}
 
     # -----------------------------------------------------------------
-    def _prepare_layers(self):
-        """Si-top ~ microlens-top 구간을 z-slice 병합해 (matid2d, thickness) 리스트로."""
-        bounds = {l["name"]: l for l in self.meta["layer_bounds_vox"]}
-        z_si_top = bounds["substrate_si"]["z1"]     # Si 반무한(투과매질)의 위 경계
-        z_top = bounds["microlens"]["z1"]           # 마이크로렌즈 꼭대기 (그 위 air=입사매질)
+    def _init_eps_direct(self, eps_path, nG, downsample, trunc, device, dtype):
+        """complex64 eps 텐서([nz,ny,nx], (n+ik)² @ 고정 λ)를 RCWA 에 직접 입력.
 
-        mat = self.matid[z_si_top:z_top]            # [nz', ny, nx]
+        부속 meta json (<name>_meta.json, 위저드가 함께 저장):
+          voxel_um(dz/dx), eps_lambda_um, substrate_material(+materials n,k),
+          si_thickness_um, pixel_pitch_um, n_pixels, bayer  -> 픽셀별 QE 까지 지원.
+        주의: eps 는 λ 고정 스냅샷 — sweep 시 물질 분산(파장의존 n,k)은 반영 안 됨.
+        """
+        import json
+        self._eps_direct = True
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.dtype = dtype
+        self.nG = nG
+        self.trunc = trunc
+        self.ds = max(1, int(downsample))
+        arr = np.load(eps_path)                      # complex64 [nz,ny,nx]
+        mpath = eps_path.replace("_eps.npy", "_meta.json")
+        meta = json.load(open(mpath, encoding="utf-8"))
+        self.meta = meta
+        self.dz = float(meta["voxel_um"]["dz"])
+        self.dxy = float(meta["voxel_um"]["dx"])
+        self.eps_lambda = float(meta.get("eps_lambda_um", 0) or 0)
+        self.span = arr.shape[2] * self.dxy
+        self.substrate = meta.get("substrate_material", "si")
+        mats = {m["name"]: m for m in meta["materials"]}
+        ms = mats.get(self.substrate, {"n": 4.08, "k": 0.028})
+        self._eps_trn_fixed = complex(float(ms["n"]), float(ms["k"])) ** 2
+        print(f"[eps-direct] {arr.shape} complex64 @ λ={self.eps_lambda}µm (분산 고정)")
+
+        ds = self.ds
+        a = arr[:, ::ds, ::ds].astype(np.complex128)
+        self.grid_ny, self.grid_nx = a.shape[1], a.shape[2]
+        layers = []
+        prev = None; count = 0
+        for z in range(a.shape[0]):
+            sl = a[z]
+            if prev is not None and np.array_equal(sl, prev):
+                count += 1
+            else:
+                if prev is not None:
+                    layers.append((prev, count * self.dz))
+                prev = sl; count = 1
+        layers.append((prev, count * self.dz))
+        self.layer_stack = list(reversed(layers))    # 입사(위)->투과(아래)
+        # Si 밴드(층 두께 합 == si_thickness_um) 식별 — 픽셀별 QE 용
+        self.si_band_um = float(meta.get("si_thickness_um", 0) or 0)
+        self.n_si_layers = 0
+        acc = 0.0
+        for m2d, th in reversed(self.layer_stack):
+            if acc + 1e-9 >= self.si_band_um:
+                break
+            acc += th; self.n_si_layers += 1
+        # 픽셀 마스크 — 우선순위: 옆에 저장된 <name>.yaml (정확한 기하) -> meta 근사
+        self._pix = None
+        ypath = eps_path.replace("_eps.npy", ".yaml")
+        if self.si_band_um > 0 and os.path.exists(ypath):
+            from ..structure.wizard_builder import WizardBuilder
+            b = WizardBuilder(load_config(ypath))
+            pixidx, colors = b.pixel_maps()
+            trench = b.dti_trench_mask()
+            self._pix = {"pixidx": pixidx[::ds, ::ds], "trench": trench[::ds, ::ds],
+                         "colors": colors, "npx": b.npx}
+        elif self.si_band_um > 0 and meta.get("bayer"):
+            npx = int(meta["n_pixels"]); p = float(meta["pixel_pitch_um"])
+            yy, xx = np.meshgrid(np.arange(self.grid_ny), np.arange(self.grid_nx), indexing="ij")
+            # 다운샘플 격자의 원본 셀 중심: (idx*ds + 0.5)*dxy  (yaml 경로와 동일 규약)
+            pr = np.clip(((yy * ds + 0.5) * self.dxy / p).astype(int), 0, npx - 1)
+            pc = np.clip(((xx * ds + 0.5) * self.dxy / p).astype(int), 0, npx - 1)
+            pixidx = (pr * npx + pc).astype(np.int32)
+            si_sl = self.layer_stack[-1][0]          # Si 밴드 슬라이스 (마지막 층)
+            eps_si = self._eps_trn_fixed
+            trench = np.abs(si_sl - eps_si) > 1e-6   # 라이너만 검출 (fill=si 는 근사 한계)
+            bay = meta["bayer"]
+            colors = [bay[r][c] for r in range(npx) for c in range(npx)]
+            self._pix = {"pixidx": pixidx, "trench": trench, "colors": colors, "npx": npx}
+
+    # -----------------------------------------------------------------
+    def _prepare_layers(self):
+        """구조를 z-slice 병합해 (matid2d, thickness) 리스트로.
+
+        wizard 스키마: Si 밴드(DTI 트렌치 포함)를 '패턴층'으로 스택에 포함
+        -> DTI 벽의 반사/굴절/도파(픽셀 격리)가 광학 계산에 반영.
+        투과 매질은 그 아래 균일 Si 반무한 (트렌치 바닥 아래 벌크).
+        구버전 qcell 스키마: 기존대로 Si-top 위만 스택 (호환).
+        """
+        bounds = {l["name"]: l for l in self.meta["layer_bounds_vox"]}
+        z_si_top = bounds["substrate_si"]["z1"]     # Si 밴드 위 경계
+        z_top = bounds["microlens"]["z1"]           # 마이크로렌즈 꼭대기 (그 위 air=입사매질)
+        self._wizard = hasattr(self.builder, "pixel_maps")
+        z_lo = 0 if self._wizard else z_si_top      # wizard: Si(DTI) 밴드 포함
+
+        mat = self.matid[z_lo:z_top]                # [nz', ny, nx]
         ds = self.ds
         mat = mat[:, ::ds, ::ds]                    # 가로 다운샘플
         self.grid_ny, self.grid_nx = mat.shape[1], mat.shape[2]
@@ -96,9 +186,17 @@ class RCWAPlaneWaveSimulator:
                     layers.append((prev, count * self.dz))
                 prev = sl; count = 1
         layers.append((prev, count * self.dz))
-        self.layer_stack = layers                   # 위->아래는 아래 build 순
         # z-slice 는 아래(z작음)->위 순서. RCWA 는 입사(위)->투과(아래) 순으로 쌓아야 하므로 반전.
         self.layer_stack = list(reversed(layers))
+        # Si(DTI) 밴드 = 반전 후 마지막 층들 (z-균일 패턴이라 병합되어 보통 1층)
+        self.si_band_um = (z_si_top - z_lo) * self.dz
+        self.n_si_layers = 0
+        if self._wizard:
+            acc = 0.0
+            for m2d, th in reversed(self.layer_stack):
+                if acc + 1e-9 >= self.si_band_um:
+                    break
+                acc += th; self.n_si_layers += 1
 
     # -----------------------------------------------------------------
     def _nk_at(self, name, lam):
@@ -143,35 +241,62 @@ class RCWAPlaneWaveSimulator:
         컬러별 QE = 같은 bayer 색 픽셀들의 평균 (CF merge average).
         """
         lam = float(wavelength)
-        eps_lut = self._eps_lut(lam)
         eps_inc = 1.0                                    # air (위)
-        n_s, k_s = self._nk_at(self.substrate, lam)      # 기판(반무한 투과 매질)
-        eps_trn = complex(n_s, k_s) ** 2
+        if self._eps_direct:
+            if self.eps_lambda and abs(lam - self.eps_lambda) > 1e-9:
+                print(f"[warn] eps 텐서는 λ={self.eps_lambda}µm 스냅샷 — λ={lam} 에서 분산 미반영")
+            eps_trn = self._eps_trn_fixed
+        else:
+            eps_lut = self._eps_lut(lam)
+            n_s, k_s = self._nk_at(self.substrate, lam)  # 기판(반무한 투과 매질)
+            eps_trn = complex(n_s, k_s) ** 2
 
         solver = RCWASolver(lam, self.span, self.span, nG=self.nG,
                             theta=theta, phi=phi, trunc=self.trunc,
                             device=self.device, dtype=self.dtype)
         solver.setup_incidence(eps_inc, eps_trn)
         for matid2d, th in self.layer_stack:
-            solver.add_layer(th, eps_grid=self._eps_grid(matid2d, eps_lut))
+            if self._eps_direct:
+                solver.add_layer(th, eps_grid=torch.as_tensor(matid2d, dtype=self.dtype,
+                                                              device=self.device))
+            else:
+                solver.add_layer(th, eps_grid=self._eps_grid(matid2d, eps_lut))
         o = solver.solve(pol_te=pol_te, pol_tm=pol_tm)
         out = {"wavelength": lam, "R": o["R"], "QE": o["T"],
                "A_stack": o["A"], "nG": solver.nG, "n_layers": len(self.layer_stack)}
 
-        if pixel_qe and self._pix is not None:
-            Sz = solver.transmitted_flux_map(self.grid_ny, self.grid_nx)
-            Sz = Sz.detach().cpu().numpy()               # 평균 == T (calibrated)
+        if pixel_qe and self._pix is not None and self.n_si_layers > 0:
+            # ---- 픽셀별 QE = 픽셀 Si 볼륨(DTI 트렌치 제외) 내 3D 흡수 + 밴드 아래 심부 Si ----
+            # 절대 스케일: Σ(전 손실층 흡수) = 1−R−T (에너지 보존) 로 고정 — 정확.
+            maps, C = solver.absorption_maps(self.grid_ny, self.grid_nx)
+            M = len(self.layer_stack)
+            nS = self.n_si_layers
+            T_deep = o["T"]                              # DTI 바닥 아래 심부 Si 로 가는 몫 (정확)
             pixidx, trench = self._pix["pixidx"], self._pix["trench"]
             colors, npx = self._pix["colors"], self._pix["npx"]
-            ngrid = Sz.size
-            qe_pix = []
+            ngrid = pixidx.size
+            pix_abs = np.zeros(npx * npx); trench_abs = 0.0; A_band = 0.0
+            for li in range(M - nS, M):                  # Si 밴드 층들 (보통 1층)
+                if li not in maps:
+                    continue
+                dens = maps[li].detach().cpu().numpy() * C
+                A_band += dens.sum()
+                for pidx in range(npx * npx):
+                    m = (pixidx == pidx) & (~trench)     # 픽셀 1×1 의 순수 Si 창 (라이너 안쪽)
+                    pix_abs[pidx] += dens[m].sum()
+                trench_abs += dens[trench].sum()         # DTI(라이너+채움) 내 흡수 = 제외분
+            # 심부(트렌치 바닥 아래) Si: 픽셀 사각형 기준 배분 (DTI 없음)
+            Sz = solver.transmitted_flux_map(self.grid_ny, self.grid_nx).detach().cpu().numpy()
             for pidx in range(npx * npx):
-                m = (pixidx == pidx) & (~trench)         # 픽셀 내 순수 Si 창
-                # (픽셀 flux 합/전체 셀) ÷ (픽셀 면적/전체 면적 = 1/npx²)
-                qe_pix.append(float(Sz[m].sum() / ngrid * (npx * npx)))
+                pix_abs[pidx] += Sz[pixidx == pidx].sum() / ngrid
+            qe_top = float(A_band + T_deep)              # Si 밴드 유입 총량 (A_band 는 trench 포함 전체)
+            qe_pix = [float(v * npx * npx) for v in pix_abs]   # 픽셀 면적 정규화
             qe_rgb = {c: float(np.mean([q for q, cc in zip(qe_pix, colors) if cc == c]))
                       for c in "RGB" if c in colors}
+            out["QE"] = qe_top                           # Si 로 들어간 총 파워 (기존 정의 유지)
+            out["A_stack"] = float(1.0 - o["R"] - qe_top)
             out["QE_pixels"] = qe_pix
             out["QE_rgb"] = qe_rgb
-            out["QE_trench"] = float(o["T"] - sum(qe_pix) / (npx * npx))  # 트렌치로 들어간 몫
+            out["QE_trench"] = float(trench_abs)         # DTI 트렌치 내부 흡수분 (픽셀 제외)
+            out["QE_deep"] = float(T_deep)
         return out

@@ -91,6 +91,27 @@ python3 app.py            # http://127.0.0.1:8787 자동 오픈 (GPU 있으면 �
 - downsample: 구조 격자 축소(속도↑). 최종 결과는 1~2 권장.
 - 소요: CPU 기준 nG=101 에서 ~수 초/파장(TE+TM). CUDA 자동 감지.
 
+### QE 물리 모델 (검증 요약)
+- **파동광학 엄밀해**: 굴절·회절·간섭·다중반사·흡수가 한 풀이에 전부 포함
+  (ML 집광, BARL/ARL 간섭, grid metal R/T/A — A/B 실험으로 개별 확인).
+- **무한 반복 배열**: RCWA 는 주기 경계조건 — unit(4×4) 이 상하좌우·대각으로
+  무한 반복된 배열의 해 (구조 평행이동 불변으로 검증).
+- **DTI 포함**: Si 밴드(트렌치+라이너)가 패턴층으로 스택에 들어가 DTI 벽의
+  반사/도파(픽셀 격리)까지 반영. 투과 매질은 트렌치 바닥 아래 벌크 Si.
+- **픽셀별 QE = 픽셀 Si 볼륨의 3D 흡수**: Im(ε)|E|²(Ez 포함) 을 픽셀 1×1 의
+  순수 Si 창(DTI 제외)으로 z-적분 + 밴드 아래 심부 유입분. 절대 스케일은
+  에너지 보존(Σ흡수=1−R−T)으로 고정. 컬러 QE = 같은 색 픽셀 평균.
+
+### complex64 eps 텐서 직접 입력
+위저드 npy 저장 시 `<product>_eps.npy` (complex64, `(n+ik)²` @ 저장 시점 λ)가
+함께 생성되며, **RCWA 에 그대로 입력** 가능:
+```python
+sim = RCWAPlaneWaveSimulator("foo_eps.npy", nG=101)   # meta.json 자동 사용
+sim.run(0.55)      # yaml 경로와 R/QE/픽셀QE 1e-8 일치 검증됨
+```
+옆에 `<product>.yaml` 이 있으면 픽셀 마스크(DTI 제외)를 정확 기하로 구성.
+주의: eps 는 λ 고정 스냅샷 — 파장 sweep 의 물질 분산은 yaml 경로 사용.
+
 ## 구조 위저드 — `editors/structure_wizard.html`
 
 브라우저에서 **step-by-step**(1~8)으로 구조 설정 → 3D/단면 확인 → **npy 생성**:

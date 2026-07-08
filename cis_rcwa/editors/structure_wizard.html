@@ -413,26 +413,43 @@ async function buildVoxels(onProg){ const P0=await buildVoxPrep();
     if(onProg&&(zi&15)===0){ onProg(zi/nz); await new Promise(r=>setTimeout(r,0)); } }
   return {data,shape:[nz,ny,nx],names,dxy,dz};
 }
-function npyHeader(shape){ const hdr=`{'descr': '|u1', 'fortran_order': False, 'shape': (${shape.join(', ')}), }`;
+function npyHeader(shape,descr){ const hdr=`{'descr': '${descr||"|u1"}', 'fortran_order': False, 'shape': (${shape.join(', ')}), }`;
   let need=(64-((10+hdr.length+1)%64))%64; const hs=hdr+" ".repeat(need)+"\n"; const hb=new TextEncoder().encode(hs);
   const out=new Uint8Array(10+hb.length); out.set([0x93,0x4E,0x55,0x4D,0x50,0x59,1,0],0);
   out[8]=hb.length&255; out[9]=(hb.length>>8)&255; out.set(hb,10); return out; }
 function npyU8(arr,shape){ const h=npyHeader(shape);
   const out=new Uint8Array(h.length+arr.length); out.set(h,0); out.set(arr,h.length); return out; }
-// 4GB 초과 npy: 디스크로 슬랩(z단면)별 스트리밍 저장 (File System Access API, Chrome/Edge)
-// handle 은 클릭 핸들러에서 미리 획득 (picker 는 user gesture 중에만 열림 — 프리컴퓨트 후엔 만료)
-async function exportNpyStream(handle,onProg){
-  const w=await handle.createWritable();
+// eps LUT: matid -> complex eps=(n+ik)^2 @ 현재 refLambda  (interleaved re,im float32)
+function epsLUT(names){ const lut=new Float32Array(names.length*2);
+  for(let i=0;i<names.length;i++){ const nk=matNK(names[i]);
+    lut[2*i]=nk.n*nk.n-nk.k*nk.k; lut[2*i+1]=2*nk.n*nk.k; } return lut; }
+function slabToC8(slab,lut,out){ // u1 slab -> complex64 bytes (Float32 x2)
+  const f=new Float32Array(out.buffer,out.byteOffset,slab.length*2);
+  for(let i=0;i<slab.length;i++){ const id=slab[i]*2; f[2*i]=lut[id]; f[2*i+1]=lut[id+1]; } return out; }
+// matid 전체 배열 -> complex64 eps npy 바이트 (RCWA 직접 입력용)
+function npyC8(data,shape,names){ const h=npyHeader(shape,"<c8"); const lut=epsLUT(names);
+  const out=new Uint8Array(h.length+data.length*8); out.set(h,0);   // 헤더 64B 정렬 -> view OK
+  slabToC8(data,lut,new Uint8Array(out.buffer,h.length,data.length*8)); return out; }
+// 디스크로 슬랩(z단면)별 스트리밍 저장 (File System Access API, Chrome/Edge)
+// matid(u1) + eps(complex64, RCWA 직접 입력) 두 npy 를 함께 기록. 대용량도 메모리 안 씀.
+// dir 은 클릭 핸들러에서 미리 획득 (picker 는 user gesture 중에만 열림 — 프리컴퓨트 후엔 만료)
+async function exportNpyStream(dir,nm,onProg){
+  const fhM=await dir.getFileHandle(nm+"_matid.npy",{create:true});
+  const fhE=await dir.getFileHandle(nm+"_eps.npy",{create:true});
+  const wM=await fhM.createWritable(), wE=await fhE.createWritable();
   try{
     const {nx,ny,nz,nP,names,dxy,dz,fillSlab}=await buildVoxPrep();
-    await w.write(npyHeader([nz,ny,nx]));
-    const slab=new Uint8Array(nP);
+    const lut=epsLUT(names);
+    await wM.write(npyHeader([nz,ny,nx]));
+    await wE.write(npyHeader([nz,ny,nx],"<c8"));
+    const slab=new Uint8Array(nP), c8=new Uint8Array(nP*8);
     for(let zi=0;zi<nz;zi++){ fillSlab(zi,slab,0);
-      await w.write(slab.slice());                       // write 는 버퍼 소유 -> 복사본 전달
+      await wM.write(slab.slice());                      // write 는 버퍼 소유 -> 복사본 전달
+      await wE.write(slabToC8(slab,lut,c8).slice());
       if(onProg&&(zi&7)===0) onProg(zi/nz); }
-    await w.close();
+    await wM.close(); await wE.close();
     return {shape:[nz,ny,nx],names,dxy,dz,bytes:nz*nP};
-  }catch(err){ try{await w.abort();}catch(_){} throw err; }
+  }catch(err){ try{await wM.abort();}catch(_){} try{await wE.abort();}catch(_){} throw err; }
 }
 
 // ============================ 렌더 ============================
@@ -874,7 +891,12 @@ const yamlFileIn=h("input",{type:"file",id:"yamlFile",accept:".yaml,.yml",style:
 yamlFileIn.onchange=async e=>{ const f=e.target.files[0]; if(!f)return; try{ loadStruct(parseYAML(await f.text())); alert("구조 불러옴: "+(S.product||f.name)); }catch(err){alert("YAML 오류: "+err.message);} e.target.value=""; };
 el("dlgCopy").onclick=async()=>{ const t=el("dlgText"); t.select(); try{await navigator.clipboard.writeText(t.value);}catch(e){document.execCommand("copy");} };
 el("dlgClose").onclick=()=>dlg.close();
-function metaJSON(v){ return JSON.stringify({product:S.product,shape_zyx:v.shape,voxel_um:{dz:v.dz,dy:v.dxy,dx:v.dxy},
+function metaJSON(v){ const nm=pname(); return JSON.stringify({product:S.product,shape_zyx:v.shape,
+  voxel_um:{dz:v.dz,dy:v.dxy,dx:v.dxy},
+  // eps 텐서(RCWA 직접 입력) 부속 정보: complex64 = (n+ik)^2 @ eps_lambda_um (고정 파장)
+  eps_file:nm+"_eps.npy", eps_dtype:"complex64", eps_lambda_um:refLambda,
+  substrate_material:S.stack.si.material, si_thickness_um:+S.stack.si.thickness_um,
+  pixel_pitch_um:P(), n_pixels:NP(), bayer:S.bayer, cf_array:S.cf_array||"bayer",
   materials:v.names.map((n,i)=>({id:i,name:n,...matNK(n)}))},null,2); }
 async function writeFileTo(dir,name,data){ const fh=await dir.getFileHandle(name,{create:true});
   const w=await fh.createWritable(); await w.write(data); await w.close(); }
@@ -896,19 +918,23 @@ el("npyBtn").onclick=async()=>{ const btn=el("npyBtn"), t0=btn.textContent;
   if(!dir && bytes>8e8 && !confirm(`npy ${nx}×${nx}×${nz} ≈ ${(bytes/1e9).toFixed(2)} GB — 메모리 여유가 필요합니다. 생성할까요?`)) return;
   btn.disabled=true;
   try{
-    if(dir){ // 선택한 폴더에 직접 저장 — npy 는 z-슬랩 스트리밍(대용량도 메모리 안 씀)
-      const fh=await dir.getFileHandle(nm+"_matid.npy",{create:true});
-      const v=await exportNpyStream(fh,f=>{btn.textContent=(big?"스트리밍 ":"생성중 ")+Math.round(f*100)+"%";});
+    if(dir){ // 선택한 폴더에 직접 저장 — matid+eps npy 를 z-슬랩 스트리밍(대용량도 메모리 안 씀)
+      const v=await exportNpyStream(dir,nm,f=>{btn.textContent=(big?"스트리밍 ":"생성중 ")+Math.round(f*100)+"%";});
       await writeFileTo(dir,nm+"_meta.json",metaJSON(v));
       await writeFileTo(dir,nm+".yaml",structYAML());
       const sz=v.bytes>1e9?(v.bytes/1e9).toFixed(2)+" GB":(v.bytes/1e6).toFixed(1)+" MB";
-      alert(`선택한 폴더에 저장 완료:\n · ${nm}_matid.npy  (${v.shape.join("×")}, ${sz} uint8)\n · ${nm}_meta.json (물질 id/n,k)\n · ${nm}.yaml (구조 설정, import 가능)`);
-    }else{   // 폴백: 브라우저 다운로드 폴더로 3파일
+      alert(`선택한 폴더에 저장 완료:\n · ${nm}_matid.npy  (${v.shape.join("×")}, ${sz} uint8)\n`+
+            ` · ${nm}_eps.npy  (complex64 ε @ λ=${refLambda}µm — RCWA 직접 입력)\n`+
+            ` · ${nm}_meta.json (물질/eps/픽셀 정보)\n · ${nm}.yaml (구조 설정, import 가능)`);
+    }else{   // 폴백: 브라우저 다운로드 폴더
       const v=await buildVoxels(f=>{btn.textContent="생성중 "+Math.round(f*100)+"%";});
       download(nm+"_matid.npy", npyU8(v.data,v.shape), "application/octet-stream");
+      if(v.data.length*8<1.5e9) download(nm+"_eps.npy", npyC8(v.data,v.shape,v.names), "application/octet-stream");
       download(nm+"_meta.json", metaJSON(v), "application/json");
       download(nm+".yaml", structYAML());
-      alert(`다운로드 폴더에 저장:\n · ${nm}_matid.npy  (${v.shape.join("×")}, ${(v.data.length/1e6).toFixed(1)} MB uint8)\n · ${nm}_meta.json (물질 id/n,k)\n · ${nm}.yaml (구조 설정, import 가능)`);
+      alert(`다운로드 폴더에 저장:\n · ${nm}_matid.npy  (${v.shape.join("×")}, ${(v.data.length/1e6).toFixed(1)} MB uint8)\n`+
+            (v.data.length*8<1.5e9?` · ${nm}_eps.npy  (complex64 ε @ λ=${refLambda}µm)\n`:" · (eps.npy 는 1.5GB 초과 — 폴더 선택 저장 사용)\n")+
+            ` · ${nm}_meta.json\n · ${nm}.yaml`);
     }
   }catch(err){ if(!(err&&err.name==="AbortError")) alert("npy 저장 오류: "+err.message); }
   finally{ btn.disabled=false; btn.textContent=t0; } };
