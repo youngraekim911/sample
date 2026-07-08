@@ -91,6 +91,16 @@ python3 app.py            # http://127.0.0.1:8787 자동 오픈 (GPU 있으면 �
 - downsample: 구조 격자 축소(속도↑). 최종 결과는 1~2 권장.
 - 소요: CPU 기준 nG=101 에서 ~수 초/파장(TE+TM). CUDA 자동 감지.
 
+### 적응 mesh (기본값 mesh="auto")
+RCWA 는 z 방향 mesh 가 필요 없다 — 층 두께를 해석적으로 정확히 지정:
+- **z**: 복셀화 없이 yaml 기하에서 층 경계 직접 생성. BARL Å 단위·20nm 코팅 cap·
+  grid stack 경계·Si 밴드 = **정확한 두께**. 연속 곡면만 계단화(ML 돔+ARL 48,
+  CF 응집면 8, grid taper 8 슬라이스 — `rcwa_layers()` 인자).
+- **가로**: npy dxy 와 독립적인 미세 래스터 (기본 5nm×downsample; ds=2 -> 10nm).
+- npy 복셀 해상도(step1 dxy/dz)는 이제 **뷰어/npy 출력 전용** — RCWA 정확도와 무관.
+- 검증: 37Å BARL 층이 voxel mesh(dz=0.02)에선 소실, auto 에선 정확 반영.
+- 구버전 비교용: `RCWAPlaneWaveSimulator(..., mesh="voxel")`.
+
 ### QE 물리 모델 (검증 요약)
 - **파동광학 엄밀해**: 굴절·회절·간섭·다중반사·흡수가 한 풀이에 전부 포함
   (ML 집광, BARL/ARL 간섭, grid metal R/T/A — A/B 실험으로 개별 확인).

@@ -85,6 +85,137 @@ class WizardBuilder:
               np.where(any_t, li_id, si_id)))
         return out.astype(np.uint8)
 
+    # ----------------------------------------------------- RCWA 적응 mesh
+    def set_lateral(self, n):
+        """가로 격자를 npy 복셀과 독립적으로 재설정 (RCWA 용 미세 래스터)."""
+        n = int(n)
+        self.nx = self.ny = n
+        self.dxy = self.span / n
+        xc = (np.arange(n) + 0.5) * self.dxy
+        self.X, self.Y = np.meshgrid(xc, xc)
+        self.__dict__.pop("_trench", None)
+        return self
+
+    def rcwa_layers(self, ml_slices=48, men_slices=8, taper_slices=8):
+        """해석적 z-경계의 RCWA 층 리스트 — z 복셀화 없음 (적응 mesh).
+
+        각 물리 층(BARL Å 단위, grid stack, 20nm 코팅 cap, Si 밴드)의 두께를
+        '정확히' 반영. 연속 변화 구간만 계단화:
+          · ML 돔+ARL conformal : ml_slices
+          · CF 응집(meniscus) 상면 : men_slices (곡률 0 이면 생략)
+          · grid taper (top_ratio<1): taper_slices
+        Returns: (layers [(id_map uint8, th_um), ...] 입사(위)->투과(아래), si_n_layers)
+        """
+        s = self.s
+        p = self.p
+        zSi = float(s["si"]["thickness_um"])
+        barl = s.get("barl") or []
+        g = s["grid"]
+        gridH = sum(float(l["height_um"]) for l in g["stack"])
+        cw = float(g.get("coat_um", 0)) if g.get("coat_on", True) else 0.0
+        cf = s["cf"]
+        th = np.array([float(cf[c]["thickness_um"]) for c in "RGB"])
+        cv = np.array([float(cf[c].get("curvature_um", 0) or 0) for c in "RGB"])
+        cfTopMax = float(np.max(th + np.maximum(2 * cv / 3, -4 * cv / 3)))
+        cfTopMin = float(max(0.002, np.min(th + np.minimum(2 * cv / 3, -4 * cv / 3))))
+        planar = max(cfTopMin + float(s["ml"]["planar_um"]), cfTopMax, gridH + cw)
+        sag = self._ml_sag()
+        sagH = self._ml_maxh()
+        arlT = float(s["arl_top"]["thickness_um"])
+
+        # ---- 2D 맵 ----
+        si_map = self._si_map()
+        per = (g.get("pitch", 1) or 1) * p
+        dg = np.minimum(np.abs(self.X - np.round(self.X / per) * per),
+                        np.abs(self.Y - np.round(self.Y / per) * per))
+        W = float(g["width_um"])
+        ratio = min(1.0, max(0.0, float(g.get("top_ratio", 1) or 0)))
+        coat_id = self._id(g.get("coat_material", "oxide")) if cw > 0 else 0
+        gbounds = []
+        acc = 0.0
+        for l in g["stack"]:
+            acc += float(l["height_um"])
+            gbounds.append((acc, self._id(l["material"])))
+        pr = np.clip((self.Y / p).astype(int), 0, self.npx - 1)
+        pc = np.clip((self.X / p).astype(int), 0, self.npx - 1)
+        colmap = {"R": 0, "G": 1, "B": 2}
+        colcode = np.zeros_like(pr)
+        bay = self.cfg["bayer"]
+        for r in range(self.npx):
+            for c in range(self.npx):
+                colcode[(pr == r) & (pc == c)] = colmap[bay[r][c]]
+        cf_per = (2 if (self.cfg.get("cf_array") == "tetra") else 1) * p
+        u = (self.X - (np.floor(self.X / cf_per) + 0.5) * cf_per) / (cf_per / 2)
+        v = (self.Y - (np.floor(self.Y / cf_per) + 0.5) * cf_per) / (cf_per / 2)
+        pin = (2.0 / 3.0) - (u * u + v * v)
+        zTop = np.maximum(0.002, th[colcode] + cv[colcode] * pin)
+        cf_ids = np.array([self._id(cf[c]["material"]) for c in "RGB"], dtype=np.uint8)
+        cf_map = cf_ids[colcode]
+        ml_id = self._id(s["ml"]["material"])
+        arl_id = self._id(s["arl_top"]["material"])
+        air_id = 0
+
+        layers = []                                # 아래(Si)->위 로 쌓고 마지막에 반전
+        # (1) Si 밴드 (DTI 포함) — 정확 두께 1층
+        layers.append((si_map.astype(np.uint8), zSi))
+        si_n = 1
+        # (2) BARL — 각 sublayer 정확 두께 (Å 그대로)
+        for l in barl:
+            t = float(l["thickness_um"])
+            if t > 0:
+                layers.append((np.full_like(si_map, self._id(l["material"])), t))
+        # (3) planar 밴드: 정확 경계 + 연속 구간 세분
+        bps = {0.0, planar}
+        for b_, _ in gbounds:
+            bps.add(min(b_, planar))
+        if cw > 0:
+            bps.add(min(gridH + cw, planar))
+        if ratio < 1.0 and gridH > 0:              # taper: 폭이 z 에 따라 변함
+            for k in range(1, taper_slices):
+                bps.add(gridH * k / taper_slices)
+        if cfTopMax - cfTopMin > 1e-6:             # CF 응집 곡면
+            for k in range(men_slices + 1):
+                z = cfTopMin + (cfTopMax - cfTopMin) * k / men_slices
+                if 0 < z < planar:
+                    bps.add(z)
+        else:
+            if 0 < cfTopMax < planar:
+                bps.add(cfTopMax)
+        bps = sorted(b for b in bps if -1e-12 <= b <= planar + 1e-12)
+        for z0, z1 in zip(bps[:-1], bps[1:]):
+            if z1 - z0 < 1e-9:
+                continue
+            zc = 0.5 * (z0 + z1)
+            m = np.full_like(si_map, ml_id)
+            m[zc <= zTop] = cf_map[zc <= zTop]
+            wz = W * (1 - (1 - ratio) * min(zc / gridH, 1.0)) if gridH > 0 else W
+            if zc <= gridH:
+                gid = gbounds[-1][1]
+                for b_, i_ in gbounds:
+                    if zc <= b_:
+                        gid = i_
+                        break
+                m[dg < wz / 2] = gid
+                if cw > 0:
+                    m[(dg >= wz / 2) & (dg < wz / 2 + cw)] = coat_id
+            elif cw > 0 and zc <= gridH + cw:
+                m[dg < wz / 2 + cw] = coat_id
+            layers.append((m.astype(np.uint8), z1 - z0))
+        # (4) ML 돔 + ARL conformal — ml_slices 균등 (전체 높이 sagH+arlT)
+        top = sagH + arlT
+        if top > 1e-9:
+            nsl = max(4, int(ml_slices))
+            for k in range(nsl):
+                z0 = top * k / nsl
+                z1 = top * (k + 1) / nsl
+                zc = 0.5 * (z0 + z1)
+                m = np.full_like(si_map, air_id)
+                m[sag + arlT > zc] = arl_id
+                m[sag > zc] = ml_id
+                if not (m == air_id).all():
+                    layers.append((m.astype(np.uint8), z1 - z0))
+        return list(reversed(layers)), si_n
+
     # ----------------------------------------------------- 픽셀 QE 마스크
     def dti_trench_mask(self):
         """(ny,nx) bool — DTI 트렌치 내부(라이너+채움). 픽셀 Si 창에서 제외용."""

@@ -24,12 +24,20 @@ from ..materials.library import MaterialLibrary
 
 class RCWAPlaneWaveSimulator:
     def __init__(self, config_path, nG=101, downsample=2, trunc="circular",
-                 device=None, dtype=torch.complex128, materials_dir=None):
+                 device=None, dtype=torch.complex128, materials_dir=None,
+                 mesh="auto", lateral_um=0.005):
+        """mesh:
+            "auto"  — 적응 mesh (기본): z 는 해석적 층 경계(복셀화 없음 — BARL Å,
+                      20nm 코팅 등 정확), 가로는 lateral_um×downsample 미세 래스터.
+            "voxel" — 구버전: npy 복셀(dz/dxy)에서 z-slice 병합.
+        """
         # ---- complex64 eps 텐서 직접 입력 모드 (<name>_eps.npy + <name>_meta.json) ----
         if str(config_path).endswith(".npy"):
             self._init_eps_direct(config_path, nG, downsample, trunc, device, dtype)
             return
         self._eps_direct = False
+        self.mesh = mesh
+        self.lateral_um = float(lateral_um)
         self.cfg = load_config(config_path)
         self.base_dir = os.path.dirname(os.path.abspath(config_path))
         # 물질 폴더(파장별 n,k) 자동 탐색: 지정값 -> conf 옆 materials -> repo data/materials
@@ -58,25 +66,42 @@ class RCWAPlaneWaveSimulator:
         else:
             b = QcellBuilder(self.cfg, base_dir=self.base_dir)
         self.builder = b
-        self.matid = b.build()                      # [nz,ny,nx] uint8
-        self.meta = b.meta()
         self.dz = b.dz
         self.dxy = b.dxy
         self.span = b.span                          # 단위셀 주기 (um)
-        self.id2name = {int(m["id"]): n for n, m in self.meta["materials"].items()}
-        self.substrate = self.meta.get("substrate_material", "si")
-
-        # 층 스택(z-slice 병합) 준비
-        self._prepare_layers()
-
-        # 픽셀별 QE 마스크 (wizard 스키마): 픽셀 1×1 의 순수 Si 창(DTI 트렌치 제외)
+        wizard = hasattr(b, "pixel_maps")
         self._pix = None
-        if hasattr(b, "pixel_maps"):
-            pixidx, colors = b.pixel_maps()
-            trench = b.dti_trench_mask()
-            ds = self.ds
-            self._pix = {"pixidx": pixidx[::ds, ::ds], "trench": trench[::ds, ::ds],
-                         "colors": colors, "npx": b.npx}
+
+        if wizard and self.mesh == "auto":
+            # ---- 적응 mesh: z 해석적 층 경계 + 가로 미세 래스터 (npy 복셀과 독립) ----
+            Nlat = int(round(self.span / (self.lateral_um * self.ds)))
+            Nlat = min(max(Nlat, 128), 2400)
+            bl = WizardBuilder(self.cfg, base_dir=self.base_dir).set_lateral(Nlat)
+            self.layer_stack, self.n_si_layers = bl.rcwa_layers()
+            self.grid_ny = self.grid_nx = Nlat
+            self.si_band_um = float(self.cfg["stack"]["si"]["thickness_um"])
+            self.id2name = {int(i): n for n, i in bl._idx.items()}
+            self.substrate = self.cfg["stack"]["si"]["material"]
+            self.matid = None; self.meta = None
+            pixidx, colors = bl.pixel_maps()
+            trench = bl.dti_trench_mask()
+            self._pix = {"pixidx": pixidx, "trench": trench,
+                         "colors": colors, "npx": bl.npx}
+            print(f"[mesh] auto: lateral {Nlat}×{Nlat} ({self.span/Nlat*1000:.1f}nm)"
+                  f" · layers {len(self.layer_stack)} (z 해석적 경계, 복셀화 없음)")
+        else:
+            # ---- 구버전 voxel mesh ----
+            self.matid = b.build()                  # [nz,ny,nx] uint8
+            self.meta = b.meta()
+            self.id2name = {int(m["id"]): n for n, m in self.meta["materials"].items()}
+            self.substrate = self.meta.get("substrate_material", "si")
+            self._prepare_layers()                  # z-slice 병합
+            if wizard:
+                pixidx, colors = b.pixel_maps()
+                trench = b.dti_trench_mask()
+                ds = self.ds
+                self._pix = {"pixidx": pixidx[::ds, ::ds], "trench": trench[::ds, ::ds],
+                             "colors": colors, "npx": b.npx}
 
     # -----------------------------------------------------------------
     def _init_eps_direct(self, eps_path, nG, downsample, trunc, device, dtype):
