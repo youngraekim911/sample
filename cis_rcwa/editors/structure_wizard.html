@@ -54,7 +54,7 @@
 </style>
 
 <div class="topbar">
-  <div class="brand"><h1>CIS Structure Wizard</h1><span class="sub">step by step → 3D → npy</span></div>
+  <div class="brand"><h1>CIS Structure Wizard</h1><span class="sub">step by step → 3D → npy · <span id="wizVer"></span></span></div>
   <div class="spacer"></div>
   <input id="prodName" type="text" placeholder="product name" style="width:150px">
   <select id="viewQ" title="viewer 해상도 (npy 해상도는 step1 dxy/dz)" style="font-size:12px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px">
@@ -1045,7 +1045,7 @@ el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
   catch(e){ out.textContent="진단 실패: "+e.message+"\n(서버 실행중인지 확인: python3 app.py)"; btn.disabled=false; return; }
   btn.disabled=false;
   if(d.error){ out.textContent="진단 오류: "+d.error+"\n"+(d.trace||""); return; }
-  let t=`λ=${(d.wavelength*1000).toFixed(0)}nm   R=${d.R}   Si 유입(=QE)=${d.T_into_si}   밴드 바닥 통과=${d.T_deep}\n`;
+  let t=`[진단 ${WIZ_VERSION}] λ=${(d.wavelength*1000).toFixed(0)}nm   R=${d.R}   Si 유입(=QE)=${d.T_into_si}   밴드 바닥 통과=${d.T_deep}\n`;
   t+="\n── 물질 n,k (실제 계산에 쓰인 값) ──\n";
   for(const m of d.materials){ const fl=m.flags&&m.flags.length;
     t+=(fl?"⚠ ":"  ")+m.name.padEnd(12)+` n=${m.n}  k=${m.k}  [${m.source}]`+
@@ -1132,5 +1132,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
+const WIZ_VERSION="v41";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
