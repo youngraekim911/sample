@@ -683,7 +683,7 @@ const STEPS=[
       wrap.appendChild(lab); wrap.appendChild(r); return wrap; })();
     const rows=[ h("div",{class:"row"},[h("label",{},["grid 배열"]),pt]),
       h("div",{class:"seclbl"},["물질 stack (아래→위, 각 height) · 동일물질 연결"]), subEditor(g.stack,[["material","material","mat"],["height","height_um","num"]],"0.001"),
-      numRow("width 하부 (µm) ≤0.02",g,"width_um","0.001",0.002,0.02),
+      numRow("width 하부 (µm) ≤0.2",g,"width_um","0.001",0.002,0.2),
       slid,
       (()=>{ const cv=h("canvas",{width:300,height:120}); cv.style.cssText="background:var(--panel-2);border:1px solid var(--line);border-radius:6px";
         setTimeout(()=>drawFenceZoom(cv),0); const cap=h("p",{class:"hint"},["fence 단면 확대 (taper·코팅 스케일 표시)"]);
@@ -829,7 +829,13 @@ function pname(){ return (S.product||"structure").trim().replace(/[^\w\-.]/g,"_"
 function structYAML(){ const exp=structuredClone(S); for(const m in exp.materials){ const at=matNK(m),src=exp.materials[m].src; exp.materials[m]={n:+at.n.toFixed(4),k:+at.k.toFixed(4)}; if(src)exp.materials[m].src=src; }
   return "# CIS structure · product: "+(S.product||"")+"\n# 파장별 n,k 는 materials 폴더 txt (아래는 λ="+refLambda+"µm 상수)\n"+toYAML(exp); }
 function download(name,text,type){ const blob=new Blob([text],{type:type||"text/yaml"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
-el("yamlBtn").onclick=()=>{ const text=structYAML(); download(pname()+".yaml",text);
+el("yamlBtn").onclick=async()=>{ const text=structYAML();
+  if(window.showSaveFilePicker){ // 저장 경로 선택 (취소=중단)
+    try{ const fh=await window.showSaveFilePicker({suggestedName:pname()+".yaml",
+           types:[{description:"YAML",accept:{"text/yaml":[".yaml",".yml"]}}]});
+      const w=await fh.createWritable(); await w.write(text); await w.close(); }
+    catch(err){ if(err&&err.name==="AbortError")return; download(pname()+".yaml",text); } }
+  else download(pname()+".yaml",text);
   el("dlgTitle").textContent="Export · "+pname()+".yaml"; el("dlgHint").textContent="구조 YAML 저장됨. Import 로 다시 불러올 수 있음."; el("dlgText").value=text; dlg.showModal(); };
 // YAML import
 el("importBtn").onclick=()=>el("yamlFile").click();
@@ -837,52 +843,44 @@ const yamlFileIn=h("input",{type:"file",id:"yamlFile",accept:".yaml,.yml",style:
 yamlFileIn.onchange=async e=>{ const f=e.target.files[0]; if(!f)return; try{ loadStruct(parseYAML(await f.text())); alert("구조 불러옴: "+(S.product||f.name)); }catch(err){alert("YAML 오류: "+err.message);} e.target.value=""; };
 el("dlgCopy").onclick=async()=>{ const t=el("dlgText"); t.select(); try{await navigator.clipboard.writeText(t.value);}catch(e){document.execCommand("copy");} };
 el("dlgClose").onclick=()=>dlg.close();
+function metaJSON(v){ return JSON.stringify({product:S.product,shape_zyx:v.shape,voxel_um:{dz:v.dz,dy:v.dxy,dx:v.dxy},
+  materials:v.names.map((n,i)=>({id:i,name:n,...matNK(n)}))},null,2); }
+async function writeFileTo(dir,name,data){ const fh=await dir.getFileHandle(name,{create:true});
+  const w=await fh.createWritable(); await w.write(data); await w.close(); }
 el("npyBtn").onclick=async()=>{ const btn=el("npyBtn"), t0=btn.textContent;
-  // 용량 가드: nx*ny*nz 사전 계산 (예: dxy=0.001 -> 71GB)
-  { const span=P()*NP(), nx=Math.round(span/S.grid.dxy_um), nz=Math.round(totalH()/S.grid.dz_um);
-    const bytes=nx*nx*nz;
-    if(!isFinite(bytes)||bytes>4.0e9){
-      const gb=(bytes/1e9).toFixed(1);
-      if(window.showSaveFilePicker){
-        // 메모리에 다 안 올라가는 크기 -> 디스크로 z-슬랩 스트리밍 저장.
-        // picker 는 클릭 제스처 안에서 '가장 먼저' 호출 (confirm/프리컴퓨트 후엔 gesture 만료).
-        // 저장 위치 선택 창 자체가 확인 역할 (취소 = 중단).
-        let handle;
-        try{ handle=await window.showSaveFilePicker({
-               suggestedName:pname()+"_matid.npy",
-               types:[{description:"NumPy array",accept:{"application/octet-stream":[".npy"]}}]}); }
-        catch(err){ return; }                                  // 사용자가 취소(AbortError)
-        btn.disabled=true;
-        try{
-          const v=await exportNpyStream(handle,f=>{btn.textContent="스트리밍 "+Math.round(f*100)+"% ("+gb+"GB)";});
-          const nm=pname();
-          const leg={product:S.product,shape_zyx:v.shape,voxel_um:{dz:v.dz,dy:v.dxy,dx:v.dxy},
-            materials:v.names.map((n,i)=>({id:i,name:n,...matNK(n)}))};
-          download(nm+"_meta.json", JSON.stringify(leg,null,2), "application/json");
-          download(nm+".yaml", structYAML());
-          alert(`스트리밍 저장 완료:\n · <선택 위치>  (${v.shape.join("×")}, ${(v.bytes/1e9).toFixed(2)} GB uint8 npy)\n`+
-                ` · ${nm}_meta.json (물질 id/n,k)\n · ${nm}.yaml (구조 설정)`);
-        }catch(err){ if(err&&err.name!=="AbortError") alert("스트리밍 저장 오류: "+err.message); }
-        finally{ btn.disabled=false; btn.textContent=t0; }
-        return; }
-      alert(`npy ${nx}×${nx}×${nz} ≈ ${gb} GB — 브라우저 배열 한계(4GB) 초과.\n\n`+
-            `Chrome/Edge 에서는 이 버튼이 디스크 스트리밍 저장을 지원합니다.\n`+
-            `또는 같은 YAML 로 Python 빌더를 사용하세요:\n`+
-            `PYTHONPATH=. python3 -m src.structure.wizard_builder -c <product>.yaml -o out\n`+
-            `(YAML 버튼으로 저장한 파일 그대로 사용)`);
-      return; }
-    if(bytes>8e8 && !confirm(`npy ${nx}×${nx}×${nz} ≈ ${(bytes/1e9).toFixed(2)} GB — 메모리 여유가 필요합니다. 생성할까요?`)) return; }
+  const span=P()*NP(), nx=Math.round(span/S.grid.dxy_um), nz=Math.round(totalH()/S.grid.dz_um);
+  const bytes=nx*nx*nz, big=!isFinite(bytes)||bytes>4.0e9, nm=pname();
+  // 저장 폴더 선택 (Chrome/Edge): 클릭 제스처 안에서 '가장 먼저' 호출해야 함
+  // (confirm/프리컴퓨트 뒤에는 gesture 만료). 취소 = 중단. 미지원/미허용 = 다운로드 폴백.
+  let dir=null;
+  if(window.showDirectoryPicker){
+    try{ dir=await window.showDirectoryPicker({mode:"readwrite"}); }
+    catch(err){ if(err&&err.name==="AbortError")return; dir=null; } }
+  if(big&&!dir){
+    alert(`npy ${nx}×${nx}×${nz} ≈ ${(bytes/1e9).toFixed(1)} GB — 브라우저 배열 한계(4GB) 초과.\n\n`+
+          `Chrome/Edge 에서는 이 버튼이 폴더 선택 후 디스크 스트리밍 저장을 지원합니다.\n`+
+          `또는 같은 YAML 로 Python 빌더를 사용하세요:\n`+
+          `PYTHONPATH=. python3 -m src.structure.wizard_builder -c <product>.yaml -o out`);
+    return; }
+  if(!dir && bytes>8e8 && !confirm(`npy ${nx}×${nx}×${nz} ≈ ${(bytes/1e9).toFixed(2)} GB — 메모리 여유가 필요합니다. 생성할까요?`)) return;
   btn.disabled=true;
-  let v; try{ v=await buildVoxels(f=>{btn.textContent="생성중 "+Math.round(f*100)+"%";}); }
-  catch(err){ btn.disabled=false; btn.textContent=t0; alert("npy 생성 오류: "+err.message); return; }
-  btn.disabled=false; btn.textContent=t0;
-  const nm=pname();
-  download(nm+"_matid.npy", npyU8(v.data,v.shape), "application/octet-stream");   // 구조 npy
-  const leg={product:S.product,shape_zyx:v.shape,voxel_um:{dz:v.dz,dy:v.dxy,dx:v.dxy},
-    materials:v.names.map((n,i)=>({id:i,name:n,...matNK(n)}))};
-  download(nm+"_meta.json", JSON.stringify(leg,null,2), "application/json");      // id/n,k
-  download(nm+".yaml", structYAML());                                             // 구조 YAML (같이)
-  alert(`생성 완료:\n · ${nm}_matid.npy  (${v.shape.join("×")}, ${(v.data.length/1e6).toFixed(1)} MB uint8)\n · ${nm}_meta.json (물질 id/n,k)\n · ${nm}.yaml (구조 설정, import 가능)`); };
+  try{
+    if(dir){ // 선택한 폴더에 직접 저장 — npy 는 z-슬랩 스트리밍(대용량도 메모리 안 씀)
+      const fh=await dir.getFileHandle(nm+"_matid.npy",{create:true});
+      const v=await exportNpyStream(fh,f=>{btn.textContent=(big?"스트리밍 ":"생성중 ")+Math.round(f*100)+"%";});
+      await writeFileTo(dir,nm+"_meta.json",metaJSON(v));
+      await writeFileTo(dir,nm+".yaml",structYAML());
+      const sz=v.bytes>1e9?(v.bytes/1e9).toFixed(2)+" GB":(v.bytes/1e6).toFixed(1)+" MB";
+      alert(`선택한 폴더에 저장 완료:\n · ${nm}_matid.npy  (${v.shape.join("×")}, ${sz} uint8)\n · ${nm}_meta.json (물질 id/n,k)\n · ${nm}.yaml (구조 설정, import 가능)`);
+    }else{   // 폴백: 브라우저 다운로드 폴더로 3파일
+      const v=await buildVoxels(f=>{btn.textContent="생성중 "+Math.round(f*100)+"%";});
+      download(nm+"_matid.npy", npyU8(v.data,v.shape), "application/octet-stream");
+      download(nm+"_meta.json", metaJSON(v), "application/json");
+      download(nm+".yaml", structYAML());
+      alert(`다운로드 폴더에 저장:\n · ${nm}_matid.npy  (${v.shape.join("×")}, ${(v.data.length/1e6).toFixed(1)} MB uint8)\n · ${nm}_meta.json (물질 id/n,k)\n · ${nm}.yaml (구조 설정, import 가능)`);
+    }
+  }catch(err){ if(!(err&&err.name==="AbortError")) alert("npy 저장 오류: "+err.message); }
+  finally{ btn.disabled=false; btn.textContent=t0; } };
 
 // 간단 YAML emit (구조 저장용)
 function toYAML(o,ind){ ind=ind||0; const pad="  ".repeat(ind); let s="";
