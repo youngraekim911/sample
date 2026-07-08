@@ -45,7 +45,8 @@ class MaterialLibrary:
             lam = arr[:, 0]
             if lam.max() > 100:          # nm -> um
                 lam = lam / 1000.0
-            self.tables[name] = (lam, arr[:, 1], arr[:, 2])
+            # k 부호 규약(음수 k 파일) -> |k| 자동 변환
+            self.tables[name] = (lam, arr[:, 1], np.abs(arr[:, 2]))
         return self
 
     def names(self):

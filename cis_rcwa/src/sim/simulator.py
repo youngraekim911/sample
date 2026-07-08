@@ -130,7 +130,9 @@ class RCWAPlaneWaveSimulator:
         self.substrate = meta.get("substrate_material", "si")
         mats = {m["name"]: m for m in meta["materials"]}
         ms = mats.get(self.substrate, {"n": 4.08, "k": 0.028})
-        self._eps_trn_fixed = complex(float(ms["n"]), float(ms["k"])) ** 2
+        self._eps_trn_fixed = complex(float(ms["n"]), abs(float(ms["k"]))) ** 2
+        amb_nk = meta.get("ambient_nk") or {"n": 1.0}
+        self._eps_inc_fixed = float(amb_nk.get("n", 1.0)) ** 2   # 상부 매질 (n 만)
         print(f"[eps-direct] {arr.shape} complex64 @ λ={self.eps_lambda}µm (분산 고정)")
 
         ds = self.ds
@@ -237,7 +239,7 @@ class RCWAPlaneWaveSimulator:
             if L.max() > 20:                            # nm 단위 테이블 자동 감지
                 L = L / 1000.0
             n = float(np.interp(lam, L, arr[:, 1]))
-            k = float(np.interp(lam, L, arr[:, 2]))
+            k = abs(float(np.interp(lam, L, arr[:, 2])))   # k<0 규약 방어
             return n, k
         mconf = (self.cfg.get("materials", {}) or {}).get(name, {}) or {}
         src = mconf.get("src", name)                 # 물질별 n,k 파일 지정(src)
@@ -246,13 +248,14 @@ class RCWAPlaneWaveSimulator:
         if self.matlib and self.matlib.has(name):
             return self.matlib.nk(name, lam)
         m = self.cfg["materials"][name]
-        return float(m["n"]), float(m["k"])
+        return float(m["n"]), abs(float(m["k"]))
 
     def _eps_lut(self, lam):
-        """id -> 복소 eps=(n+ik)^2 @ lam."""
+        """id -> 복소 eps=(n+ik)^2 @ lam.  'air' 역할은 ambient(상부 매질)로 매핑."""
+        amb = self.cfg.get("ambient", "air") or "air"
         lut = {}
         for mid, name in self.id2name.items():
-            n, k = self._nk_at(name, lam)
+            n, k = self._nk_at(amb if name == "air" else name, lam)
             lut[mid] = complex(n, k) ** 2
         return lut
 
@@ -273,15 +276,18 @@ class RCWAPlaneWaveSimulator:
         컬러별 QE = 같은 bayer 색 픽셀들의 평균 (CF merge average).
         """
         lam = float(wavelength)
-        eps_inc = 1.0                                    # air (위)
         if self._eps_direct:
             if self.eps_lambda and abs(lam - self.eps_lambda) > 1e-9:
                 print(f"[warn] eps 텐서는 λ={self.eps_lambda}µm 스냅샷 — λ={lam} 에서 분산 미반영")
             eps_trn = self._eps_trn_fixed
+            eps_inc = getattr(self, "_eps_inc_fixed", 1.0)
         else:
             eps_lut = self._eps_lut(lam)
             n_s, k_s = self._nk_at(self.substrate, lam)  # 기판(반무한 투과 매질)
             eps_trn = complex(n_s, k_s) ** 2
+            amb = self.cfg.get("ambient", "air") or "air"
+            n_a, _ = self._nk_at(amb, lam)               # 입사 반무한 매질 (흡수 무시: n 만)
+            eps_inc = float(n_a) ** 2
 
         solver = RCWASolver(lam, self.span, self.span, nG=self.nG,
                             theta=theta, phi=phi, trunc=self.trunc,

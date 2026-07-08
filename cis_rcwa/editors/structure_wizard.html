@@ -136,6 +136,7 @@
 // ============================ 상태 ============================
 const DEFAULT = {
   product:"qcell_demo",
+  ambient:"air",   // 상부 입사 매질 (step1 선택 — 뷰어 air 영역 + RCWA 입사 매질)
   grid:{ pixel_pitch_um:1.0, n_pixels:4, dxy_um:0.02, dz_um:0.02, air_margin_um:0.20 },
   cf_array:"bayer",
   bayer:[["R","G","R","G"],["G","B","G","B"],["R","G","R","G"],["G","B","G","B"]],
@@ -167,8 +168,10 @@ function interp1(x,xs,ys){ if(x<=xs[0])return ys[0]; const n=xs.length; if(x>=xs
   for(let i=1;i<n;i++){ if(x<=xs[i]){const t=(x-xs[i-1])/(xs[i]-xs[i-1]); return ys[i-1]+t*(ys[i]-ys[i-1]);} } return ys[n-1]; }
 function matTable(name){ const m=S.materials[name]||{}; if(m.src&&folderLib[m.src])return folderLib[m.src]; if(folderLib[name])return folderLib[name]; if(m.nk&&m.nk.length)return m.nk; return null; }
 function matNK(name){ const m=S.materials[name]||{n:1,k:0}; const t=matTable(name);
-  if(t&&t.length){const L=t.map(r=>r[0]); return {n:interp1(refLambda,L,t.map(r=>r[1])),k:interp1(refLambda,L,t.map(r=>r[2]))};} return {n:+m.n||0,k:+m.k||0}; }
-function parseNK(txt){ const rows=[]; txt.split(/\r?\n/).forEach(l=>{l=l.trim(); if(!l||l[0]==="#")return; const p=l.replace(/,/g," ").split(/\s+/).map(Number); if(p.length>=3&&p.slice(0,3).every(v=>!isNaN(v)))rows.push(p.slice(0,3));}); if(!rows.length)return null; rows.sort((a,b)=>a[0]-b[0]); const mx=Math.max(...rows.map(r=>r[0])),sc=mx>100?0.001:1; return rows.map(r=>[r[0]*sc,r[1],r[2]]); }
+  // k 는 항상 |k| (음수 부호 규약 파일/과거 저장분 방어)
+  if(t&&t.length){const L=t.map(r=>r[0]); return {n:interp1(refLambda,L,t.map(r=>r[1])),k:Math.abs(interp1(refLambda,L,t.map(r=>r[2])))};} return {n:+m.n||0,k:Math.abs(+m.k||0)}; }
+function parseNK(txt){ const rows=[]; txt.split(/\r?\n/).forEach(l=>{l=l.trim(); if(!l||l[0]==="#")return; const p=l.replace(/,/g," ").split(/\s+/).map(Number); if(p.length>=3&&p.slice(0,3).every(v=>!isNaN(v)))rows.push(p.slice(0,3));}); if(!rows.length)return null; rows.sort((a,b)=>a[0]-b[0]); const mx=Math.max(...rows.map(r=>r[0])),sc=mx>100?0.001:1;
+  return rows.map(r=>[r[0]*sc,r[1],Math.abs(r[2])]); }   // k<0 (부호 규약 차이) -> |k| 자동 변환
 // jet 컬러맵 (0..1 -> hex) — import 물질 뷰어 색 자동 배정용
 function jetHex(t){ t=Math.min(1,Math.max(0,t));
   const c=x=>Math.round(255*Math.min(Math.max(1.5-Math.abs(4*t-x),0),1));
@@ -436,8 +439,9 @@ function npyHeader(shape,descr){ const hdr=`{'descr': '${descr||"|u1"}', 'fortra
 function npyU8(arr,shape){ const h=npyHeader(shape);
   const out=new Uint8Array(h.length+arr.length); out.set(h,0); out.set(arr,h.length); return out; }
 // eps LUT: matid -> complex eps=(n+ik)^2 @ 현재 refLambda  (interleaved re,im float32)
+// 'air' 역할 셀은 선택된 상부 입사 매질(ambient)의 n,k 사용
 function epsLUT(names){ const lut=new Float32Array(names.length*2);
-  for(let i=0;i<names.length;i++){ const nk=matNK(names[i]);
+  for(let i=0;i<names.length;i++){ const nk=matNK(names[i]==="air"?(S.ambient||"air"):names[i]);
     lut[2*i]=nk.n*nk.n-nk.k*nk.k; lut[2*i+1]=2*nk.n*nk.k; } return lut; }
 function slabToC8(slab,lut,out){ // u1 slab -> complex64 bytes (Float32 x2)
   const f=new Float32Array(out.buffer,out.byteOffset,slab.length*2);
@@ -717,7 +721,8 @@ function subEditor(arr, fields, st){ // fields: [['material','mat'],['두께','t
   } rd(); return box;
 }
 const STEPS=[
- {t:"1 · Pixel array", d:"pitch 와 n×n 배열", body:()=>[ numRow("pixel pitch (µm)",S.grid,"pixel_pitch_um","0.01"), numRow("n × n",S.grid,"n_pixels","1"),
+ {t:"1 · Pixel array", d:"pitch 와 n×n 배열 · 상부 매질", body:()=>[ numRow("pixel pitch (µm)",S.grid,"pixel_pitch_um","0.01"), numRow("n × n",S.grid,"n_pixels","1"),
+    matRow("상부 입사 매질",S,"ambient"),
     h("div",{class:"seclbl"},["voxel 해상도 (0.01~0.02 — 최소 피처 20nm 보존, nm급은 용량만 커짐)"]),
     numRow("dxy (µm) 0.01~0.02",S.grid,"dxy_um","0.001",0.01,0.02), numRow("dz (µm) 0.01~0.02",S.grid,"dz_um","0.001",0.01,0.02), numRow("air margin (µm)",S.grid,"air_margin_um","0.01") ]},
  {t:"2 · Si substrate", d:"물질(n,k 폴더 연동) 과 두께. DTI depth = 이 두께", body:()=>[ matRow("Si 물질",S.stack.si,"material"), numRow("thickness (µm)",S.stack.si,"thickness_um","0.1") ]},
@@ -928,6 +933,7 @@ function metaJSON(v){ const nm=pname(); return JSON.stringify({product:S.product
   voxel_um:{dz:v.dz,dy:v.dxy,dx:v.dxy},
   // eps 텐서(RCWA 직접 입력) 부속 정보: complex64 = (n+ik)^2 @ eps_lambda_um (고정 파장)
   eps_file:nm+"_eps.npy", eps_dtype:"complex64", eps_lambda_um:refLambda,
+  ambient:S.ambient||"air", ambient_nk:matNK(S.ambient||"air"),
   substrate_material:S.stack.si.material, si_thickness_um:+S.stack.si.thickness_um,
   pixel_pitch_um:P(), n_pixels:NP(), bayer:S.bayer, cf_array:S.cf_array||"bayer",
   materials:v.names.map((n,i)=>({id:i,name:n,color:matColor(n),...matNK(n)}))},null,2); }
@@ -1132,7 +1138,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v41";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v42";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
