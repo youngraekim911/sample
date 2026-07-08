@@ -285,7 +285,8 @@ class RCWAPlaneWaveSimulator:
 
         solver = RCWASolver(lam, self.span, self.span, nG=self.nG,
                             theta=theta, phi=phi, trunc=self.trunc,
-                            device=self.device, dtype=self.dtype)
+                            device=self.device, dtype=self.dtype,
+                            fff=getattr(self, "fff", True))   # Li 인수분해 (금속 수렴 가속)
         solver.setup_incidence(eps_inc, eps_trn)
         for matid2d, th in self.layer_stack:
             if self._eps_direct:

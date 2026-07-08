@@ -24,13 +24,15 @@ from .torch_eig import eig, sqrt_decaying, sqrt_outgoing
 
 class RCWASolver:
     def __init__(self, wavelength, Lx, Ly, nG=101, theta=0.0, phi=0.0,
-                 trunc="circular", device=None, dtype=torch.complex128):
+                 trunc="circular", device=None, dtype=torch.complex128, fff=False):
         """
         wavelength : 진공 파장 (um, 격자 Lx,Ly 와 같은 단위)
         Lx, Ly     : 단위셀 주기 (um)
         nG         : Fourier order 개수(목표). 원형 truncation 시 근사 개수.
         theta,phi  : 입사각 (deg)
+        fff        : Li 인수분해(inverse rule) — 고대비(금속) 층 수렴 가속
         """
+        self.fff = bool(fff)
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.cdt = dtype
         self.rdt = torch.float64 if dtype == torch.complex128 else torch.float32
@@ -131,14 +133,22 @@ class RCWASolver:
             V = -(self._homogeneous_Q(er) @ torch.diag(1.0 / lam))
             return W, V, lam
 
-        ER = fft_funs.conv_matrix(data, self.m, self.n)     # (N,N)
-        ERinv = torch.linalg.inv(ER)
+        if getattr(self, "fff", False):
+            # Li 인수분해(FFF): Q 의 eps·Ey 항엔 y-inverse, eps·Ex 항엔 x-inverse
+            # (Q@[ex;ey]: row1 의 ER 은 ey 에, row2 의 ER 은 ex 에 곱해짐)
+            ER, EX, EY = fft_funs.conv_matrix_fff(data, self.m, self.n)
+            ERinv = torch.linalg.inv(ER)
+            E_ey, E_ex = EY, EX
+        else:
+            ER = fft_funs.conv_matrix(data, self.m, self.n)  # (N,N) Laurent
+            ERinv = torch.linalg.inv(ER)
+            E_ey = E_ex = ER
         P = torch.cat([
             torch.cat([Kx @ ERinv @ Ky,     I - Kx @ ERinv @ Kx], dim=1),
             torch.cat([Ky @ ERinv @ Ky - I, -Ky @ ERinv @ Kx],    dim=1)], dim=0)
         Q = torch.cat([
-            torch.cat([Kx @ Ky,      ER - Kx @ Kx], dim=1),
-            torch.cat([Ky @ Ky - ER, -Ky @ Kx],     dim=1)], dim=0)
+            torch.cat([Kx @ Ky,        E_ey - Kx @ Kx], dim=1),
+            torch.cat([Ky @ Ky - E_ex, -Ky @ Kx],       dim=1)], dim=0)
         OM2 = P @ Q
         lam2, W = eig(OM2)
         lam = sqrt_decaying(lam2)               # Re(lam)>=0, X=exp(-lam k0 L) 안정
