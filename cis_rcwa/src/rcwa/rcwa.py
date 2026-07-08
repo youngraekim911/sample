@@ -114,13 +114,22 @@ class RCWASolver:
         return torch.full((gy, gx), complex(er), dtype=self.cdt, device=self.device)
 
     def _layer_modes(self, kind, data):
-        """층 고유모드 (W, V, lam).  lam = sqrt(eig(P@Q)), 감쇠분기."""
+        """층 고유모드 (W, V, lam).  patterned: lam=sqrt(eig(P@Q)) 감쇠분기 /
+        uniform: 해석식 q (eig 생략 — 수 배 빠름).
+
+        해석식 균일층: lam = sqrt_decaying(kt²−er), W=I, V=−Q·diag(1/lam).
+        sqrt_decaying 의 전파모드 tie-break(Im<0) 수정 후 gap V0(outgoing)와
+        전 모드에서 forward 짝이 일치 -> 과거의 A 특이(층≈gap 크래시) 문제 없음.
+        (검증: patterned 경로와 R/T 일치, validate.py 5종 통과)"""
         N = self.nG
         Kx, Ky, I = self.Kx, self.Ky, self.I
         if kind == "uniform":
-            # 균일층도 patterned 와 동일 경로(eig) 사용 — 해석식 분기(analytic V)가
-            # gap 규약과 propagating/evanescent 에서 어긋나 A 가 특이해지는 버그 회피
-            data = self._uniform_grid(data)
+            er = complex(data)
+            lam1 = sqrt_decaying(self._C(self.kx) ** 2 + self._C(self.ky) ** 2 - er)
+            lam = torch.cat([lam1, lam1])
+            W = self.I2
+            V = -(self._homogeneous_Q(er) @ torch.diag(1.0 / lam))
+            return W, V, lam
 
         ER = fft_funs.conv_matrix(data, self.m, self.n)     # (N,N)
         ERinv = torch.linalg.inv(ER)

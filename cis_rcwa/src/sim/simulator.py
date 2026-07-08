@@ -289,10 +289,17 @@ class RCWAPlaneWaveSimulator:
         solver.setup_incidence(eps_inc, eps_trn)
         for matid2d, th in self.layer_stack:
             if self._eps_direct:
-                solver.add_layer(th, eps_grid=torch.as_tensor(matid2d, dtype=self.dtype,
-                                                              device=self.device))
+                if (matid2d == matid2d.flat[0]).all():          # 균일층 -> 해석식 (eig 생략)
+                    solver.add_layer(th, eps_scalar=complex(matid2d.flat[0]))
+                else:
+                    solver.add_layer(th, eps_grid=torch.as_tensor(matid2d, dtype=self.dtype,
+                                                                  device=self.device))
             else:
-                solver.add_layer(th, eps_grid=self._eps_grid(matid2d, eps_lut))
+                u = np.unique(matid2d)
+                if len(u) == 1:                                  # 균일층 -> 해석식 (eig 생략)
+                    solver.add_layer(th, eps_scalar=eps_lut[int(u[0])])
+                else:
+                    solver.add_layer(th, eps_grid=self._eps_grid(matid2d, eps_lut))
         o = solver.solve(pol_te=pol_te, pol_tm=pol_tm)
         out = {"wavelength": lam, "R": o["R"], "QE": o["T"],
                "A_stack": o["A"], "nG": solver.nG, "n_layers": len(self.layer_stack)}
