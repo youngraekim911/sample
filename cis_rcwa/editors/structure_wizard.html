@@ -167,8 +167,22 @@ function matTable(name){ const m=S.materials[name]||{}; if(m.src&&folderLib[m.sr
 function matNK(name){ const m=S.materials[name]||{n:1,k:0}; const t=matTable(name);
   if(t&&t.length){const L=t.map(r=>r[0]); return {n:interp1(refLambda,L,t.map(r=>r[1])),k:interp1(refLambda,L,t.map(r=>r[2]))};} return {n:+m.n||0,k:+m.k||0}; }
 function parseNK(txt){ const rows=[]; txt.split(/\r?\n/).forEach(l=>{l=l.trim(); if(!l||l[0]==="#")return; const p=l.replace(/,/g," ").split(/\s+/).map(Number); if(p.length>=3&&p.slice(0,3).every(v=>!isNaN(v)))rows.push(p.slice(0,3));}); if(!rows.length)return null; rows.sort((a,b)=>a[0]-b[0]); const mx=Math.max(...rows.map(r=>r[0])),sc=mx>100?0.001:1; return rows.map(r=>[r[0]*sc,r[1],r[2]]); }
-function matColor(name){ const M={air:"#e9f1fb",si:"#3b3b3b",oxide:"#bcd4e6",grid_metal:"#141414",arl_hi:"#8b6fd0",arl_lo:"#a9c7d6",cf_red:"#e24a4a",cf_green:"#3fb34f",cf_blue:"#3f6fd0",ml:"#f2c14e",ml_arl:"#d9b3ff"};
-  if(M[name])return M[name]; if(/red/.test(name))return"#e24a4a"; if(/green/.test(name))return"#3fb34f"; if(/blue/.test(name))return"#3f6fd0"; if(/metal/.test(name))return"#141414"; if(/oxide|arl_lo/.test(name))return"#bcd4e6"; if(/arl/.test(name))return"#8b6fd0"; if(/ml/.test(name))return"#f2c14e"; if(/si/.test(name))return"#3b3b3b"; return"#9aa"; }
+// jet 컬러맵 (0..1 -> hex) — import 물질 뷰어 색 자동 배정용
+function jetHex(t){ t=Math.min(1,Math.max(0,t));
+  const c=x=>Math.round(255*Math.min(Math.max(1.5-Math.abs(4*t-x),0),1));
+  return "#"+[c(3),c(2),c(1)].map(x=>x.toString(16).padStart(2,"0")).join(""); }
+// import 순서대로 jet 를 순회하며 새 물질에 색 배정 (기존 배정 수 이어서)
+function assignMatColor(name){ if(S.materials[name]&&S.materials[name].color)return;
+  const idx=Object.values(S.materials).filter(m=>m&&m.color).length;
+  if(S.materials[name])S.materials[name].color=jetHex((idx%12)/11);
+  delete _rgbCache[name]; }
+function matColor(name){ const m=S.materials[name];
+  if(m&&m.color)return m.color;                      // import 물질: jet 자동 배정색
+  const M={air:"#e9f1fb",si:"#3b3b3b",oxide:"#bcd4e6",grid_metal:"#141414",arl_hi:"#8b6fd0",arl_lo:"#a9c7d6",cf_red:"#e24a4a",cf_green:"#3fb34f",cf_blue:"#3f6fd0",ml:"#f2c14e",ml_arl:"#d9b3ff"};
+  if(M[name])return M[name]; if(/red/.test(name))return"#e24a4a"; if(/green/.test(name))return"#3fb34f"; if(/blue/.test(name))return"#3f6fd0"; if(/metal/.test(name))return"#141414"; if(/oxide|arl_lo/.test(name))return"#bcd4e6"; if(/arl/.test(name))return"#8b6fd0"; if(/ml/.test(name))return"#f2c14e"; if(/si/.test(name))return"#3b3b3b";
+  // 미배정 미지 물질: 이름 해시로 jet 고정색 (회색 없음)
+  let h=0; for(let i=0;i<name.length;i++)h=(h*31+name.charCodeAt(i))>>>0;
+  return jetHex((h%12)/11); }
 function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
 const _rgbCache={};
 function rgbOf(name){ if(_rgbCache[name])return _rgbCache[name];
@@ -814,6 +828,7 @@ el("matFolder").onchange=async e=>{ let n=0; for(const f of [...e.target.files])
       const t=folderLib[name],L=t.map(r=>r[0]);
       S.materials[name]={n:+interp1(refLambda,L,t.map(r=>r[1])).toFixed(4),
                          k:+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4)};
+      assignMatColor(name);                       // 뷰어 색: jet 순서 자동 배정
       added++; } }
   save(); e.target.value=""; renderStep(); renderViews();
   alert(n+" 물질 n,k 로드됨"+(added?` · 새 물질 ${added}종을 선택 목록에 추가`:"")+"\n모든 step 의 물질 선택창에서 사용 가능 (·λ = 파장 테이블 연동)"); };
@@ -913,7 +928,7 @@ function metaJSON(v){ const nm=pname(); return JSON.stringify({product:S.product
   eps_file:nm+"_eps.npy", eps_dtype:"complex64", eps_lambda_um:refLambda,
   substrate_material:S.stack.si.material, si_thickness_um:+S.stack.si.thickness_um,
   pixel_pitch_um:P(), n_pixels:NP(), bayer:S.bayer, cf_array:S.cf_array||"bayer",
-  materials:v.names.map((n,i)=>({id:i,name:n,...matNK(n)}))},null,2); }
+  materials:v.names.map((n,i)=>({id:i,name:n,color:matColor(n),...matNK(n)}))},null,2); }
 async function writeFileTo(dir,name,data){ const fh=await dir.getFileHandle(name,{create:true});
   const w=await fh.createWritable(); await w.write(data); await w.close(); }
 el("npyBtn").onclick=async()=>{ const btn=el("npyBtn"), t0=btn.textContent;
@@ -980,7 +995,7 @@ function parseYAML(text){ const lines=text.replace(/\t/g,"  ").split("\n").map(l
   function sc(s){ if(s===""||s==null)return null; if(s[0]==='"'&&s[s.length-1]==='"')return JSON.parse(s); if(s==="true")return true; if(s==="false")return false; if(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s))return parseFloat(s); return s; } }
 function loadStruct(obj){ S=Object.assign(structuredClone(DEFAULT),obj); if(obj.stack)S.stack=Object.assign(structuredClone(DEFAULT.stack),obj.stack); if(obj.materials)S.materials=Object.assign(structuredClone(DEFAULT.materials),obj.materials);
   // yaml 에 동봉된 dispersion(λ-테이블) 복원 -> 새 브라우저에서도 물질 테이블 유지
-  if(obj.dispersion){ for(const nm in obj.dispersion){ const t=obj.dispersion[nm]; if(Array.isArray(t)&&t.length>1){ folderLib[nm]=t; if(!(nm in S.materials)){ const L=t.map(r=>r[0]); S.materials[nm]={n:+interp1(refLambda,L,t.map(r=>r[1])).toFixed(4),k:+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4)}; } } } }
+  if(obj.dispersion){ for(const nm in obj.dispersion){ const t=obj.dispersion[nm]; if(Array.isArray(t)&&t.length>1){ folderLib[nm]=t; if(!(nm in S.materials)){ const L=t.map(r=>r[0]); S.materials[nm]={n:+interp1(refLambda,L,t.map(r=>r[1])).toFixed(4),k:+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4)}; assignMatColor(nm); } } } }
   clampRes(); save(); prod.value=S.product||""; curStep=0; renderStep(); }
 
 // ============================ QE 해석 (structure -> RCWA -> QE) ============================

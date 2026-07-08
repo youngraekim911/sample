@@ -36,10 +36,12 @@ def main():
     vol = np.load(a.npy)                       # [nz, ny, nx]
     meta_path = a.meta or a.npy.replace("_matid.npy", "_meta.json")
     names = {}
+    meta_colors = {}
     dz = dxy = None
     if os.path.exists(meta_path):
         meta = json.load(open(meta_path, encoding="utf-8"))
         names = {int(m["id"]): m["name"] for m in meta["materials"]}
+        meta_colors = {int(m["id"]): m.get("color") for m in meta["materials"]}
         dz = meta["voxel_um"]["dz"]; dxy = meta["voxel_um"]["dx"]
     else:
         names = {i: f"id{i}" for i in range(int(vol.max()) + 1)}
@@ -48,7 +50,15 @@ def main():
     exy = [0, nx * (dxy or 1), 0, ny * (dxy or 1)]
 
     nid = int(max(names)) + 1
-    cmap = ListedColormap([COLORS.get(names.get(i, ""), "#888888") for i in range(nid)])
+    # 색 우선순위: meta(위저드 배정, jet 포함) > 내장 팔레트 > jet(id 순)
+    from matplotlib import cm
+    def col_of(i):
+        c = meta_colors.get(i) or COLORS.get(names.get(i, ""))
+        if c:
+            return c
+        r, g, b, _ = cm.jet((i % 12) / 11.0)
+        return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+    cmap = ListedColormap([col_of(i) for i in range(nid)])
 
     # 물질이 등장하는 z 대역 (air 제외) -> XY 대표 z 3곳
     occ = [(z, set(np.unique(vol[z]))) for z in range(nz)]
@@ -86,7 +96,7 @@ def main():
         if fr[:, i].max() <= 0:
             continue
         ax[0, 2].fill_betweenx(zs, bottom, bottom + fr[:, i],
-                               color=COLORS.get(names.get(i, ""), "#888"), lw=0)
+                               color=col_of(i), lw=0)
         bottom += fr[:, i]
     ax[0, 2].set_title("z-occupancy per material")
     ax[0, 2].set_xlabel("fraction"); ax[0, 2].set_ylabel("z (um)")
@@ -99,7 +109,7 @@ def main():
     for axx in ax.flat:
         axx.tick_params(labelsize=8)
     used = sorted(set(np.unique(vol)))
-    fig.legend(handles=[Patch(color=COLORS.get(names.get(i, ""), "#888"), label=f"{i}:{names.get(i, '?')}")
+    fig.legend(handles=[Patch(color=col_of(i), label=f"{i}:{names.get(i, '?')}")
                         for i in used], loc="lower center", ncol=min(len(used), 11), fontsize=8)
     fig.suptitle(os.path.basename(a.npy), fontsize=11)
     fig.tight_layout(rect=[0, 0.06, 1, 0.97])
