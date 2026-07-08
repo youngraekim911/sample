@@ -17,7 +17,7 @@ from matplotlib.colors import ListedColormap, BoundaryNorm
 
 
 def load(outdir, meta_name="qcell_meta.json", mat_name="qcell_matid.npy"):
-    with open(os.path.join(outdir, meta_name)) as f:
+    with open(os.path.join(outdir, meta_name), encoding="utf-8") as f:
         meta = json.load(f)
     matid = np.load(os.path.join(outdir, mat_name))
     return matid, meta

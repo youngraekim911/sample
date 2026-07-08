@@ -27,7 +27,7 @@ class MaterialLibrary:
         for path in glob.glob(os.path.join(self.folder, "*.txt")):
             name = os.path.splitext(os.path.basename(path))[0]
             rows = []
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line or line.startswith("#"):

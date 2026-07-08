@@ -60,7 +60,7 @@ def _run_job(jid, cfg_path, p):
             job["note"] = f"λ={lam*1000:.0f}nm  QE={QE:.3f}  ({time.time()-t0:.1f}s/λ, TE+TM)"
         # csv 저장
         csv_path = os.path.join(JOBS_DIR, jid + "_qe.csv")
-        with open(csv_path, "w") as f:
+        with open(csv_path, "w", encoding="utf-8") as f:
             f.write("lambda_um,R,QE_Si,A_stack\n")
             for r in job["rows"]:
                 f.write(",".join(str(x) for x in r) + "\n")
@@ -76,7 +76,7 @@ def start_job(yaml_text, p):
     os.makedirs(JOBS_DIR, exist_ok=True)
     jid = uuid.uuid4().hex[:12]
     cfg_path = os.path.join(JOBS_DIR, jid + ".yaml")
-    with open(cfg_path, "w") as f:
+    with open(cfg_path, "w", encoding="utf-8") as f:
         f.write(yaml_text)
     JOBS[jid] = {"state": "running", "progress": 0.0, "note": "시작중...",
                  "rows": [], "error": None, "cancel": False, "params": p}

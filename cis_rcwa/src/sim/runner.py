@@ -40,7 +40,7 @@ def sweep(config, lam0, lam1, nlam, nG, downsample, theta, phi, device):
 def save_outputs(rows, outdir):
     os.makedirs(outdir, exist_ok=True)
     csv_path = os.path.join(outdir, "qe_spectrum.csv")
-    with open(csv_path, "w", newline="") as f:
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["lambda_um", "R", "QE_Si", "A_stack"])
         for r in rows:

@@ -28,7 +28,7 @@ def _um2vox(t_um, d_um):
 
 
 def load_config(path):
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -127,7 +127,7 @@ class QcellBuilder:
         f = ml.get("deform_file")
         if f:
             path = f if os.path.isabs(f) else os.path.join(self.base_dir, f)
-            with open(path) as fh:
+            with open(path, encoding="utf-8") as fh:
                 data = json.load(fh)
             if data.get("quads"):
                 quads = data["quads"]
@@ -325,7 +325,7 @@ def main():
 
     meta = b.meta()
     p_meta = os.path.join(args.outdir, ex["meta_json"])
-    with open(p_meta, "w") as f:
+    with open(p_meta, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)
     print(f"[saved] {p_meta}")
 

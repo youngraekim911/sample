@@ -38,7 +38,7 @@ def main():
     names = {}
     dz = dxy = None
     if os.path.exists(meta_path):
-        meta = json.load(open(meta_path))
+        meta = json.load(open(meta_path, encoding="utf-8"))
         names = {int(m["id"]): m["name"] for m in meta["materials"]}
         dz = meta["voxel_um"]["dz"]; dxy = meta["voxel_um"]["dx"]
     else:

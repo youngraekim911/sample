@@ -293,14 +293,14 @@ def main():
     ap.add_argument("-c", "--config", required=True)
     ap.add_argument("-o", "--outdir", default="out")
     args = ap.parse_args()
-    with open(args.config) as f:
+    with open(args.config, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     b = WizardBuilder(cfg, base_dir=os.path.dirname(os.path.abspath(args.config)))
     A = b.build()
     os.makedirs(args.outdir, exist_ok=True)
     nm = (cfg.get("product") or "structure").replace(" ", "_")
     np.save(os.path.join(args.outdir, f"{nm}_matid.npy"), A)
-    with open(os.path.join(args.outdir, f"{nm}_meta.json"), "w") as f:
+    with open(os.path.join(args.outdir, f"{nm}_meta.json"), "w", encoding="utf-8") as f:
         json.dump(b.meta(), f, indent=2, ensure_ascii=False)
     print(f"[saved] {args.outdir}/{nm}_matid.npy shape={A.shape}")
     print(f"[saved] {args.outdir}/{nm}_meta.json  materials={b.names}")
