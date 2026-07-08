@@ -72,6 +72,25 @@ python3 run_qe.py -c conf/wizard_config.yaml --nG 101
   step7 인라인 에디터에서 드래그(이동/크기). 파라미터 (cx,cy,ax,ay,hr)뿐이라 일반화/최적화 용이.
 - **ARL**: ML 표면 conformal(ALD).
 
+## 한 줄 실행 — structure → RCWA → QE (프론트 flow)
+
+```bash
+pip install torch numpy pyyaml
+python3 app.py            # http://127.0.0.1:8787 자동 오픈 (GPU 있으면 자동 사용)
+```
+브라우저에서 step1~8 로 구조 설정 → 상단 **[▶ QE 해석]** → 파장범위·nG 설정 → Run
+→ **QE / R / A 스펙트럼** 차트·표·CSV. 구조는 현재 위저드 상태가 그대로 RCWA 에 들어간다.
+
+블록 구조 (개발자가 아니어도 이 경계만 알면 됨):
+```
+[프론트]  structure_wizard.html  ── structYAML() ──►  POST /api/qe
+[백엔드]  src/api/server.py  ─►  WizardBuilder(구조) ─►  RCWAPlaneWaveSimulator
+          ─►  RCWASolver(FMM+S-matrix, torch) ─►  QE=Si 결합 T  ─►  GET /api/qe/status
+```
+- nG: Fourier 차수. metal grid 수렴에 **101 이상 권장** (기본값). 빠른 미리보기는 41~61.
+- downsample: 구조 격자 축소(속도↑). 최종 결과는 1~2 권장.
+- 소요: CPU 기준 nG=101 에서 ~수 초/파장(TE+TM). CUDA 자동 감지.
+
 ## 구조 위저드 — `editors/structure_wizard.html`
 
 브라우저에서 **step-by-step**(1~8)으로 구조 설정 → 3D/단면 확인 → **npy 생성**:

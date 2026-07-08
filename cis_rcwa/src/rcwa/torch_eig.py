@@ -24,12 +24,19 @@ def sqrt_decaying(x):
 
     RCWA S-matrix 는 X = exp(-lam*k0*L) 로 전파를 다루므로 Re(lam) >= 0 이어야
     수치적으로 안정 (evanescent 모드가 감쇠). 실수부가 음이면 부호 반전.
+
+    순수 전파 모드(Re(lam)≈0, lam=±i·kz)는 |X|=1 이라 어느 분기든 안정하지만,
+    gap 기준 V0(outgoing, lam0=1j·Kz)와 '전방(forward)' 짝이 맞으려면 Im<0
+    (lam=-i·kz) 쪽이어야 한다. 반대(+i·kz)를 고르면 층이 gap 과 비슷해질수록
+    A = W⁻¹W0+V⁻¹V0 의 전파 블록이 0 으로 붕괴 -> quasi-uniform 층(ML 렌즈
+    꼭지/ARL 슬라이스 등 소수 픽셀 패턴)에서 R/T 폭발. (손실 모드는 Re>0 라
+    영향 없음 — 흡수층 검증(test5)과 양립.)
     """
     r = torch.sqrt(x + 0j)
     r = torch.where(r.real < 0, -r, r)
-    # 실수부가 (거의) 0 인 순수 evanescent 는 허수부로 분기 결정
+    # 실수부가 (거의) 0 인 순수 전파 모드: gap(outgoing) 짝에 맞춰 Im<0 분기
     zero_re = r.real.abs() < 1e-12
-    r = torch.where(zero_re & (r.imag < 0), -r, r)
+    r = torch.where(zero_re & (r.imag > 0), -r, r)
     return r
 
 

@@ -107,19 +107,20 @@ class RCWASolver:
         self.layers = []
 
     # -----------------------------------------------------------------
+    def _uniform_grid(self, er):
+        """균일 유전율 -> conv_matrix 가 정확한(앨리어싱 없는) 최소 상수 격자."""
+        gx = int(self.m.abs().max()) * 2 + 2
+        gy = int(self.n.abs().max()) * 2 + 2
+        return torch.full((gy, gx), complex(er), dtype=self.cdt, device=self.device)
+
     def _layer_modes(self, kind, data):
         """층 고유모드 (W, V, lam).  lam = sqrt(eig(P@Q)), 감쇠분기."""
         N = self.nG
         Kx, Ky, I = self.Kx, self.Ky, self.I
         if kind == "uniform":
-            er = data
-            # 층 전파 고유값: lam = sqrt(kt^2 - er), Re(lam)>=0 (감쇠분기, X=exp(-lam k0 L) 안정)
-            lam1 = sqrt_decaying(self._C(self.kx) ** 2 + self._C(self.ky) ** 2 - er)
-            lam = torch.cat([lam1, lam1])
-            W = self.I2
-            # V 부호: gap/영역(_homogeneous_V, lam=1j*Kz)과 분기가 반대이므로 정합 위해 음부호
-            V = -(self._homogeneous_Q(er) @ torch.diag(1.0 / lam))
-            return W, V, lam
+            # 균일층도 patterned 와 동일 경로(eig) 사용 — 해석식 분기(analytic V)가
+            # gap 규약과 propagating/evanescent 에서 어긋나 A 가 특이해지는 버그 회피
+            data = self._uniform_grid(data)
 
         ER = fft_funs.conv_matrix(data, self.m, self.n)     # (N,N)
         ERinv = torch.linalg.inv(ER)
@@ -201,10 +202,22 @@ class RCWASolver:
         Sref, Strn, Kzr, Kzt = self._region_smatrices()
         self._modes = []
         self._layerS = []
+        self.n_regularized = 0
         S = Sref
         for kind, data, th in self.layers:
             W, V, lam = self._layer_modes(kind, data)
             SL = self._layer_smatrix(W, V, lam, th)
+            # 준-균일(quasi-uniform) 패턴층 가드: 소수 픽셀만 다른 층은 OM2 고유값이
+            # near-degenerate -> 고유벡터 행렬 병적 조건수 -> S 폭발.
+            # 이때 층을 평균 유전율(균일)로 재계산 — 물리 오차는 미소(패턴이 거의 없음).
+            bad = (not torch.isfinite(SL["11"]).all()) or (not torch.isfinite(SL["21"]).all()) \
+                  or float(SL["11"].abs().amax()) > 1e4 or float(SL["21"].abs().amax()) > 1e4
+            if bad and kind == "patterned":
+                mean_eps = complex(data.mean())
+                W, V, lam = self._layer_modes("uniform", mean_eps)
+                SL = self._layer_smatrix(W, V, lam, th)
+                data = self._uniform_grid(mean_eps)
+                self.n_regularized += 1
             self._modes.append((W, V, lam, th, kind, data))
             self._layerS.append(SL)
             S = self._star(S, SL)

@@ -65,6 +65,7 @@
   <button class="btn ghost" id="importBtn">⤒ Import</button>
   <button class="btn ghost" id="yamlBtn">⤓ YAML</button>
   <button class="btn primary" id="npyBtn">⤓ npy + yaml</button>
+  <button class="btn primary" id="qeBtn">▶ QE 해석</button>
 </div>
 
 <div class="layout">
@@ -97,6 +98,36 @@
 <dialog id="dlg"><div class="dlg-h"><h3 id="dlgTitle">YAML</h3><div class="spacer"></div>
   <button class="btn ghost" id="dlgCopy">Copy</button><button class="btn ghost" id="dlgClose">Close</button></div>
   <div class="dlg-b"><p class="hint" id="dlgHint" style="margin:0 0 9px"></p><textarea id="dlgText" spellcheck="false"></textarea></div></dialog>
+
+<!-- ===== QE 해석 패널: structure(현재 위저드 상태) -> RCWA 서버 -> QE 스펙트럼 ===== -->
+<dialog id="qeDlg" style="width:min(880px,95vw)">
+  <div class="dlg-h"><h3>▶ QE 해석 · structure → RCWA → QE</h3><div class="spacer"></div>
+    <button class="btn ghost" id="qeCsv" disabled>⤓ CSV</button>
+    <button class="btn ghost" id="qeClose">Close</button></div>
+  <div class="dlg-b" style="display:flex;flex-direction:column;gap:10px">
+    <div id="qeGuide" class="hint" style="display:none;white-space:pre-wrap;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px"></div>
+    <div id="qeCtl" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 시작 (µm)<input id="qeL0" type="number" step="0.01" value="0.40" style="width:76px"></label>
+      <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 끝 (µm)<input id="qeL1" type="number" step="0.01" value="0.70" style="width:76px"></label>
+      <label class="hint" style="display:flex;flex-direction:column;gap:3px">파장 수<input id="qeN" type="number" step="1" min="1" value="7" style="width:60px"></label>
+      <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="Fourier 차수 — metal grid 수렴에 101 이상 권장 (클수록 정확·느림)">nG<input id="qeNG" type="number" step="2" min="9" value="101" style="width:66px"></label>
+      <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조 격자 다운샘플 (클수록 빠르고 거침)">downsample<input id="qeDS" type="number" step="1" min="1" value="2" style="width:60px"></label>
+      <label class="hint" style="display:flex;flex-direction:column;gap:3px">입사각 θ(°)<input id="qeTH" type="number" step="1" value="0" style="width:56px"></label>
+      <button class="btn primary" id="qeRun">▶ Run</button>
+      <button class="btn" id="qeStop" disabled>■ Stop</button>
+    </div>
+    <div style="height:8px;background:var(--panel-2);border:1px solid var(--line);border-radius:5px;overflow:hidden">
+      <div id="qeProg" style="height:100%;width:0%;background:var(--accent);transition:width .3s"></div></div>
+    <div class="hint" id="qeNote">-</div>
+    <div id="qeLegend" style="display:flex;gap:16px;font-size:12px;align-items:center"></div>
+    <div style="position:relative">
+      <canvas id="qeChart" width="820" height="340" style="width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel)"></canvas>
+      <div id="qeTip" style="position:absolute;display:none;pointer-events:none;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:11px;line-height:1.5;z-index:3"></div>
+    </div>
+    <details><summary class="hint" style="cursor:pointer">결과 표 (표로 보기)</summary>
+      <div id="qeTable" style="max-height:200px;overflow:auto;font:11px/1.7 var(--mono);margin-top:6px"></div></details>
+  </div>
+</dialog>
 
 <script>
 "use strict";
@@ -906,6 +937,94 @@ function parseYAML(text){ const lines=text.replace(/\t/g,"  ").split("\n").map(l
     if(s[j]==='"'){let k=j+1,str="";while(k<s.length&&s[k]!=='"'){str+=s[k++];}j=k+1;return str;} let t="";while(j<s.length&&!/[,\]}]/.test(s[j])){t+=s[j++];} return sc(t.trim()); } return val(); }
   function sc(s){ if(s===""||s==null)return null; if(s[0]==='"'&&s[s.length-1]==='"')return JSON.parse(s); if(s==="true")return true; if(s==="false")return false; if(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s))return parseFloat(s); return s; } }
 function loadStruct(obj){ S=Object.assign(structuredClone(DEFAULT),obj); if(obj.stack)S.stack=Object.assign(structuredClone(DEFAULT.stack),obj.stack); if(obj.materials)S.materials=Object.assign(structuredClone(DEFAULT.materials),obj.materials); clampRes(); prod.value=S.product||""; curStep=0; renderStep(); }
+
+// ============================ QE 해석 (structure -> RCWA -> QE) ============================
+// 백엔드 블록: python3 app.py 가 띄우는 로컬 서버의 /api/qe (+status/cancel).
+// 프론트는 현재 위저드 구조(structYAML)를 그대로 보내고 스펙트럼을 그린다.
+const QE={job:null,rows:[],timer:null,running:false};
+const qeDlg=el("qeDlg");
+function qeDark(){ const t=document.documentElement.getAttribute("data-theme");
+  return t? t==="dark" : matchMedia("(prefers-color-scheme: dark)").matches; }
+// 시리즈 고정 배정(검증 팔레트): QE=green, A_stack=blue, R=red  (light/dark 별도 스텝)
+function qeColors(){ return qeDark()
+  ? {QE:"#2f9e4f",A:"#3987e5",R:"#d9534f"} : {QE:"#1a7f37",A:"#0969da",R:"#cf222e"}; }
+function qeApiBase(){ return location.protocol.startsWith("http")? "" : "http://127.0.0.1:8787"; }
+async function qePing(){ try{ const r=await fetch(qeApiBase()+"/api/ping"); return await r.json(); }catch(e){ return null; } }
+el("qeBtn").onclick=async()=>{ qeDlg.showModal(); drawQEChart();
+  const g=el("qeGuide"), p=await qePing();
+  if(p){ g.style.display="none"; el("qeNote").textContent=`서버 연결됨 (device=${p.device}). 구조는 현재 위저드 상태가 그대로 사용됩니다.`; el("qeRun").disabled=false; }
+  else{ g.style.display="block"; el("qeRun").disabled=true;
+    g.textContent="RCWA 서버가 꺼져 있습니다. 터미널에서 아래 한 줄을 실행하면 이 화면이 서버 모드로 열립니다:\n\n"+
+      "  cd cis_rcwa && python3 app.py\n\n(pip install torch numpy pyyaml · GPU 있으면 자동 사용 · 그 뒤 이 버튼을 다시 누르세요)";
+    el("qeNote").textContent="서버 미연결"; } };
+el("qeClose").onclick=()=>{ qeDlg.close(); };
+el("qeStop").onclick=async()=>{ if(QE.job) try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
+el("qeRun").onclick=async()=>{ if(QE.running)return;
+  const body={ yaml:structYAML(), lam0:+el("qeL0").value, lam1:+el("qeL1").value,
+    n:+el("qeN").value, nG:+el("qeNG").value, downsample:+el("qeDS").value, theta:+el("qeTH").value };
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/qe",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
+  catch(e){ el("qeNote").textContent="요청 실패: "+e.message; return; }
+  if(!r.job){ el("qeNote").textContent="오류: "+(r.error||"?"); return; }
+  QE.job=r.job; QE.rows=[]; QE.running=true;
+  el("qeRun").disabled=true; el("qeStop").disabled=false; el("qeCsv").disabled=true;
+  QE.timer=setInterval(qePoll,700); };
+async function qePoll(){ let s; try{ s=await(await fetch(qeApiBase()+"/api/qe/status?job="+QE.job)).json(); }catch(e){ return; }
+  QE.rows=s.rows||QE.rows;
+  el("qeProg").style.width=Math.round((s.progress||0)*100)+"%";
+  el("qeNote").textContent=(s.state==="running"?"":"["+s.state+"] ")+(s.error||s.note||"");
+  drawQEChart(); qeTableFill();
+  if(s.state!=="running"){ clearInterval(QE.timer); QE.running=false;
+    el("qeRun").disabled=false; el("qeStop").disabled=true; el("qeCsv").disabled=QE.rows.length===0; } }
+el("qeCsv").onclick=()=>{ let t="lambda_um,R,QE_Si,A_stack\n"+QE.rows.map(r=>r.join(",")).join("\n");
+  download(pname()+"_qe_spectrum.csv",t,"text/csv"); };
+function qeTableFill(){ const d=el("qeTable"); if(!QE.rows.length){d.textContent="";return;}
+  d.innerHTML="<table><tr><th>λ(nm)</th><th>QE(Si)</th><th>R</th><th>A_stack</th><th>합</th></tr>"+
+    QE.rows.map(r=>`<tr><td>${(r[0]*1000).toFixed(0)}</td><td>${r[2].toFixed(3)}</td><td>${r[1].toFixed(3)}</td><td>${r[3].toFixed(3)}</td><td>${(r[1]+r[2]+r[3]).toFixed(3)}</td></tr>`).join("")+"</table>";
+  d.querySelectorAll("td,th").forEach(c=>{c.style.padding="1px 12px";c.style.textAlign="right";}); }
+// ---- 스펙트럼 차트: 3 시리즈(QE/R/A) + 합(=1) 점검선, 직접 라벨 + 범례 + hover 툴팁
+function drawQEChart(hoverI){ const cv=el("qeChart"); if(!cv)return; const ctx=cv.getContext("2d");
+  const W=cv.width,H=cv.height, mL=52,mR=86,mT=16,mB=34, pw=W-mL-mR, ph=H-mT-mB;
+  const C=qeColors(), ink=css("--ink"), dim=css("--ink-dim"), faint=css("--ink-faint"), line=css("--line");
+  ctx.clearRect(0,0,W,H);
+  const rows=QE.rows;
+  const l0=rows.length? rows[0][0] : +el("qeL0").value, l1=rows.length? rows[rows.length-1][0] : +el("qeL1").value;
+  const X=lam=>mL+(l1>l0?(lam-l0)/(l1-l0):0.5)*pw, Y=v=>mT+(1.02-Math.min(1.02,Math.max(0,v)))/1.02*ph;
+  // 축/그리드 (recessive)
+  ctx.strokeStyle=line; ctx.fillStyle=faint; ctx.font="10px "+css("--mono"); ctx.lineWidth=1;
+  for(let v=0;v<=1.001;v+=0.25){ const y=Y(v)+0.5; ctx.beginPath(); ctx.moveTo(mL,y); ctx.lineTo(W-mR,y); ctx.stroke();
+    ctx.textAlign="right"; ctx.fillText(v.toFixed(2),mL-6,y+3); }
+  const nt=5; for(let i=0;i<=nt;i++){ const lam=l0+(l1-l0)*i/nt, x=X(lam);
+    ctx.textAlign="center"; ctx.fillText((lam*1000).toFixed(0),x,H-mB+16); }
+  ctx.fillStyle=dim; ctx.textAlign="center"; ctx.fillText("wavelength (nm)",mL+pw/2,H-6);
+  ctx.save(); ctx.translate(12,mT+ph/2); ctx.rotate(-Math.PI/2); ctx.fillText("fraction",0,0); ctx.restore();
+  if(!rows.length){ ctx.fillStyle=faint; ctx.textAlign="center"; ctx.font="12px "+css("--mono");
+    ctx.fillText("Run 을 누르면 QE / R / A 스펙트럼이 여기 그려집니다",mL+pw/2,mT+ph/2); qeLegendFill(C); return; }
+  const S3=[["QE",2,C.QE],["R",1,C.R],["A",3,C.A]];
+  // 합(=1) 점검선: 파선 회색
+  ctx.strokeStyle=faint; ctx.setLineDash([4,4]); ctx.lineWidth=1; ctx.beginPath();
+  rows.forEach((r,i)=>{ const x=X(r[0]),y=Y(r[1]+r[2]+r[3]); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }); ctx.stroke(); ctx.setLineDash([]);
+  for(const [nm,ci,col] of S3){ ctx.strokeStyle=col; ctx.lineWidth=2; ctx.beginPath();
+    rows.forEach((r,i)=>{ const x=X(r[0]),y=Y(r[ci]); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }); ctx.stroke();
+    ctx.fillStyle=col; rows.forEach(r=>{ ctx.beginPath(); ctx.arc(X(r[0]),Y(r[ci]),3.5,0,7); ctx.fill();
+      ctx.strokeStyle=css("--panel"); ctx.lineWidth=1.5; ctx.stroke(); });
+    // 직접 라벨 (선 끝, 잉크 텍스트 + 색 칩)
+    const last=rows[rows.length-1], y=Y(last[ci]);
+    ctx.fillStyle=col; ctx.fillRect(W-mR+8,y-4,8,8);
+    ctx.fillStyle=ink; ctx.textAlign="left"; ctx.font="11px "+css("--mono");
+    ctx.fillText(nm==="QE"?"QE (Si)":nm==="R"?"Reflection":"Stack abs.",W-mR+20,y+4); }
+  if(hoverI!=null&&rows[hoverI]){ const r=rows[hoverI],x=X(r[0])+0.5;
+    ctx.strokeStyle=dim; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(x,mT); ctx.lineTo(x,H-mB); ctx.stroke(); ctx.setLineDash([]); }
+  qeLegendFill(C); }
+function qeLegendFill(C){ el("qeLegend").innerHTML=[["QE (Si 로 결합)",C.QE],["Reflection",C.R],["Stack absorption",C.A],["합 R+QE+A (=1 점검)",css("--ink-faint")]]
+  .map(([t,c])=>`<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:${c};display:inline-block"></span>${t}</span>`).join(""); }
+el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const cv=el("qeChart"),rc=cv.getBoundingClientRect();
+  const px=(e.clientX-rc.left)*cv.width/rc.width, mL=52,mR=86,pw=cv.width-mL-mR;
+  const l0=QE.rows[0][0], l1=QE.rows[QE.rows.length-1][0];
+  let bi=0,bd=1e9; QE.rows.forEach((r,i)=>{ const x=mL+(l1>l0?(r[0]-l0)/(l1-l0):0.5)*pw, d=Math.abs(x-px); if(d<bd){bd=d;bi=i;} });
+  drawQEChart(bi); const r=QE.rows[bi],tip=el("qeTip");
+  tip.style.display="block"; tip.style.left=Math.min(rc.width-160,(e.clientX-rc.left)+12)+"px"; tip.style.top="12px";
+  tip.innerHTML=`λ ${(r[0]*1000).toFixed(0)} nm<br>QE ${r[2].toFixed(3)} · R ${r[1].toFixed(3)}<br>A ${r[3].toFixed(3)} · 합 ${(r[1]+r[2]+r[3]).toFixed(3)}`; });
+el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
 renderStep();
