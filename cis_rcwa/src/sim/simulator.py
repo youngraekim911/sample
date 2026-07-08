@@ -297,6 +297,10 @@ class RCWAPlaneWaveSimulator:
         out = {"wavelength": lam, "R": o["R"], "QE": o["T"],
                "A_stack": o["A"], "nG": solver.nG, "n_layers": len(self.layer_stack)}
 
+        if pixel_qe == "diag":
+            out["_solver"] = solver
+            return out
+
         if pixel_qe and self._pix is not None and self.n_si_layers > 0:
             # ---- 픽셀별 QE = 픽셀 Si 볼륨(DTI 트렌치 제외) 내 3D 흡수 + 밴드 아래 심부 Si ----
             # 절대 스케일: Σ(전 손실층 흡수) = 1−R−T (에너지 보존) 로 고정 — 정확.
@@ -332,3 +336,72 @@ class RCWAPlaneWaveSimulator:
             out["QE_trench"] = float(trench_abs)         # DTI 트렌치 내부 흡수분 (픽셀 제외)
             out["QE_deep"] = float(T_deep)
         return out
+
+    # -----------------------------------------------------------------
+    def diagnose(self, wavelength, theta=0.0):
+        """QE 이상 원인 추적 — 물질 n,k 점검 + 경계 투과(T) 프로파일.
+
+        반환 dict:
+          materials: [{name, n, k, source, lam_range, flags[]}]  (사용 물질 전부)
+          profile:   [{mats, th_um, A, T_after}]  air 직후(1-R)부터 Si 유입까지
+                     (같은 물질 조합의 연속 층은 묶음 — ML 슬라이스 등)
+          R, T_into_si, T_deep
+        """
+        lam = float(wavelength)
+        o = self.run(lam, theta=theta, pol_te=1.0, pol_tm=0.0, pixel_qe="diag")
+        solver = o.pop("_solver")
+        maps, C = solver.absorption_maps(self.grid_ny, self.grid_nx)
+        M = len(self.layer_stack)
+        A = [float(maps[i].sum() * C) if i in maps else 0.0 for i in range(M)]
+        # ---- 물질 표 + 의심 플래그 ----
+        disp = self.cfg.get("dispersion", {}) or {} if not self._eps_direct else {}
+        mats = []
+        for mid in sorted(self.id2name):
+            name = self.id2name[mid]
+            n, k = self._nk_at(name, lam) if not self._eps_direct else (0, 0)
+            if name in disp:
+                src = "yaml dispersion(브라우저 테이블)"
+                arr = np.array(disp[name], dtype=float)
+                L = arr[:, 0] / (1000.0 if arr[:, 0].max() > 20 else 1.0)
+                rng = (float(L.min()), float(L.max()))
+            elif self.matlib and (self.matlib.has((self.cfg.get("materials", {}).get(name, {}) or {}).get("src", name))
+                                  or self.matlib.has(name)):
+                src = "materials 폴더"
+                key = (self.cfg.get("materials", {}).get(name, {}) or {}).get("src", name)
+                rng = self.matlib.lam_range(key if self.matlib.has(key) else name)
+            else:
+                src = "yaml 상수"
+                rng = None
+            flags = []
+            if name != "air" and not (0.9 <= n <= 8.5):
+                flags.append(f"n={n:.3g} 비정상 범위(열 순서/단위 확인)")
+            if k < 0:
+                flags.append("k<0 (비물리)")
+            if k > 0.5 and name not in ("si",) and "metal" not in name:
+                flags.append(f"k={k:.3g} 강흡수 — 흡수계수(α)를 k 로 오인했는지 확인")
+            if rng and not (rng[0] - 1e-9 <= lam <= rng[1] + 1e-9):
+                flags.append(f"λ={lam} 가 테이블 범위({rng[0]:.2f}~{rng[1]:.2f}µm) 밖 -> 경계값 사용")
+            mats.append({"name": name, "n": round(n, 4), "k": round(k, 5),
+                         "source": src, "lam_range": rng, "flags": flags})
+        # ---- 경계 투과 프로파일 (같은 물질 조합 연속층 묶음) ----
+        prof = []
+        Tcur = 1.0 - o["R"]
+        cur = None
+        for i, (m2d, th) in enumerate(self.layer_stack):
+            ids = np.unique(np.asarray(m2d)) if not self._eps_direct else []
+            nm = "+".join(sorted(self.id2name[int(x)] for x in ids)) if len(ids) else f"layer{i}"
+            Tcur -= A[i]
+            if cur and cur["mats"] == nm:
+                cur["th_um"] += th; cur["A"] += A[i]; cur["T_after"] = Tcur; cur["n_sub"] += 1
+            else:
+                cur = {"mats": nm, "th_um": th, "A": A[i], "T_after": Tcur, "n_sub": 1}
+                prof.append(cur)
+        for p in prof:
+            p["th_um"] = round(p["th_um"], 4); p["A"] = round(p["A"], 5)
+            p["T_after"] = round(p["T_after"], 5)
+        nS = self.n_si_layers
+        A_above = sum(A[:M - nS]) if nS else sum(A)
+        return {"wavelength": lam, "R": round(o["R"], 5), "materials": mats,
+                "profile": prof,
+                "T_into_si": round(1.0 - o["R"] - A_above, 5),   # Si 밴드 유입 = 광학 QE
+                "T_deep": round(o["QE"], 5)}                     # 밴드 바닥 통과분

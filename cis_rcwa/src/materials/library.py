@@ -54,6 +54,13 @@ class MaterialLibrary:
     def has(self, name):
         return name in self.tables
 
+    def lam_range(self, name):
+        """테이블 λ 커버 범위 (um) — 진단용."""
+        if name not in self.tables:
+            return None
+        lam = self.tables[name][0]
+        return float(lam.min()), float(lam.max())
+
     def nk(self, name, lam_um):
         """이름/파장(um) -> (n,k). 범위 밖은 경계값 clamp (np.interp 기본)."""
         if name not in self.tables:

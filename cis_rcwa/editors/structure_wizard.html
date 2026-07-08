@@ -115,7 +115,9 @@
       <label class="hint" style="display:flex;flex-direction:column;gap:3px">입사각 θ(°)<input id="qeTH" type="number" step="1" value="0" style="width:56px"></label>
       <button class="btn primary" id="qeRun">▶ Run</button>
       <button class="btn" id="qeStop" disabled>■ Stop</button>
+      <button class="btn" id="qeDiag" title="QE가 0 등 이상할 때: 물질 n,k 점검 + air→…→Si 경계 투과 프로파일">🔍 진단</button>
     </div>
+    <div id="qeDiagOut" style="display:none;font:11px/1.6 var(--mono);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:300px;overflow:auto;white-space:pre-wrap"></div>
     <div style="height:8px;background:var(--panel-2);border:1px solid var(--line);border-radius:5px;overflow:hidden">
       <div id="qeProg" style="height:100%;width:0%;background:var(--accent);transition:width .3s"></div></div>
     <div class="hint" id="qeNote">-</div>
@@ -1035,6 +1037,29 @@ async function qePoll(){ let s; try{ s=await(await fetch(qeApiBase()+"/api/qe/st
   drawQEChart(); qeTableFill();
   if(s.state!=="running"){ clearInterval(QE.timer); QE.running=false;
     el("qeRun").disabled=false; el("qeStop").disabled=true; el("qeCsv").disabled=QE.rows.length===0; } }
+el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
+  out.style.display="block"; out.textContent="진단 계산중... (단일 λ, 수 초)"; btn.disabled=true;
+  const lam=0.5*((+el("qeL0").value)+(+el("qeL1").value));
+  let d; try{ d=await(await fetch(qeApiBase()+"/api/qe/diag",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({yaml:structYAML(),lam,nG:+el("qeNG").value,downsample:+el("qeDS").value,theta:+el("qeTH").value})})).json(); }
+  catch(e){ out.textContent="진단 실패: "+e.message+"\n(서버 실행중인지 확인: python3 app.py)"; btn.disabled=false; return; }
+  btn.disabled=false;
+  if(d.error){ out.textContent="진단 오류: "+d.error+"\n"+(d.trace||""); return; }
+  let t=`λ=${(d.wavelength*1000).toFixed(0)}nm   R=${d.R}   Si 유입(=QE)=${d.T_into_si}   밴드 바닥 통과=${d.T_deep}\n`;
+  t+="\n── 물질 n,k (실제 계산에 쓰인 값) ──\n";
+  for(const m of d.materials){ const fl=m.flags&&m.flags.length;
+    t+=(fl?"⚠ ":"  ")+m.name.padEnd(12)+` n=${m.n}  k=${m.k}  [${m.source}]`+
+       (m.lam_range?`  λ${m.lam_range[0].toFixed(2)}~${m.lam_range[1].toFixed(2)}µm`:"")+"\n";
+    if(fl) for(const f of m.flags) t+="      └ "+f+"\n"; }
+  t+="\n── 경계 투과 프로파일 (air → … → Si) ──\n";
+  t+=`  진입 (1-R)${" ".repeat(30)}T=${(1-d.R).toFixed(4)}\n`;
+  let worst=null;
+  for(const p of d.profile){ if(!worst||p.A>worst.A)worst=p; }
+  for(const p of d.profile){ const tag=`  ${p.mats} (${(p.th_um*1000).toFixed(0)}nm${p.n_sub>1?"×"+p.n_sub:""})`;
+    t+=tag.padEnd(44)+`A=${p.A.toFixed(4)}  →T=${p.T_after.toFixed(4)}`+(p===worst&&p.A>0.05?"   ← 최대 흡수":"")+"\n"; }
+  t+="\n힌트: 특정 층에서 T 가 급락하면 그 층 물질의 k 를 확인하세요.\n"+
+     "흔한 원인: ① k 열에 흡수계수(α)나 % 값이 들어감  ② n/k 열 순서 뒤바뀜  ③ λ 단위 오감지(Å/eV)";
+  out.textContent=t; };
 el("qeCsv").onclick=()=>{ const rgb=QE.rows.length&&QE.rows[0].length>=7;
   let t="lambda_um,R,QE_Si_total,A_stack"+(rgb?",QE_R,QE_G,QE_B":"")+"\n"+QE.rows.map(r=>r.join(",")).join("\n");
   download(pname()+"_qe_spectrum.csv",t,"text/csv"); };

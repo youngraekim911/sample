@@ -147,6 +147,27 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             self._json({"error": "bad json"}, 400); return
+        if u.path == "/api/qe/diag":
+            # 진단: 물질 n,k 점검 + 경계 투과 프로파일 (단일 λ, 동기 실행)
+            yaml_text = data.get("yaml") or ""
+            if not yaml_text.strip():
+                self._json({"error": "yaml 이 비었습니다"}, 400); return
+            try:
+                os.makedirs(JOBS_DIR, exist_ok=True)
+                cfg_path = os.path.join(JOBS_DIR, "diag_" + uuid.uuid4().hex[:8] + ".yaml")
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    f.write(yaml_text)
+                from ..sim.simulator import RCWAPlaneWaveSimulator
+                sim = RCWAPlaneWaveSimulator(cfg_path,
+                                             nG=min(61, max(9, int(data.get("nG", 61)))),
+                                             downsample=max(4, int(data.get("downsample", 4))))
+                d = sim.diagnose(float(data.get("lam", 0.55)),
+                                 theta=float(data.get("theta", 0.0)))
+                self._json(d)
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}",
+                            "trace": traceback.format_exc()[-1500:]}, 500)
+            return
         if u.path == "/api/qe":
             yaml_text = data.get("yaml") or ""
             if not yaml_text.strip():
