@@ -52,6 +52,7 @@ class RCWAPlaneWaveSimulator:
             print("[builder] wizard v3 schema")
         else:
             b = QcellBuilder(self.cfg, base_dir=self.base_dir)
+        self.builder = b
         self.matid = b.build()                      # [nz,ny,nx] uint8
         self.meta = b.meta()
         self.dz = b.dz
@@ -62,6 +63,15 @@ class RCWAPlaneWaveSimulator:
 
         # 층 스택(z-slice 병합) 준비
         self._prepare_layers()
+
+        # 픽셀별 QE 마스크 (wizard 스키마): 픽셀 1×1 의 순수 Si 창(DTI 트렌치 제외)
+        self._pix = None
+        if hasattr(b, "pixel_maps"):
+            pixidx, colors = b.pixel_maps()
+            trench = b.dti_trench_mask()
+            ds = self.ds
+            self._pix = {"pixidx": pixidx[::ds, ::ds], "trench": trench[::ds, ::ds],
+                         "colors": colors, "npx": b.npx}
 
     # -----------------------------------------------------------------
     def _prepare_layers(self):
@@ -123,8 +133,15 @@ class RCWAPlaneWaveSimulator:
         return torch.as_tensor(g, dtype=self.dtype, device=self.device)
 
     # -----------------------------------------------------------------
-    def run(self, wavelength, theta=0.0, phi=0.0, pol_te=1.0, pol_tm=0.0):
-        """단일 파장 RCWA -> R, QE(Si 결합 T), A_stack."""
+    def run(self, wavelength, theta=0.0, phi=0.0, pol_te=1.0, pol_tm=0.0,
+            pixel_qe=True):
+        """단일 파장 RCWA -> R, QE(Si 결합 T), A_stack (+픽셀/컬러별 QE).
+
+        픽셀별 QE 정의: 투과(Si) 계면의 공간 Poynting flux Sz(x,y) 를
+        '픽셀 1×1 안의 순수 Si 창(DTI 트렌치·라이너 제외)' 마스크로 적분,
+        그 픽셀 전체 면적에 입사한 파워로 정규화.
+        컬러별 QE = 같은 bayer 색 픽셀들의 평균 (CF merge average).
+        """
         lam = float(wavelength)
         eps_lut = self._eps_lut(lam)
         eps_inc = 1.0                                    # air (위)
@@ -138,5 +155,23 @@ class RCWAPlaneWaveSimulator:
         for matid2d, th in self.layer_stack:
             solver.add_layer(th, eps_grid=self._eps_grid(matid2d, eps_lut))
         o = solver.solve(pol_te=pol_te, pol_tm=pol_tm)
-        return {"wavelength": lam, "R": o["R"], "QE": o["T"],
-                "A_stack": o["A"], "nG": solver.nG, "n_layers": len(self.layer_stack)}
+        out = {"wavelength": lam, "R": o["R"], "QE": o["T"],
+               "A_stack": o["A"], "nG": solver.nG, "n_layers": len(self.layer_stack)}
+
+        if pixel_qe and self._pix is not None:
+            Sz = solver.transmitted_flux_map(self.grid_ny, self.grid_nx)
+            Sz = Sz.detach().cpu().numpy()               # 평균 == T (calibrated)
+            pixidx, trench = self._pix["pixidx"], self._pix["trench"]
+            colors, npx = self._pix["colors"], self._pix["npx"]
+            ngrid = Sz.size
+            qe_pix = []
+            for pidx in range(npx * npx):
+                m = (pixidx == pidx) & (~trench)         # 픽셀 내 순수 Si 창
+                # (픽셀 flux 합/전체 셀) ÷ (픽셀 면적/전체 면적 = 1/npx²)
+                qe_pix.append(float(Sz[m].sum() / ngrid * (npx * npx)))
+            qe_rgb = {c: float(np.mean([q for q, cc in zip(qe_pix, colors) if cc == c]))
+                      for c in "RGB" if c in colors}
+            out["QE_pixels"] = qe_pix
+            out["QE_rgb"] = qe_rgb
+            out["QE_trench"] = float(o["T"] - sum(qe_pix) / (npx * npx))  # 트렌치로 들어간 몫
+        return out

@@ -54,14 +54,24 @@ def _run_job(jid, cfg_path, p):
             R = 0.5 * (o_te["R"] + o_tm["R"])
             QE = 0.5 * (o_te["QE"] + o_tm["QE"])
             A = 0.5 * (o_te["A_stack"] + o_tm["A_stack"])
-            job["rows"].append([round(float(lam), 5), round(float(R), 5),
-                                round(float(QE), 5), round(float(A), 5)])
+            row = [round(float(lam), 5), round(float(R), 5),
+                   round(float(QE), 5), round(float(A), 5)]
+            note_rgb = ""
+            if o_te.get("QE_rgb"):                       # 픽셀(색)별 QE: CF 하부 Si 창 기준
+                for c in "RGB":
+                    v = 0.5 * (o_te["QE_rgb"].get(c, 0) + o_tm["QE_rgb"].get(c, 0))
+                    row.append(round(float(v), 5))
+                note_rgb = f"  R/G/B={row[4]:.3f}/{row[5]:.3f}/{row[6]:.3f}"
+            job["rows"].append(row)
             job["progress"] = (i + 1) / len(lams)
-            job["note"] = f"λ={lam*1000:.0f}nm  QE={QE:.3f}  ({time.time()-t0:.1f}s/λ, TE+TM)"
+            job["note"] = f"λ={lam*1000:.0f}nm{note_rgb}  ({time.time()-t0:.1f}s/λ, TE+TM)"
         # csv 저장
         csv_path = os.path.join(JOBS_DIR, jid + "_qe.csv")
         with open(csv_path, "w", encoding="utf-8") as f:
-            f.write("lambda_um,R,QE_Si,A_stack\n")
+            hdr = "lambda_um,R,QE_Si_total,A_stack"
+            if job["rows"] and len(job["rows"][0]) >= 7:
+                hdr += ",QE_R,QE_G,QE_B"
+            f.write(hdr + "\n")
             for r in job["rows"]:
                 f.write(",".join(str(x) for x in r) + "\n")
         job["csv"] = os.path.relpath(csv_path, ROOT)

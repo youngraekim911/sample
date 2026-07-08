@@ -79,10 +79,31 @@ class WizardBuilder:
         endwall = (vEnd & vAct) | (hEnd & hAct)
         core = (vAct & (dx <= W / 2 - ol)) | (hAct & (dy <= W / 2 - ol))
         any_t = vAct | hAct
+        self._trench = any_t                   # DTI 트렌치(라이너+채움) 마스크 캐시
         out = np.where(endwall, li_id,
               np.where(core, fi_id,
               np.where(any_t, li_id, si_id)))
         return out.astype(np.uint8)
+
+    # ----------------------------------------------------- 픽셀 QE 마스크
+    def dti_trench_mask(self):
+        """(ny,nx) bool — DTI 트렌치 내부(라이너+채움). 픽셀 Si 창에서 제외용."""
+        if not hasattr(self, "_trench"):
+            self._si_map()
+        return self._trench
+
+    def pixel_maps(self):
+        """픽셀 QE 용 맵: (pixidx[ny,nx] int, colors[list len npx²] 'R'/'G'/'B').
+
+        pixidx = pr*npx+pc (pr: y-행, pc: x-열). colors[k] 는 bayer 색.
+        """
+        p = self.p
+        pr = np.clip((self.Y / p).astype(int), 0, self.npx - 1)
+        pc = np.clip((self.X / p).astype(int), 0, self.npx - 1)
+        pixidx = (pr * self.npx + pc).astype(np.int32)
+        bay = self.cfg["bayer"]
+        colors = [bay[r][c] for r in range(self.npx) for c in range(self.npx)]
+        return pixidx, colors
 
     # ------------------------------------------------------------- ML (풍선 모델)
     def _ml_lenses(self):

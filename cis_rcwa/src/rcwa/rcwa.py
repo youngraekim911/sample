@@ -221,6 +221,7 @@ class RCWASolver:
             self._modes.append((W, V, lam, th, kind, data))
             self._layerS.append(SL)
             S = self._star(S, SL)
+        self._S_pre_trn = S                       # 투과 계면 필드 복원용 (픽셀별 QE)
         S = self._star(S, Strn)
         self.S_global = S
         self._Sref, self._Strn, self._Kzr, self._Kzt = Sref, Strn, Kzr, Kzt
@@ -345,6 +346,28 @@ class RCWASolver:
         self._flux_calib = calib
         return {"A_layers": A_layers, "flux_nodes": flux, "calib": calib,
                 "sum_A": sum(A_layers), "check_1_R_T": 1.0 - self._R - self._T}
+
+    def transmitted_flux_map(self, Ny, Nx):
+        """투과(기판) 계면 바로 위 node 의 하향 Poynting flux Sz(x,y) — (Ny,Nx).
+
+        평균값이 정확히 T 가 되도록 calibration (Parseval: 셀 평균 = order 합).
+        픽셀별 QE = 픽셀 마스크 영역 flux 적분 / 픽셀 면적 비율.
+        """
+        N = self.nG
+        Spre, Strn = self._S_pre_trn, self._Strn
+        a = torch.linalg.solve(self.I2 - Spre["22"] @ Strn["11"],
+                               Spre["21"] @ self._cinc)
+        b = Strn["11"] @ a
+        E = self.W0 @ (a + b)
+        H = self.V0 @ (a - b)
+        f = float(self._flux_from_tangential(E, H, N))
+        calib = (self._T / f) if abs(f) > 1e-300 else 0.0
+        Ex = fft_funs.field_ifft(E[:N], self.m, self.n, Ny, Nx)
+        Ey = fft_funs.field_ifft(E[N:], self.m, self.n, Ny, Nx)
+        Hx = fft_funs.field_ifft(H[:N], self.m, self.n, Ny, Nx)
+        Hy = fft_funs.field_ifft(H[N:], self.m, self.n, Ny, Nx)
+        Sz = 0.5 * (Ex * Hy.conj() - Ey * Hx.conj()).real * calib
+        return Sz
 
     def node_tangential_realspace(self, node_k, Ny, Nx):
         """node_k 접선 필드를 실공간 (Ny,Nx) 로 ifft.  반환 Ex,Ey,Hx,Hy, Sz(x,y)."""
