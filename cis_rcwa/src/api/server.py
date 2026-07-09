@@ -63,7 +63,7 @@ def _run_job(jid, cfg_path, p):
                     v = w * (o_te["QE_rgb"].get(c, 0) + o_tm["QE_rgb"].get(c, 0))
                     row.append(round(float(v), 5))
                 note_rgb = f"  R/G/B={row[4]:.3f}/{row[5]:.3f}/{row[6]:.3f}"
-                note_rgb += f"  (deep {w*(o_te.get('QE_deep',0)+o_tm.get('QE_deep',0)):.3f} 제외)"
+                note_rgb += f"  (전체 Si흡수, 심부 {w*(o_te.get('QE_deep',0)+o_tm.get('QE_deep',0)):.3f} 포함)"
             job["rows"].append(row)
             job["progress"] = (i + 1) / len(lams)
             job["note"] = f"λ={lam*1000:.0f}nm{note_rgb}  ({time.time()-t0:.1f}s/λ, TE+TM)"

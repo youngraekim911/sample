@@ -1054,7 +1054,7 @@ el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
   catch(e){ out.textContent="진단 실패: "+e.message+"\n(서버 실행중인지 확인: python3 app.py)"; btn.disabled=false; return; }
   btn.disabled=false;
   if(d.error){ out.textContent="진단 오류: "+d.error+"\n"+(d.trace||""); return; }
-  let t=`[진단 ${WIZ_VERSION}] λ=${(d.wavelength*1000).toFixed(0)}nm   R=${d.R}   Si 유입=${d.T_into_si} (QE=흡수는 이 중 통과분 제외)   밴드 바닥 통과=${d.T_deep}\n`;
+  let t=`[진단 ${WIZ_VERSION}] λ=${(d.wavelength*1000).toFixed(0)}nm   R=${d.R}   Si 유입=${d.T_into_si} (=QE, 밴드흡수+심부 전체)   밴드 바닥 통과=${d.T_deep}\n`;
   t+="\n── 물질 n,k (실제 계산에 쓰인 값) ──\n";
   for(const m of d.materials){ const fl=m.flags&&m.flags.length;
     t+=(fl?"⚠ ":"  ")+m.name.padEnd(12)+` n=${m.n}  k=${m.k}  [${m.source}]`+
@@ -1147,7 +1147,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v44";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v45";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
