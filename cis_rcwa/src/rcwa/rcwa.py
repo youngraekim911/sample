@@ -90,9 +90,14 @@ class RCWASolver:
             torch.cat([Ky @ Ky - erI, -Ky @ Kx],       dim=1)], dim=0)
 
     def _homogeneous_V(self, er, Kz):
-        """반무한/gap 기준 매질 V = Q @ inv(Lam), Lam = 1j*[Kz;Kz] (outgoing 분기)."""
+        """반무한/gap 기준 매질 V = Q @ inv(Lam), Lam = 1j*[Kz;Kz] (outgoing 분기).
+
+        Wood anomaly(회절 차수가 정확히 kz=0) 가드: |lam| 하한 클램프로 0-나눗셈 방지
+        (해당 λ 는 simulator 가 미세 이동 재계산으로 처리 — 이건 NaN 전파 방지용)."""
         Q = self._homogeneous_Q(er)
         lam = torch.cat([1j * Kz, 1j * Kz])
+        small = lam.abs() < 1e-10
+        lam = torch.where(small, lam + 1e-10, lam)
         return Q @ torch.diag(1.0 / lam)
 
     # -----------------------------------------------------------------

@@ -1,12 +1,12 @@
-# CIS structure · wizard v3 schema (structure_wizard.html 과 동일)
-# 파장별 n,k 는 data/materials/ 폴더 txt 사용 (아래 n,k 는 상수 fallback)
+# CIS structure · wizard v3 schema — 실측 사양 기준 demo
+# ARL(top) 1200A / ML 돔 4000A / 평탄층 2000A / CF 5000A / BARL 100/100/500/500/100A
+# DTI 100nm(liner 10nm, poly 채움 80nm) 클로버 / grid 100nm폭 200nm 금속 / Bayer 2x2
 product: wizard_demo
-grid: { pixel_pitch_um: 1.0, n_pixels: 4, dxy_um: 0.02, dz_um: 0.02, air_margin_um: 0.2 }
+grid: { pixel_pitch_um: 1.0, n_pixels: 2, dxy_um: 0.02, dz_um: 0.02, air_margin_um: 0.2 }
+ambient: air
 bayer:
-  - [R, G, R, G]
-  - [G, B, G, B]
-  - [R, G, R, G]
-  - [G, B, G, B]
+  - [R, G]
+  - [G, B]
 materials:
   air:        { n: 1.00, k: 0.00 }
   si:         { n: 4.08, k: 0.028 }
@@ -21,30 +21,31 @@ materials:
   ml_arl:     { n: 1.25, k: 0.00 }
 stack:
   si:  { material: si, thickness_um: 2.0 }
-  dti:                       # 식각 -> 식각면 oxide 라이너 -> 채움. depth = si 두께
-    # mode: 1x1(전체 격자) | 2x2(quad 경계만) | 2x2_open(클로버: 팔이 중앙 못미쳐 끊김)
-    { mode: 2x2_open, width_um: 0.15, oxide_liner_um: 0.02, liner: oxide, fill: si,
-      center_gap_x_um: 0.20, center_gap_y_um: 0.20 }
-  barl:                      # 전면(blanket) 다층
-    - { material: arl_hi, thickness_um: 0.02 }
-    - { material: arl_lo, thickness_um: 0.05 }
-  grid:                      # 울타리(fence) — 하부 width 기준, 상부 top_ratio(0.8~1)로 축소(taper)
-    { pitch: 1, width_um: 0.15, top_ratio: 0.85, coat_on: true, coat_material: oxide, coat_um: 0.02,
-      stack: [ { material: grid_metal, height_um: 0.30 },
-               { material: grid_metal, height_um: 0.30 } ] }
-  cf:                        # 울타리 셀 채움. curvature: +볼록/-오목 (셀 중앙 offset)
-    R: { material: cf_red,   thickness_um: 0.60, curvature_um: -0.05 }
-    G: { material: cf_green, thickness_um: 0.60, curvature_um: -0.05 }
-    B: { material: cf_blue,  thickness_um: 0.60, curvature_um: -0.05 }
-  ml:                        # radius(footprint) + 평탄층 두께 + ML 돔 두께 -> 곡률 자동
+  dti:                       # 100nm 식각 -> 벽면 oxide 10nm -> 가운데 80nm poly(si) 채움
+    { mode: 2x2_open, width_um: 0.10, oxide_liner_um: 0.01, liner: oxide, fill: si,
+      center_gap_x_um: 0.20, center_gap_y_um: 0.20 }   # 클로버 center open (가로=세로)
+  barl:                      # 5층 AR: 100/100/500/500/100 A
+    - { material: arl_hi, thickness_um: 0.010 }
+    - { material: arl_lo, thickness_um: 0.010 }
+    - { material: arl_hi, thickness_um: 0.050 }
+    - { material: arl_lo, thickness_um: 0.050 }
+    - { material: arl_hi, thickness_um: 0.010 }
+  grid:                      # CF 담는 네모 울타리: 100nm 폭 x 200nm 금속 + oxide 코팅
+    { pitch: 1, width_um: 0.10, top_ratio: 0.9, coat_on: true, coat_material: oxide, coat_um: 0.02,
+      stack: [ { material: grid_metal, height_um: 0.20 } ] }
+  cf:                        # 5000A
+    R: { material: cf_red,   thickness_um: 0.50, curvature_um: 0.0 }
+    G: { material: cf_green, thickness_um: 0.50, curvature_um: 0.0 }
+    B: { material: cf_blue,  thickness_um: 0.50, curvature_um: 0.0 }
+  ml:                        # 평탄층 2000A + 돔 4000A (곡률 자동)
     material: ml
-    planar_um: 0.30          # 평탄층 두께 (스페이서, 초점거리)
-    height_um: 0.40          # ML 돔 두께 (평탄층 위~곡률 끝 sag). ROC=(r²+h²)/2h 자동
-    hr: 0.55                 # (fallback) height_um 0 일 때만 사용: 높이=hr*min(반경)
-    quads:                   # 템플릿 (shape + scale; scale>1 이면 이웃과 겹쳐 '찌부')
-      - - { shape: "2x2", scale: 1 }
-        - { shape: "2x1", orient: h, scale: 1 }
-      - - { shape: "2x1", orient: v, scale: 1 }
+    planar_um: 0.20
+    height_um: 0.40
+    hr: 0.55
+    quads:                   # 픽셀당 1x1 렌즈 (픽셀 중앙 집광)
+      - - { shape: "1x1", scale: 1 }
         - { shape: "1x1", scale: 1 }
-    lenses: null             # 개별 편집 시 [{cx,cy,ax,ay},...] (템플릿 대체)
-  arl_top: { material: ml_arl, thickness_um: 0.10 }   # ML 표면 conformal (ALD)
+      - - { shape: "1x1", scale: 1 }
+        - { shape: "1x1", scale: 1 }
+    lenses: null
+  arl_top: { material: ml_arl, thickness_um: 0.12 }   # ML 표면 conformal 1200A

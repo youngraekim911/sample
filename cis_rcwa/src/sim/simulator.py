@@ -307,7 +307,17 @@ class RCWAPlaneWaveSimulator:
                     solver.add_layer(th, eps_scalar=eps_lut[int(u[0])])
                 else:
                     solver.add_layer(th, eps_grid=self._eps_grid(matid2d, eps_lut))
-        o = solver.solve(pol_te=pol_te, pol_tm=pol_tm)
+        # Wood anomaly (회절 차수가 정확히 kz=0 -> V0 특이/비유한) 가드: λ 미세 이동 재계산
+        try:
+            o = solver.solve(pol_te=pol_te, pol_tm=pol_tm)
+            bad = not (np.isfinite(o["R"]) and np.isfinite(o["T"]))
+        except Exception:
+            bad = True
+        if bad:
+            lam_shift = lam * (1 + 5e-4)                 # ~0.3nm 이동
+            print(f"[warn] λ={lam}µm Wood anomaly -> λ={lam_shift:.5f}µm 로 재계산")
+            return self.run(lam_shift, theta=theta, phi=phi,
+                            pol_te=pol_te, pol_tm=pol_tm, pixel_qe=pixel_qe)
         out = {"wavelength": lam, "R": o["R"], "QE": o["T"],
                "A_stack": o["A"], "nG": solver.nG, "n_layers": len(self.layer_stack)}
 

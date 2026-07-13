@@ -146,13 +146,13 @@ const DEFAULT = {
     grid_metal:{n:0.4,k:3.4}, cf_red:{n:1.65,k:0.02}, cf_green:{n:1.65,k:0.02}, cf_blue:{n:1.65,k:0.02}, ml:{n:1.6,k:0}, ml_arl:{n:1.25,k:0} },
   stack:{
     si:{ material:"si", thickness_um:2.0 },
-    dti:{ width_um:0.08, oxide_liner_um:0.01, liner:"oxide", fill:"si", mode:"2x2_open", center_open:true, center_gap_x_um:0.20, center_gap_y_um:0.20 },  // depth = si.thickness
-    barl:[ {material:"arl_hi",thickness_um:0.02}, {material:"arl_lo",thickness_um:0.05} ],
-    grid:{ pitch:1, width_um:0.02, top_ratio:1.0, coat_on:true, coat_material:"oxide", coat_um:0.02, stack:[ {material:"grid_metal",height_um:0.30}, {material:"grid_metal",height_um:0.30} ] },
-    cf:{ R:{material:"cf_red",thickness_um:0.60,curvature_um:0}, G:{material:"cf_green",thickness_um:0.60,curvature_um:0}, B:{material:"cf_blue",thickness_um:0.60,curvature_um:0} },
-    ml:{ material:"ml", planar_um:0.30, hr:0.55, height_um:0.40, sag_height_um:0.55,
-         quads:[[{shape:"2x2",scale:1},{shape:"2x1",orient:"h",scale:1}],[{shape:"2x1",orient:"v",scale:1},{shape:"1x1",scale:1}]], lenses:null },
-    arl_top:{ material:"ml_arl", thickness_um:0.10 },
+    dti:{ width_um:0.10, oxide_liner_um:0.01, liner:"oxide", fill:"si", mode:"2x2_open", center_open:true, center_gap_x_um:0.20, center_gap_y_um:0.20 },  // 100nm 식각, liner 10nm, poly 80nm. depth = si.thickness
+    barl:[ {material:"arl_hi",thickness_um:0.010}, {material:"arl_lo",thickness_um:0.010}, {material:"arl_hi",thickness_um:0.050}, {material:"arl_lo",thickness_um:0.050}, {material:"arl_hi",thickness_um:0.010} ],  // 100/100/500/500/100 A
+    grid:{ pitch:1, width_um:0.10, top_ratio:0.9, coat_on:true, coat_material:"oxide", coat_um:0.02, stack:[ {material:"grid_metal",height_um:0.20} ] },
+    cf:{ R:{material:"cf_red",thickness_um:0.50,curvature_um:0}, G:{material:"cf_green",thickness_um:0.50,curvature_um:0}, B:{material:"cf_blue",thickness_um:0.50,curvature_um:0} },  // 5000A
+    ml:{ material:"ml", planar_um:0.20, hr:0.55, height_um:0.40, sag_height_um:0.55,   // 평탄층 2000A + 돔 4000A
+         quads:[[{shape:"1x1",scale:1},{shape:"1x1",scale:1}],[{shape:"1x1",scale:1},{shape:"1x1",scale:1}]], lenses:null },
+    arl_top:{ material:"ml_arl", thickness_um:0.12 },   // 1200A (1000~1500A)
   }
 };
 let refLambda=0.55, folderLib={}, curStep=0, viewMode="iso";
@@ -806,7 +806,7 @@ const STEPS=[
       h("span",{class:"hint",id:"mlInfo"},[""])]));
     setTimeout(()=>{drawMLedit(); wireMLedit();},0);
     return rows; }},
- {t:"8 · ARL top", d:"air→ML 사이 AR (물질·두께)", body:()=>[ matRow("ARL 물질",S.stack.arl_top,"material"), numRowA("thickness (Å) ≤1000",S.stack.arl_top,"thickness_um",1000),
+ {t:"8 · ARL top", d:"air→ML 사이 AR (물질·두께)", body:()=>[ matRow("ARL 물질",S.stack.arl_top,"material"), numRowA("thickness (Å) ≤2000",S.stack.arl_top,"thickness_um",2000),
     h("p",{class:"hint"},["여기까지가 구조 셋업. 우측에서 3D 확인 후 상단 '⤓ Generate .npy'."]) ]},
 ];
 function buildSteps(){ const st=el("steps"); st.innerHTML=""; STEPS.forEach((s,i)=>{ const c=h("div",{class:"schip"+(i===curStep?" on":(i<curStep?" done":"")),onclick:()=>{curStep=i; renderStep();}},[String(i+1)]); st.appendChild(c); }); }
@@ -1152,7 +1152,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v46";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v47";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
