@@ -13,6 +13,12 @@ materials:
   oxide:      { n: 1.46, k: 0.00 }
   arl_hi:     { n: 2.20, k: 0.00 }
   arl_lo:     { n: 1.46, k: 0.00 }
+  barl1:      { n: 1.77, k: 0.00 }   # BARL 물질1 (실측 @550)
+  barl2:      { n: 2.06, k: 0.00 }   # BARL 물질2
+  barl3:      { n: 1.46, k: 0.00 }   # BARL 물질3
+  barl4:      { n: 2.06, k: 0.00 }   # BARL 물질4
+  barl5:      { n: 1.77, k: 0.00 }   # BARL 물질5
+  poly:       { n: 4.15, k: 0.07 }   # DTI 채움 poly-Si (근사 — 실측 파일로 교체 권장)
   grid_metal: { n: 0.40, k: 3.40 }
   cf_red:     { n: 1.65, k: 0.02 }
   cf_green:   { n: 1.65, k: 0.02 }
@@ -22,17 +28,17 @@ materials:
 stack:
   si:  { material: si, thickness_um: 2.0 }
   dti:                       # 100nm 식각 -> 벽면 oxide 10nm -> 가운데 80nm poly(si) 채움
-    { mode: 2x2_open, width_um: 0.10, oxide_liner_um: 0.01, liner: oxide, fill: si,
+    { mode: 2x2_open, width_um: 0.10, oxide_liner_um: 0.01, liner: oxide, fill: poly,
       center_gap_x_um: 0.20, center_gap_y_um: 0.20 }   # 클로버 center open (가로=세로)
-  barl:                      # 5층 AR: 100/100/500/500/100 A
-    - { material: arl_hi, thickness_um: 0.010 }
-    - { material: arl_lo, thickness_um: 0.010 }
-    - { material: arl_hi, thickness_um: 0.050 }
-    - { material: arl_lo, thickness_um: 0.050 }
-    - { material: arl_hi, thickness_um: 0.010 }
-  grid:                      # CF 담는 네모 울타리: 100nm 폭 x 200nm 금속 + oxide 코팅
+  barl:                      # 5층 AR: 물질1(1.77)=air쪽, 물질5=Si쪽 (아래->위 = 5,4,3,2,1)
+    - { material: barl5, thickness_um: 0.010 }
+    - { material: barl4, thickness_um: 0.050 }
+    - { material: barl3, thickness_um: 0.050 }
+    - { material: barl2, thickness_um: 0.010 }
+    - { material: barl1, thickness_um: 0.010 }
+  grid:                      # CF 담는 네모 울타리: 100nm 폭 x 200nm 저굴절(n1.45) + oxide 코팅
     { pitch: 1, width_um: 0.10, top_ratio: 0.9, coat_on: true, coat_material: oxide, coat_um: 0.02,
-      stack: [ { material: grid_metal, height_um: 0.20 } ] }
+      stack: [ { material: grid_lo, height_um: 0.20 } ] }
   cf:                        # 5000A
     R: { material: cf_red,   thickness_um: 0.50, curvature_um: 0.0 }
     G: { material: cf_green, thickness_um: 0.50, curvature_um: 0.0 }

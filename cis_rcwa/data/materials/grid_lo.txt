@@ -1,0 +1,4 @@
+# low-n grid material — 실측 1.45 0 (400~700 flat)
+wavelength n k
+400 1.45 0
+700 1.45 0
