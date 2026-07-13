@@ -149,7 +149,7 @@ const DEFAULT = {
   stack:{
     si:{ material:"si", thickness_um:4.0 },
     dti:{ width_um:0.10, oxide_liner_um:0.01, liner:"oxide", fill:"poly", mode:"2x2_open", center_open:true, center_gap_x_um:0.20, center_gap_y_um:0.20 },  // 100nm 식각, liner 10nm, poly 80nm. depth = si.thickness
-    barl:[ {material:"barl5",thickness_um:0.010}, {material:"barl4",thickness_um:0.050}, {material:"barl3",thickness_um:0.050}, {material:"barl2",thickness_um:0.010}, {material:"barl1",thickness_um:0.010} ],  // 물질1=air쪽 (아래->위 = 5,4,3,2,1)
+    barl:[ {material:"barl5",thickness_um:0.0020}, {material:"barl4",thickness_um:0.0623}, {material:"barl3",thickness_um:0.0841}, {material:"barl2",thickness_um:0.1200}, {material:"barl1",thickness_um:0.0239} ],  // 최적화: CF->Si 반사 ~1% (물질1=air쪽, 아래->위 = 5,4,3,2,1)
     grid:{ pitch:1, width_um:0.10, top_ratio:0.9, coat_on:true, coat_material:"oxide", coat_um:0.02, stack:[ {material:"grid_lo",height_um:0.20} ] },
     cf:{ R:{material:"cf_red",thickness_um:0.50,curvature_um:0}, G:{material:"cf_green",thickness_um:0.50,curvature_um:0}, B:{material:"cf_blue",thickness_um:0.50,curvature_um:0} },  // 5000A
     ml:{ material:"ml", planar_um:0.10, hr:0.55, height_um:0.35, sag_height_um:0.55,   // 최적화: 평탄 1000A + 돔 3500A (QE_G@550=74%)
@@ -1154,7 +1154,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v49";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v50";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>

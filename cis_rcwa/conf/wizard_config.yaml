@@ -30,12 +30,12 @@ stack:
   dti:                       # 100nm 식각 -> 벽면 oxide 10nm -> 가운데 80nm poly(si) 채움
     { mode: 2x2_open, width_um: 0.10, oxide_liner_um: 0.01, liner: oxide, fill: poly,
       center_gap_x_um: 0.20, center_gap_y_um: 0.20 }   # 클로버 center open (가로=세로)
-  barl:                      # 5층 AR: 물질1(1.77)=air쪽, 물질5=Si쪽 (아래->위 = 5,4,3,2,1)
-    - { material: barl5, thickness_um: 0.010 }
-    - { material: barl4, thickness_um: 0.050 }
-    - { material: barl3, thickness_um: 0.050 }
-    - { material: barl2, thickness_um: 0.010 }
-    - { material: barl1, thickness_um: 0.010 }
+  barl:                      # 5층 AR 최적화(TMM+RCWA): CF->Si 반사 7.8%->~1% — QE_G@550 74->78%
+    - { material: barl5, thickness_um: 0.0020 }   # Si쪽 20A
+    - { material: barl4, thickness_um: 0.0623 }
+    - { material: barl3, thickness_um: 0.0841 }
+    - { material: barl2, thickness_um: 0.1200 }
+    - { material: barl1, thickness_um: 0.0239 }   # CF쪽 239A
   grid:                      # CF 담는 네모 울타리: 100nm 폭 x 200nm 저굴절(n1.45) + oxide 코팅
     { pitch: 1, width_um: 0.10, top_ratio: 0.9, coat_on: true, coat_material: oxide, coat_um: 0.02,
       stack: [ { material: grid_lo, height_um: 0.20 } ] }
