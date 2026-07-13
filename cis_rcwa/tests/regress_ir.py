@@ -6,6 +6,8 @@
 3) remap_material (물질 교체, 기하 재생성 없음) -> QE 반응
 4) 합성 eps 모드 IR -> 에너지 보존
 5) IR 렌더러 smoke
+6) 블록 조립 == 위저드 rcwa_layers (맵/두께/detector 완전 일치)
+7) 블록 일반화: DTI liner 2겹 스택 + BARL 7층 + conformal 코팅 2겹 조합 실행
 """
 import os
 import sys
@@ -74,6 +76,82 @@ def main():
     png = render_ir(sim.ir, os.path.join(TMP, "regress_ir.png"), title="regress")
     assert os.path.getsize(png) > 10000
     print(f"[5] 렌더러 OK: {png}")
+
+    # ---- 6) 블록 조립 == 위저드 rcwa_layers (기하 완전 일치) ----
+    from src.config.loader import load_config
+    from src.structure.wizard_builder import WizardBuilder
+    from src.structure.ir import StructureIR as IRC, Detector as Det
+    from src.structure.blocks import ir_from_wizard_cfg
+
+    def canon(ir):
+        rm = ir.region_materials
+        n2c = {n: i for i, n in enumerate(sorted(set(rm.values())))}
+        out = []
+        for m, th in ir.layers:
+            conv = np.vectorize(lambda x: n2c[rm[int(x)]])(m).astype(np.int16)
+            if out and np.array_equal(out[-1][0], conv):
+                out[-1] = (out[-1][0], out[-1][1] + th)
+            else:
+                out.append((conv, th))
+        return out
+
+    cfg = load_config(CONF)
+    N = 200
+    b = WizardBuilder(cfg).set_lateral(N)
+    layers, si_n = b.rcwa_layers()                     # 레거시 경로 직접
+    pixidx, colors = b.pixel_maps()
+    irA = IRC(span_x=b.span, span_y=b.span, layers=layers,
+              region_materials={int(i): n for n, i in b._idx.items()},
+              substrate=b.s["si"]["material"],
+              detector=Det(band_um=float(b.s["si"]["thickness_um"]), n_layers=si_n,
+                           pixel_map=pixidx, pixel_labels=list(colors),
+                           exclude_mask=b.dti_trench_mask()),
+              materials=dict(cfg.get("materials", {}) or {})).validate()
+    irB = ir_from_wizard_cfg(cfg, N)
+    A, B = canon(irA), canon(irB)
+    assert len(A) == len(B), f"canon 층 수 {len(A)} vs {len(B)}"
+    for i, ((ma, ta), (mb, tb)) in enumerate(zip(A, B)):
+        assert abs(ta - tb) < 1e-9 and np.array_equal(ma, mb), f"layer{i} 불일치"
+    assert np.array_equal(irA.detector.pixel_map, irB.detector.pixel_map)
+    assert np.array_equal(irA.detector.exclude_mask, irB.detector.exclude_mask)
+    print(f"[6] 블록 조립 == rcwa_layers: canon {len(A)}층 완전 일치")
+
+    # ---- 7) 블록 일반화 조합 (liner 2겹 + BARL 7층 + 코팅 2겹) ----
+    from src.structure.blocks import (BlockContext, BlockStack, SiDtiBlock,
+                                      BarlBlock, GridCfBlock, PlanarBlock,
+                                      MlBlock, ConformalCoatBlock)
+    ctx = BlockContext(pitch_um=1.0, n_pixels=2, lateral_n=128,
+                       bayer=[["R", "G"], ["G", "B"]])
+    grid = {"pitch": 1, "width_um": 0.10, "top_ratio": 0.9, "coat_on": True,
+            "coat_material": "oxide", "coat_um": 0.02,
+            "stack": [{"material": "grid_lo", "height_um": 0.20}]}
+    cf = {c: {"material": m, "thickness_um": 0.5, "curvature_um": 0.05}
+          for c, m in (("R", "cf_red"), ("G", "cf_green"), ("B", "cf_blue"))}
+    st = BlockStack([
+        SiDtiBlock("si", 3.0, dti={"mode": "2x2_open", "width_um": 0.10,
+                                   "center_gap_x_um": 0.2, "center_gap_y_um": 0.2,
+                                   "fill": "poly",
+                                   "liners": [{"material": "oxide", "thickness_um": 0.02},
+                                              {"material": "barl2", "thickness_um": 0.01}]}),
+        BarlBlock([{"material": f"barl{1 + i % 5}", "thickness_um": 0.02}
+                   for i in range(7)]),                     # 7층 gradual
+        GridCfBlock(grid, cf, bg_material="ml"),
+        PlanarBlock("ml", 0.10),
+        MlBlock("ml", height_um=0.35,
+                quads=[[{"shape": "1x1", "scale": 1}] * 2] * 2),
+        ConformalCoatBlock("ml_arl", 0.08),
+        ConformalCoatBlock("oxide", 0.03),                  # 코팅 2겹
+    ], materials={"poly": {"n": 4.15, "k": 0.07},           # 폴더에 없는 물질은 상수로
+                  "barl1": {"n": 1.77, "k": 0}, "barl2": {"n": 2.06, "k": 0},
+                  "barl3": {"n": 1.46, "k": 0}, "barl4": {"n": 2.06, "k": 0},
+                  "barl5": {"n": 1.77, "k": 0}})
+    ir7 = st.to_ir(ctx)
+    sim7 = RCWAPlaneWaveSimulator(ir7, nG=41)
+    o7 = sim7.run(0.55)
+    assert abs(o7["R"] + o7["QE"] + o7["A_stack"] - 1) < 1e-6
+    assert set(o7["QE_rgb"]) == {"R", "G", "B"}
+    print(f"[7] 블록 일반화 조합: {len(ir7.layers)}층, R={o7['R']:.3f} "
+          f"QE_G={o7['QE_rgb']['G']:.3f} — OK")
     print("\nALL PASS")
 
 

@@ -218,30 +218,16 @@ class WizardBuilder:
 
     # ----------------------------------------------------- IR (구조/RCWA 계약)
     def to_ir(self, lateral_n=None, ml_slices=48, men_slices=8, taper_slices=8):
-        """위저드 구조 -> StructureIR. RCWA 는 이 IR 만 소비한다.
+        """위저드 구조 -> StructureIR — 블록 조립(src/structure/blocks.py)에 위임.
 
-        lateral_n: 가로 격자 수 (지정 시 set_lateral 재래스터).
-        detector: Si 밴드(마지막 si_n 층) + bayer 픽셀 분할 + DTI 트렌치 제외.
+        위저드 yaml 은 6개 블록(SiDti/Barl/GridCf/Planar/Ml/Coat) 조립의 한
+        사례일 뿐이다. (블록 경로와 이 빌더의 rcwa_layers 가 층/맵/detector
+        완전 동일함은 tests/regress_ir.py 에서 검증.)
         """
-        from .ir import StructureIR, Detector
-        if lateral_n:
-            self.set_lateral(lateral_n)
-        layers, si_n = self.rcwa_layers(ml_slices, men_slices, taper_slices)
-        pixidx, colors = self.pixel_maps()
-        det = Detector(band_um=float(self.s["si"]["thickness_um"]), n_layers=si_n,
-                       pixel_map=pixidx, pixel_labels=list(colors),
-                       exclude_mask=self.dti_trench_mask())
-        amb = self.cfg.get("ambient", "air") or "air"
-        ir = StructureIR(
-            span_x=self.span, span_y=self.span, layers=layers,
-            region_materials={int(i): n for n, i in self._idx.items()},
-            ambient=amb,
-            substrate=self.s["si"]["material"], detector=det,
-            materials=dict(self.cfg.get("materials", {}) or {}),
-            dispersion=dict(self.cfg.get("dispersion", {}) or {}))
-        if amb != "air":                     # ML 위 빈 공간 = ambient 매질
-            ir.remap_material("air", amb)
-        return ir.validate()
+        from .blocks import ir_from_wizard_cfg
+        return ir_from_wizard_cfg(self.cfg, lateral_n or self.nx,
+                                  ml_slices=ml_slices, men_slices=men_slices,
+                                  taper_slices=taper_slices)
 
     # ----------------------------------------------------- 픽셀 QE 마스크
     def dti_trench_mask(self):

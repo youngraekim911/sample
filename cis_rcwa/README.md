@@ -78,6 +78,39 @@ from src.viz.structure_view import render_ir  # IR -> 구조 이미지 (빌더 �
 render_ir(sim.ir, "structure.png")
 ```
 
+### 구조 블록 (src/structure/blocks.py)
+
+구조 블록도 부품화되어 있다 — 아래(Si)→위(공기) 순으로 조립:
+
+| 블록 | 역할 | 주요 파라미터 |
+|---|---|---|
+| `SiDtiBlock` | Si + DTI (none/1x1/2x2_open 클로버) | thickness, width, **liners 스택**(벽면 겹겹이), fill(poly), center gap |
+| `BarlBlock` | blanket 다층 AR — 층 수 임의 | [{material, thickness}, ...] (gradual n) |
+| `GridCfBlock` | grid 울타리(stack+표면코팅) 안 CF 채움 | grid{pitch,width,taper,stack,coat}, cf{색별 두께+**reflow 응집 곡률**} |
+| `PlanarBlock` | ML 평탄층 — CF/grid 위 전부 채움 | material, thickness |
+| `MlBlock` | ML 렌즈 (1x1/1x2/2x1/2x2 × quad 4) | height(곡률 자동), scale, quads/lenses |
+| `ConformalCoatBlock` | ML 표면 conformal 코팅(ARL) | material, thickness — **여러 겹 가능** |
+
+```python
+from src.structure.blocks import *
+ctx = BlockContext(pitch_um=1.0, n_pixels=2, lateral_n=200, bayer=[["R","G"],["G","B"]])
+ir = BlockStack([
+    SiDtiBlock("si", 4.0, dti={"mode":"2x2_open","width_um":0.10,
+        "liners":[{"material":"oxide","thickness_um":0.03}],  # 벽면 30nm 좌우 -> 남는 40nm
+        "fill":"poly","center_gap_x_um":0.2,"center_gap_y_um":0.2}),
+    BarlBlock([...7층이든 몇 층이든...]),
+    GridCfBlock(grid, cf, bg_material="ml"),
+    PlanarBlock("ml", 0.10),
+    MlBlock("ml", height_um=0.35, quads=[[{"shape":"1x1","scale":1}]*2]*2),
+    ConformalCoatBlock("ml_arl", 0.12),          # 겹겹이 코팅 가능
+], materials={...}).to_ir(ctx)                   # -> 그대로 RCWA 에
+```
+
+위저드 yaml 은 이 블록 조립의 한 사례일 뿐이다(`blocks_from_wizard_cfg`) —
+블록 경로와 기존 위저드 경로가 **맵/두께/detector 완전 일치**함을
+`tests/regress_ir.py` [6] 이 보증한다. 블록 간 결합은 `BlockContext` 공표
+필드(트렌치 마스크, CF 상면, 돔 sag)로만 이루어지므로 블록 추가/교체가 자유롭다.
+
 - 물질 해석은 `src/materials/resolver.py` 단일 창구: ① yaml dispersion(브라우저
   테이블) → ② materials/ 폴더 → ③ 상수. k 는 전 경로 |k|.
 - QE 집계는 `IR.detector` 규약만 따른다: 스택 하단 검출 밴드(n_layers) 3D 흡수
