@@ -150,7 +150,7 @@ const DEFAULT = {
     barl:[ {material:"arl_hi",thickness_um:0.02}, {material:"arl_lo",thickness_um:0.05} ],
     grid:{ pitch:1, width_um:0.02, top_ratio:1.0, coat_on:true, coat_material:"oxide", coat_um:0.02, stack:[ {material:"grid_metal",height_um:0.30}, {material:"grid_metal",height_um:0.30} ] },
     cf:{ R:{material:"cf_red",thickness_um:0.60,curvature_um:0}, G:{material:"cf_green",thickness_um:0.60,curvature_um:0}, B:{material:"cf_blue",thickness_um:0.60,curvature_um:0} },
-    ml:{ material:"ml", planar_um:0.30, hr:0.55, height_um:0, sag_height_um:0.55,
+    ml:{ material:"ml", planar_um:0.30, hr:0.55, height_um:0.40, sag_height_um:0.55,
          quads:[[{shape:"2x2",scale:1},{shape:"2x1",orient:"h",scale:1}],[{shape:"2x1",orient:"v",scale:1},{shape:"1x1",scale:1}]], lenses:null },
     arl_top:{ material:"ml_arl", thickness_um:0.10 },
   }
@@ -782,10 +782,15 @@ const STEPS=[
     tbl.appendChild(mkRow("응집 κ µm","curvature_um","0.001"));
     return [ h("div",{class:"row"},[h("label",{},["CF array"]),arr]), tbl,
       h("p",{class:"hint"},["grid 울타리 셀 안 채움. 두께=셀 평균두께(볼륨 보존). 응집 κ>0: 열처리로 중앙에 모임(중앙↑·코너↓), κ<0: 벽 젖음. 표면 프로파일 t+κ(2/3−r²)."]) ]; }},
- {t:"7 · Microlens", d:"풍선(balloon) 모델 — footprint(원/타원) 만 정하면 높이·곡률 자동", body:()=>{ const m=S.stack.ml; if(m.hr==null)m.hr=0.55;
-    const rows=[ matRow("ML 물질",m,"material"), numRow("평탄층 두께 (µm)",m,"planar_um","0.001"), numRow("h/r 비율 (0~1)",m,"hr"), numRow("돔 높이 h (µm, 0=h/r 자동)",m,"height_um","0.001",0,2) ];
-    rows.push(h("p",{class:"hint"},["높이 = h/r × min(반경). 렌즈가 겹치면 교선에서 '찌부'(풍선 접촉) — 자동."]));
-    rows.push(h("div",{class:"seclbl"},["quad 템플릿 (shape · scale)"]));
+ {t:"7 · Microlens", d:"radius(footprint) · 평탄층 두께 · ML 돔 두께 → 곡률 자동", body:()=>{ const m=S.stack.ml; if(m.hr==null)m.hr=0.55; if(!(+m.height_um>0))m.height_um=0.40;
+    const rows=[ matRow("ML 물질",m,"material"),
+      numRow("평탄층 두께 (µm)",m,"planar_um","0.001",0,3),
+      numRow("ML 돔 두께 (µm, 평탄층 위~곡률 끝 sag)",m,"height_um","0.01",0.01,3) ];
+    // 곡률반경 ROC = (r²+h²)/2h  (대표 렌즈 반경 r = min 반경) — 자동 계산 표시
+    { const Ls=mlLenses(), r=Ls.length?Math.min(...Ls.map(L=>Math.min(L.ax,L.ay))):P()/2, hh=mlH(Ls[0]||{ax:r,ay:r});
+      const roc=hh>1e-6?((r*r+hh*hh)/(2*hh)):0;
+      rows.push(h("p",{class:"hint"},[`곡률반경 ROC ≈ ${roc.toFixed(2)}µm (radius r≈${r.toFixed(2)}, 돔 ${(+m.height_um).toFixed(2)}µm) — 작을수록 강한 집광. 겹치면 교선 '찌부' 자동.`])); }
+    rows.push(h("div",{class:"seclbl"},["radius(footprint): quad shape × scale 로 조절"]));
     const SH=[["2x2","2×2"],["2x1h","2×1 가로"],["2x1v","2×1 세로"],["1x1","1×1"]];
     [[1,0,"TL"],[1,1,"TR"],[0,0,"BL"],[0,1,"BR"]].forEach(([qy,qx,pos])=>{ const sp=m.quads[qy][qx];
       const cur=sp.shape==="2x1"?(sp.orient==="v"?"2x1v":"2x1h"):sp.shape;
@@ -1147,7 +1152,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v45";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v46";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>

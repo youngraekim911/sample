@@ -36,10 +36,11 @@ stack:
     R: { material: cf_red,   thickness_um: 0.60, curvature_um: -0.05 }
     G: { material: cf_green, thickness_um: 0.60, curvature_um: -0.05 }
     B: { material: cf_blue,  thickness_um: 0.60, curvature_um: -0.05 }
-  ml:                        # 풍선(balloon) 모델: footprint(원/타원) -> 높이=hr*min(반경), 곡률 자동
+  ml:                        # radius(footprint) + 평탄층 두께 + ML 돔 두께 -> 곡률 자동
     material: ml
-    planar_um: 0.30          # 최저 CF top 기준 평탄층 두께
-    hr: 0.55                 # h/r 비율 (1=반구)
+    planar_um: 0.30          # 평탄층 두께 (스페이서, 초점거리)
+    height_um: 0.40          # ML 돔 두께 (평탄층 위~곡률 끝 sag). ROC=(r²+h²)/2h 자동
+    hr: 0.55                 # (fallback) height_um 0 일 때만 사용: 높이=hr*min(반경)
     quads:                   # 템플릿 (shape + scale; scale>1 이면 이웃과 겹쳐 '찌부')
       - - { shape: "2x2", scale: 1 }
         - { shape: "2x1", orient: h, scale: 1 }
