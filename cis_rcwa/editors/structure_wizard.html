@@ -147,12 +147,12 @@ const DEFAULT = {
     arl_hi:{n:2.2,k:0}, arl_lo:{n:1.46,k:0},
     grid_metal:{n:0.4,k:3.4}, cf_red:{n:1.78,k:0.32}, cf_green:{n:1.62,k:0.011}, cf_blue:{n:1.49,k:0.22}, ml:{n:1.58,k:0}, ml_arl:{n:1.47,k:0} },
   stack:{
-    si:{ material:"si", thickness_um:2.0 },
+    si:{ material:"si", thickness_um:4.0 },
     dti:{ width_um:0.10, oxide_liner_um:0.01, liner:"oxide", fill:"poly", mode:"2x2_open", center_open:true, center_gap_x_um:0.20, center_gap_y_um:0.20 },  // 100nm 식각, liner 10nm, poly 80nm. depth = si.thickness
     barl:[ {material:"barl5",thickness_um:0.010}, {material:"barl4",thickness_um:0.050}, {material:"barl3",thickness_um:0.050}, {material:"barl2",thickness_um:0.010}, {material:"barl1",thickness_um:0.010} ],  // 물질1=air쪽 (아래->위 = 5,4,3,2,1)
     grid:{ pitch:1, width_um:0.10, top_ratio:0.9, coat_on:true, coat_material:"oxide", coat_um:0.02, stack:[ {material:"grid_lo",height_um:0.20} ] },
     cf:{ R:{material:"cf_red",thickness_um:0.50,curvature_um:0}, G:{material:"cf_green",thickness_um:0.50,curvature_um:0}, B:{material:"cf_blue",thickness_um:0.50,curvature_um:0} },  // 5000A
-    ml:{ material:"ml", planar_um:0.20, hr:0.55, height_um:0.40, sag_height_um:0.55,   // 평탄층 2000A + 돔 4000A
+    ml:{ material:"ml", planar_um:0.10, hr:0.55, height_um:0.35, sag_height_um:0.55,   // 최적화: 평탄 1000A + 돔 3500A (QE_G@550=74%)
          quads:[[{shape:"1x1",scale:1},{shape:"1x1",scale:1}],[{shape:"1x1",scale:1},{shape:"1x1",scale:1}]], lenses:null },
     arl_top:{ material:"ml_arl", thickness_um:0.12 },   // 1200A (1000~1500A)
   }
@@ -1154,7 +1154,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v48";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v49";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>

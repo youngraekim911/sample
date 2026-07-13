@@ -26,7 +26,7 @@ materials:
   ml:         { n: 1.60, k: 0.00 }
   ml_arl:     { n: 1.25, k: 0.00 }
 stack:
-  si:  { material: si, thickness_um: 2.0 }
+  si:  { material: si, thickness_um: 4.0 }
   dti:                       # 100nm 식각 -> 벽면 oxide 10nm -> 가운데 80nm poly(si) 채움
     { mode: 2x2_open, width_um: 0.10, oxide_liner_um: 0.01, liner: oxide, fill: poly,
       center_gap_x_um: 0.20, center_gap_y_um: 0.20 }   # 클로버 center open (가로=세로)
@@ -43,10 +43,10 @@ stack:
     R: { material: cf_red,   thickness_um: 0.50, curvature_um: 0.0 }
     G: { material: cf_green, thickness_um: 0.50, curvature_um: 0.0 }
     B: { material: cf_blue,  thickness_um: 0.50, curvature_um: 0.0 }
-  ml:                        # 평탄층 2000A + 돔 4000A (곡률 자동)
+  ml:                        # 평탄층 1000A + 돔 3500A (최적화: QE_G@550=74%, ROC 0.53µm)
     material: ml
-    planar_um: 0.20
-    height_um: 0.40
+    planar_um: 0.10
+    height_um: 0.35
     hr: 0.55
     quads:                   # 픽셀당 1x1 렌즈 (픽셀 중앙 집광)
       - - { shape: "1x1", scale: 1 }
