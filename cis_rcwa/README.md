@@ -51,6 +51,40 @@ qcell = 2×2 quad. **각 quad 마다** 렌즈 형태를 선택:
 2. **HTML 에디터 export** — `microlens_layout.deform_file: "ml_shapes.json"`
    (파일에 `quads` 포함 시 그 레이아웃이 우선 적용)
 
+## 블록 아키텍처 — StructureIR (구조/RCWA 분리 계약)
+
+```
+[구조 블록]                        [계약]                [RCWA 블록]        [결과 블록]
+WizardBuilder.to_ir() ─┐                                                  QE 스펙트럼
+eps npy(ir_from_eps_npy)├──►  StructureIR  ──────►  RCWAPlaneWaveSimulator ─ 픽셀/라벨별 QE
+voxel(ir_from_voxels) ─┘      · layers[(공간맵,두께)]                        워터폴 진단
+임의의 새 빌더 ────────┘      · region_materials{공간→물질}                  구조 이미지(viz)
+                              · detector(밴드+픽셀분할+제외마스크)
+```
+
+구조란 본질적으로 **공간 분할(boundary) + 각 공간을 채우는 물질** 이다.
+`src/structure/ir.py` 의 `StructureIR` 이 그 두 가지만 담는 계약이고,
+RCWA(`src/sim/simulator.py`)는 IR 만 소비한다 — DTI/CF/ML 같은 구조 개념을 모른다.
+따라서 **구조·물질이 바뀌어도 RCWA/결과 코드는 재작성이 필요 없다**:
+
+```python
+from src.sim.simulator import RCWAPlaneWaveSimulator
+sim = RCWAPlaneWaveSimulator("conf/wizard_config.yaml")   # yaml | *_eps.npy | ir.npz | StructureIR
+sim.remap_material("cf_green", "my_new_cf")   # 기하 그대로 물질만 교체
+sim.ir.save_npz("structure.npz")              # IR 저장/재사용
+o = sim.run(0.55)                             # {R, QE, QE_rgb(라벨별), ...}
+
+from src.viz.structure_view import render_ir  # IR -> 구조 이미지 (빌더 무관)
+render_ir(sim.ir, "structure.png")
+```
+
+- 물질 해석은 `src/materials/resolver.py` 단일 창구: ① yaml dispersion(브라우저
+  테이블) → ② materials/ 폴더 → ③ 상수. k 는 전 경로 |k|.
+- QE 집계는 `IR.detector` 규약만 따른다: 스택 하단 검출 밴드(n_layers) 3D 흡수
+  + 심부(반무한) 흡수를 `pixel_map`/`exclude_mask` 로 픽셀 귀속, 라벨별 평균.
+- 새 구조 생성기는 `StructureIR` 만 만들면 끝 (`validate()` 가 계약 위반을 즉시 검출).
+- 회귀: `python3 tests/regress_ir.py` (yaml 회귀 / npz 라운드트립 / remap / eps 모드 / 렌더).
+
 ## 위저드 스키마 v3 → RCWA (Python)
 
 위저드가 저장한 `<product>.yaml` 을 **그대로 RCWA 파이프라인에 사용** 가능:
