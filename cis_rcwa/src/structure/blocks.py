@@ -396,11 +396,30 @@ class BlockStack:
                 layers.append((m, z1 - z0))
         return layers
 
+    @staticmethod
+    def _tag_of(b):
+        """블록 -> 경계 프로브용 태그 이름 (name 지정 우선)."""
+        if getattr(b, "name", None):
+            return b.name
+        if isinstance(b, ConformalCoatBlock):
+            return b.mat                                  # 코팅은 물질명 (예: ml_arl)
+        return {"SiDtiBlock": "si", "BarlBlock": "barl", "GridCfBlock": "cf_grid",
+                "PlanarBlock": "planar", "MlBlock": "ml"}.get(
+                    type(b).__name__, type(b).__name__)
+
     def to_ir(self, ctx, substrate=None):
         layers = []                                       # 아래->위
+        tags = []
         for b in self.blocks:
-            layers += b.build(ctx)
-        layers += self._flush_dome(ctx)
+            new = b.build(ctx)
+            layers += new
+            tags += [self._tag_of(b)] * len(new)
+        dome = self._flush_dome(ctx)
+        layers += dome
+        # 돔 구간은 ML+conformal 코팅이 같은 z 를 공유 -> 하나의 태그로 묶음
+        dome_tag = "+".join([self._tag_of(b) for b in self.blocks
+                             if isinstance(b, (MlBlock, ConformalCoatBlock))]) or "ml"
+        tags += [dome_tag] * len(dome)
         assert layers, "블록이 층을 하나도 만들지 않음"
         # detector: 픽셀 분할(bayer) + SiDti 공표값
         det = None
@@ -419,7 +438,8 @@ class BlockStack:
             layers=[(m.astype(np.uint8), th) for m, th in reversed(layers)],
             region_materials={int(i): n for n, i in ctx._idx.items()},
             ambient=self.ambient, substrate=sub, detector=det,
-            materials=self.materials, dispersion=self.dispersion)
+            materials=self.materials, dispersion=self.dispersion,
+            layer_tags=list(reversed(tags)))
         if self.ambient != "air":
             ir.remap_material("air", self.ambient)
         return ir.validate()

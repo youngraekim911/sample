@@ -69,6 +69,7 @@ class StructureIR:
     detector: Detector = None
     materials: dict = field(default_factory=dict)  # {name: {n,k[,src]}}
     dispersion: dict = field(default_factory=dict) # {name: [[lam,n,k],..]}
+    layer_tags: list = None                        # 층별 출신 블록 이름 (위->아래, 옵션)
 
     # ---------------------------------------------------------------- 기본
     @property
@@ -102,6 +103,8 @@ class StructureIR:
             assert not missing, f"물질 매핑 없는 공간 번호: {missing}"
         else:
             assert self.substrate_eps is not None, "eps 모드: substrate_eps 필요"
+        if self.layer_tags is not None:
+            assert len(self.layer_tags) == len(self.layers), "layer_tags 길이 != 층 수"
         d = self.detector
         if d is not None:
             assert d.n_layers <= len(self.layers), "detector.n_layers > 층 수"
@@ -138,6 +141,7 @@ class StructureIR:
             "substrate_eps": ([self.substrate_eps.real, self.substrate_eps.imag]
                               if self.substrate_eps is not None else None),
             "materials": self.materials, "dispersion": self.dispersion,
+            "layer_tags": self.layer_tags,
             "detector": ({"band_um": d.band_um, "n_layers": d.n_layers,
                           "pixel_labels": d.pixel_labels,
                           "deep_is_detector": d.deep_is_detector,
@@ -177,7 +181,8 @@ class StructureIR:
                    ambient_eps=complex(*meta["ambient_eps"]),
                    substrate_eps=complex(*se) if se else None,
                    detector=det, materials=meta.get("materials", {}),
-                   dispersion=meta.get("dispersion", {})).validate()
+                   dispersion=meta.get("dispersion", {}),
+                   layer_tags=meta.get("layer_tags")).validate()
 
 
 # --------------------------------------------------------------------------

@@ -111,6 +111,33 @@ ir = BlockStack([
 `tests/regress_ir.py` [6] 이 보증한다. 블록 간 결합은 `BlockContext` 공표
 필드(트렌치 마스크, CF 상면, 돔 sag)로만 이루어지므로 블록 추가/교체가 자유롭다.
 
+### RCWA 실행 블록 (src/sim/blocks.py)
+
+RCWA 쪽도 블록이다 — 광원/메쉬/프로브를 조합해 실행:
+
+```python
+from src.sim.blocks import RCWAEngine, LightSource, MeshPolicy, QEProbe, BoundaryProbe
+from src.viz.analysis_view import plot_boundary_T, plot_qe
+
+eng = RCWAEngine(ir, mesh=MeshPolicy(nG=101, downsample=2))   # ① IR 수신 ② mesh 정책
+res = eng.run(LightSource(lam=(0.40, 0.70, 13), theta=0, pol="avg"),  # ③ 빛 옵션 블록
+              probes=[QEProbe(), BoundaryProbe()])            # ④ 원하는 분석 프로브
+
+res["qe"]        # 픽셀별 QE — [{pixel,row,col,x_um,y_um,cf(어느 CF 아래인지),qe[λ]}]
+res["qe_by_cf"]  # CF 라벨별 평균 QE 스펙트럼
+res["boundary"]  # 블록 경계별 T(λ) — [{tag:"ml+ml_arl"|"cf_grid"|..., T:{R,G,B}}]
+plot_boundary_T(res, "boundary_T.png")   # 경계 Transmittance 그래프 (컬러 분기)
+plot_qe(res, "pixel_qe.png")             # 픽셀/CF별 QE 그래프
+```
+
+- **MeshPolicy**: 공간 크기별 mesh 자동 최적 — z 는 해석적 층 경계(Å층 정확,
+  복셀화 없음), 연속 곡면만 슬라이스, 균일층은 고유분해 생략 → λ당 수십 초.
+- **BoundaryProbe** 는 IR 의 `layer_tags`(블록 provenance)로 층을 묶어, 빛
+  시작(1-R)부터 Si 유입까지 각 블록 경계의 T(λ) 를 컬러 분기로 준다. 흡수맵은
+  QE 계산과 같은 solve 를 재사용하므로 추가 비용이 거의 없다.
+- **QEProbe** 는 모든 픽셀의 QE 를 위치(µm)·bayer (row,col)·상부 CF 라벨과
+  함께 준다 — 어떤 QE 가 어떤 CF 에 의한 것인지 명확.
+
 - 물질 해석은 `src/materials/resolver.py` 단일 창구: ① yaml dispersion(브라우저
   테이블) → ② materials/ 폴더 → ③ 상수. k 는 전 경로 |k|.
 - QE 집계는 `IR.detector` 규약만 따른다: 스택 하단 검출 밴드(n_layers) 3D 흡수

@@ -8,6 +8,7 @@
 5) IR 렌더러 smoke
 6) 블록 조립 == 위저드 rcwa_layers (맵/두께/detector 완전 일치)
 7) 블록 일반화: DTI liner 2겹 스택 + BARL 7층 + conformal 코팅 2겹 조합 실행
+8) RCWA 엔진 블록: LightSource/QEProbe/BoundaryProbe — 경계 T 단조감소·QE 정합
 """
 import os
 import sys
@@ -152,6 +153,26 @@ def main():
     assert set(o7["QE_rgb"]) == {"R", "G", "B"}
     print(f"[7] 블록 일반화 조합: {len(ir7.layers)}층, R={o7['R']:.3f} "
           f"QE_G={o7['QE_rgb']['G']:.3f} — OK")
+
+    # ---- 8) RCWA 엔진 블록 (광원/메쉬/프로브) ----
+    from src.sim.blocks import RCWAEngine, LightSource, MeshPolicy, QEProbe, BoundaryProbe
+    ir8 = ir_from_wizard_cfg(cfg, 128)
+    eng = RCWAEngine(ir8, mesh=MeshPolicy(nG=41, downsample=4))
+    res = eng.run(LightSource(lam=[0.46, 0.55], pol="avg"),
+                  probes=[QEProbe(), BoundaryProbe()], verbose=False)
+    # 픽셀 표: 위치 + CF 귀속
+    assert len(res["qe"]) == 4 and {r["cf"] for r in res["qe"]} == {"R", "G", "B"}
+    assert all("x_um" in r and len(r["qe"]) == 2 for r in res["qe"])
+    # 경계 T: 진입(1-R)에서 시작해 경계마다 단조 감소 (흡수 누적)
+    tags = [b["tag"] for b in res["boundary"]]
+    assert tags[-1] == "barl" and any("ml" in t for t in tags)
+    for L in "RGB":
+        seq = [res["entry"][L][1]] + [b["T"][L][1] for b in res["boundary"]]
+        assert all(a >= b - 1e-6 for a, b in zip(seq, seq[1:])), f"{L} T 증가함: {seq}"
+    # QE 정합: qe_by_cf(G) ≈ 라벨 평균
+    gs = [r["qe"][1] for r in res["qe"] if r["cf"] == "G"]
+    assert abs(res["qe_by_cf"]["G"][1] - np.mean(gs)) < 1e-6
+    print(f"[8] 엔진 블록: 경계 {tags} 단조감소, QE_G@550={res['qe_by_cf']['G'][1]:.3f} — OK")
     print("\nALL PASS")
 
 
