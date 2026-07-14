@@ -112,19 +112,19 @@ stack:
       curvature_um: 0.0
   ml:
     material: ml
-    planar_um: 0.05
+    planar_um: 0.2
     height_um: 0.25
     hr: 0.55
     sag_height_um: 0.55
     quads:
-    - - shape: 1x1
-        scale: 0.95
-      - shape: 1x1
-        scale: 0.95
-    - - shape: 1x1
-        scale: 0.95
-      - shape: 1x1
-        scale: 0.95
+    - - shape: 2x2
+        scale: 1.6
+      - shape: 2x2
+        scale: 1.6
+    - - shape: 2x2
+        scale: 1.6
+      - shape: 2x2
+        scale: 1.6
     lenses: null
   arl_top:
     material: ml_arl
