@@ -35,41 +35,38 @@ _LOCK = threading.Lock()
 
 
 # --------------------------------------------------------------- QE 작업
-def _auto_nG(job, cfg_path, p):
-    """대표 파장에서 nG 를 올려가며 QE 수렴(Δ<0.5%p) 탐색 -> 'QE real' 용 nG.
+def _recommend_mesh(cfg_path, quality="std"):
+    """구조에서 (nG, downsample) 즉시 추천 — 계산 없이 0초.
 
-    셀이 클수록(작은 pitch × 여러 픽셀) 필요한 차수가 커진다 — 고정 nG 는
-    과소평가 위험. 101→145→201→257 순으로 확인, 연속 두 값의 컬러별 QE
-    최대 변화가 0.5%p 미만이면 수렴으로 판단.
+    근거: 필요한 회절 차수는 셀 크기(pitch × n_pixels)와 최소 가로 피처
+    (DTI 폭, grid 폭)가 정한다. 기준점: 2µm 셀·100nm 피처에서 nG=101 검증.
+      nG ∝ (셀 면적) × (100nm/최소피처)  → 품질 배율/시간 캡 적용.
+    시간 추정: eig ≈ nG³, FFT ≈ 격자² — nG=101·200² ≈ 12s/λ(TE+TM, CPU) 기준.
     """
-    from ..sim.simulator import RCWAPlaneWaveSimulator
-    lam0, lam1 = p["lam0"], p["lam1"]
-    lam_cal = 0.55 if lam0 - 1e-9 <= 0.55 <= lam1 + 1e-9 else 0.5 * (lam0 + lam1)
-    seq = [101, 145, 201, 257]
-    prev = None
-    chosen = seq[-1]
-    hist = []
-    for nG in seq:
-        if job.get("cancel"):
-            return chosen
-        job["note"] = f"nG auto: nG={nG} 수렴 확인중 (λ={lam_cal*1000:.0f}nm)..."
-        sim = RCWAPlaneWaveSimulator(cfg_path, nG=nG, downsample=p["downsample"])
-        o1 = sim.run(lam_cal, theta=p["theta"], pol_te=1.0, pol_tm=0.0)
-        o2 = sim.run(lam_cal, theta=p["theta"], pol_te=0.0, pol_tm=1.0)
-        rgb = o1.get("QE_rgb") or {}
-        q = ({c: 0.5 * (o1["QE_rgb"][c] + o2["QE_rgb"][c]) for c in rgb}
-             if rgb else {"QE": 0.5 * (o1["QE"] + o2["QE"])})
-        chosen = nG
-        if prev is not None:
-            d = max(abs(q[c] - prev[c]) for c in q)
-            hist.append(f"{nG}(Δ{d*100:.1f}%p)")
-            if d < 0.005:
-                break
-        else:
-            hist.append(str(nG))
-        prev = q
-    job["nG_auto"] = " → ".join(hist) + f"  채택 nG={chosen}"
-    return chosen
+    from ..config.loader import load_config
+    cfg = load_config(cfg_path)
+    g = cfg.get("grid", {})
+    span = float(g.get("pixel_pitch_um", 1.0)) * int(g.get("n_pixels", 2))
+    st = cfg.get("stack", {})
+    feats = [float((st.get("dti") or {}).get("width_um", 0) or 0),
+             float((st.get("grid") or {}).get("width_um", 0) or 0)]
+    feat = min([f for f in feats if f > 0] or [0.10])
+    base = 101.0 * (span / 2.0) ** 2 * min(max(0.10 / feat, 0.7), 2.0)
+
+    def est_s(nG, ds):                          # s/λ 추정 (TE+TM)
+        nlat = min(max(int(round(span / (0.005 * ds))), 128), 2400)
+        return 12.0 * (nG / 101.0) ** 3 * (nlat / 200.0) ** 2
+
+    if quality == "fast":                       # 미리보기: 수 초/λ
+        nG, ds = 61, 4
+    elif quality == "high":                     # 수렴 지향: 추천값 그대로 (느림 감수)
+        nG, ds = int(base * 1.3), 2
+    else:                                       # 표준: 추천값을 ~40s/λ 로 시간 캡
+        nG, ds = int(base), 2
+        while est_s(nG, ds) > 40 and nG > 101:
+            nG = int(nG * 0.9)
+    nG = max(41, min(257, nG | 1))              # 홀수화 + 범위
+    return nG, ds, est_s(nG, ds)
 
 
 def _run_job(jid, cfg_path, p):
@@ -77,8 +74,14 @@ def _run_job(jid, cfg_path, p):
     try:
         from ..sim.simulator import RCWAPlaneWaveSimulator
         job["note"] = "구조 생성 + 층 스택 준비중..."
-        if p.get("nG") == "auto":
-            p["nG"] = _auto_nG(job, cfg_path, p)
+        if p.get("nG") == "auto" or p.get("downsample") == "auto":
+            nG, ds, est = _recommend_mesh(cfg_path, p.get("quality", "std"))
+            if p.get("nG") == "auto":
+                p["nG"] = nG
+            if p.get("downsample") == "auto":
+                p["downsample"] = ds
+            job["nG_auto"] = (f"자동 추천 (품질 {p.get('quality','std')}): "
+                              f"nG={p['nG']}, downsample={p['downsample']} · 예상 ~{est:.0f}s/λ")
         sim = RCWAPlaneWaveSimulator(cfg_path, nG=p["nG"], downsample=p["downsample"])
         job["note"] = (f"device={sim.device} · grid {sim.grid_ny}×{sim.grid_nx} · "
                        f"layers {len(sim.layer_stack)} · nG {sim.nG if hasattr(sim,'nG') else p['nG']}")
@@ -216,12 +219,14 @@ class Handler(BaseHTTPRequestHandler):
             yaml_text = data.get("yaml") or ""
             if not yaml_text.strip():
                 self._json({"error": "yaml 이 비었습니다"}, 400); return
-            ng_req = data.get("nG", 101)
+            ng_req = data.get("nG", "auto")
+            ds_req = data.get("downsample", "auto")
             p = {"lam0": float(data.get("lam0", 0.40)),
                  "lam1": float(data.get("lam1", 0.70)),
                  "n": max(1, int(data.get("n", 7))),
                  "nG": "auto" if str(ng_req) == "auto" else max(9, int(ng_req)),
-                 "downsample": max(1, int(data.get("downsample", 2))),
+                 "downsample": "auto" if str(ds_req) == "auto" else max(1, int(ds_req)),
+                 "quality": str(data.get("quality", "std")),
                  "theta": float(data.get("theta", 0.0)),
                  "pol": str(data.get("pol", "avg"))}
             jid = start_job(yaml_text, p)

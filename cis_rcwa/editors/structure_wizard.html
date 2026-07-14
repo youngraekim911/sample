@@ -111,8 +111,13 @@
       <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 시작 (µm)<input id="qeL0" type="number" step="0.01" value="0.40" style="width:76px"></label>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 끝 (µm)<input id="qeL1" type="number" step="0.01" value="0.70" style="width:76px"></label>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px">파장 수<input id="qeN" type="number" step="1" min="1" value="7" style="width:60px"></label>
-      <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="Fourier 차수. auto: 대표 파장에서 101→145→201→257 수렴 탐색(ΔQE<0.5%p) 후 그 nG 로 스윕 — 'QE real'">nG<select id="qeNG" style="width:86px"><option value="61">61</option><option value="101" selected>101</option><option value="145">145</option><option value="201">201</option><option value="257">257</option><option value="auto">auto(수렴)</option></select></label>
-      <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조 격자 다운샘플 (클수록 빠르고 거침)">downsample<input id="qeDS" type="number" step="1" min="1" value="2" style="width:60px"></label>
+      <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조(pitch·최소 피처·셀 크기)에서 정확도/속도를 자동 산정 — 세부는 [고급]">품질
+        <select id="qeQual" style="width:120px"><option value="fast">빠름 (미리보기)</option><option value="std" selected>표준 (추천)</option><option value="high">정밀 (수렴 지향)</option><option value="manual">수동 (고급)</option></select></label>
+      <details id="qeAdv" style="display:none"><summary class="hint">고급</summary>
+        <div style="display:flex;gap:10px;align-items:flex-end;padding-top:6px">
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="Fourier 차수 — 빛을 몇 개의 회절 성분으로 전개할지. 클수록 정확·느림(≈세제곱)">nG<select id="qeNG" style="width:80px"><option value="61">61</option><option value="101" selected>101</option><option value="145">145</option><option value="201">201</option><option value="257">257</option></select></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조 격자 다운샘플 (클수록 빠르고 거침)">downsample<input id="qeDS" type="number" step="1" min="1" value="2" style="width:60px"></label>
+        </div></details>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px">입사각 θ(°)<input id="qeTH" type="number" step="1" value="0" style="width:56px"></label>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="비편광 표준=TE/TM 평균 · 합산=참조 도구 호환(값 2배, 합=2)">편광
         <select id="qePol" style="font-size:12px"><option value="avg" selected>평균(비편광)</option><option value="sum">합산(참조호환)</option></select></label>
@@ -1048,10 +1053,14 @@ el("qeBtn").onclick=async()=>{ qeDlg.showModal(); drawQEChart();
       "  cd cis_rcwa && python3 app.py\n\n(pip install torch numpy pyyaml · GPU 있으면 자동 사용 · 그 뒤 이 버튼을 다시 누르세요)";
     el("qeNote").textContent="서버 미연결"; } };
 el("qeClose").onclick=()=>{ qeDlg.close(); };
+el("qeQual").onchange=()=>{ el("qeAdv").style.display = el("qeQual").value==="manual"?"block":"none"; };
 el("qeStop").onclick=async()=>{ if(QE.job) try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
 el("qeRun").onclick=async()=>{ if(QE.running)return;
   const body={ yaml:structYAML(), lam0:+el("qeL0").value, lam1:+el("qeL1").value,
-    n:+el("qeN").value, nG:(el("qeNG").value==="auto"?"auto":+el("qeNG").value), downsample:+el("qeDS").value, theta:+el("qeTH").value,
+    n:+el("qeN").value,
+    nG:(el("qeQual").value==="manual"? +el("qeNG").value : "auto"),
+    quality:el("qeQual").value,
+    downsample:(el("qeQual").value==="manual"? +el("qeDS").value : "auto"), theta:+el("qeTH").value,
     pol:el("qePol")?el("qePol").value:"avg" };
   let r; try{ r=await(await fetch(qeApiBase()+"/api/qe",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
   catch(e){ el("qeNote").textContent="요청 실패: "+e.message; return; }
@@ -1062,7 +1071,7 @@ el("qeRun").onclick=async()=>{ if(QE.running)return;
 async function qePoll(){ let s; try{ s=await(await fetch(qeApiBase()+"/api/qe/status?job="+QE.job)).json(); }catch(e){ return; }
   QE.rows=s.rows||QE.rows;
   el("qeProg").style.width=Math.round((s.progress||0)*100)+"%";
-  el("qeNote").textContent=(s.state==="running"?"":"["+s.state+"] ")+(s.error||s.note||"");
+  el("qeNote").textContent=(s.nG_auto?("["+s.nG_auto+"]  "):"")+(s.state==="running"?"":"["+s.state+"] ")+(s.error||s.note||"");
   drawQEChart(); qeTableFill();
   if(s.state!=="running"){ clearInterval(QE.timer); QE.running=false;
     el("qeRun").disabled=false; el("qeStop").disabled=true; el("qeCsv").disabled=QE.rows.length===0; } }
@@ -1070,7 +1079,7 @@ el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
   out.style.display="block"; out.textContent="진단 계산중... (단일 λ, 수 초)"; btn.disabled=true;
   const lam=0.5*((+el("qeL0").value)+(+el("qeL1").value));
   let d; try{ d=await(await fetch(qeApiBase()+"/api/qe/diag",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({yaml:structYAML(),lam,nG:(el("qeNG").value==="auto"?101:+el("qeNG").value),downsample:+el("qeDS").value,theta:+el("qeTH").value})})).json(); }
+    body:JSON.stringify({yaml:structYAML(),lam,nG:61,downsample:4,theta:+el("qeTH").value})})).json(); }
   catch(e){ out.textContent="진단 실패: "+e.message+"\n(서버 실행중인지 확인: python3 app.py)"; btn.disabled=false; return; }
   btn.disabled=false;
   if(d.error){ out.textContent="진단 오류: "+d.error+"\n"+(d.trace||""); return; }
@@ -1167,7 +1176,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v54";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v55";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
