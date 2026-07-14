@@ -239,10 +239,12 @@ function dtiAt(x,y){ const p=P(),st=S.stack.dti,W=+st.width_um,ol=Math.min(+st.o
   return ox; }                                               // 사이드월 라이너
 // Grid 울타리(fence): (x,y,zabs[um]) -> 물질명|null(셀 내부). taper: 하부 width 기준 상부 축소(0.8~1)
 function gridAt(x,y,zabs){ const g=S.stack.grid,p=P(),per=(g.pitch||1)*p,W=+g.width_um,cw=gridCoat(),H=gridStackH();
+  // 코팅이 복셀보다 얇으면 샘플을 빠져나가 안 보임 -> 표시/복셀은 최소 1셀 폭 보장 (물리 두께는 cw 유지)
+  const cwx=cw>0?Math.max(cw,+S.grid.dxy_um||0):0, cwz=cw>0?Math.max(cw,+S.grid.dz_um||0):0;
   const ratio=Math.min(1,Math.max(0,+(g.top_ratio!=null?g.top_ratio:1)||0));
   const wz=W*(1-(1-ratio)*Math.min(zabs/Math.max(H,1e-9),1));   // 아래 W -> 위 W*ratio 선형
   const d=Math.min(Math.abs(x-Math.round(x/per)*per), Math.abs(y-Math.round(y/per)*per));
-  if(d>wz/2+cw || zabs>H+cw) return null;
+  if(d>wz/2+cwx || zabs>H+cwz) return null;
   if(cw>0 && (d>wz/2 || zabs>H)) return g.coat_material||"oxide";   // 표면 코팅 (옆+위)
   if(d>wz/2) return null;
   let acc=0; for(const s of g.stack){acc+=+s.height_um; if(zabs<=acc+1e-9)return s.material;} return g.stack.length?g.stack[g.stack.length-1].material:"grid_metal"; }
@@ -331,7 +333,7 @@ async function buildGC(){ const gen=++GCgen;
   GC={gen,N,d,span,names,siM,gD,cfT,cfI,sg,
       zSi, siName:st.si.material, barlB, barlTop:zSi+barlH, plTop:zSi+barlH+planarSpan(),
       gW:+g.width_um, ratio:Math.min(1,Math.max(0,+(g.top_ratio!=null?g.top_ratio:1)||0)),
-      cw:gridCoat(), gH:gridStackH(), coatName:g.coat_material||"oxide", gB,
+      cw:gridCoat(), cwx:(gridCoat()>0?Math.max(gridCoat(),+S.grid.dxy_um||0):0), cwz:(gridCoat()>0?Math.max(gridCoat(),+S.grid.dz_um||0):0), gH:gridStackH(), coatName:g.coat_material||"oxide", gB,
       mlName:st.ml.material, arlName:st.arl_top.material, arlT:+st.arl_top.thickness_um};
   return GC; }
 // matAt 과 동일 결과, 캐시 조회 기반 (뷰 전용 고속 경로)
@@ -364,8 +366,8 @@ function matFast(x,y,zc,upto){ const g=GC; if(!g)return matAt(x,y,zc,upto);
   if(zc<g.plTop){ const zabs=zc-g.barlTop;
     if(upto>=4){ const wz=g.gH>0? g.gW*(1-(1-g.ratio)*Math.min(zabs/g.gH,1)) : g.gW; const d0=g.gD[k];
       if(zabs<=g.gH){ if(d0<wz/2){ for(const e of g.gB){ if(zabs<=e[0])return e[1]; } return g.gB.length?g.gB[g.gB.length-1][1]:"grid_metal"; }
-        if(g.cw>0&&d0<wz/2+g.cw)return g.coatName; }
-      else if(g.cw>0&&zabs<=g.gH+g.cw&&d0<wz/2+g.cw)return g.coatName; }
+        if(g.cw>0&&d0<wz/2+g.cwx)return g.coatName; }
+      else if(g.cw>0&&zabs<=g.gH+g.cwz&&d0<wz/2+g.cwx)return g.coatName; }
     if(upto>=5 && zabs<=g.cfT[k]) return g.names[g.cfI[k]];
     if(upto>=6) return g.mlName;
     return "air"; }
@@ -416,12 +418,13 @@ async function buildVoxPrep(){
     else if(zc<plTop){ const zabs=zc-barlTop;
       const wz=gH>0? W*(1-(1-ratio)*Math.min(zabs/gH,1)) : W;
       let gid=0; if(zabs<=gH){ gid=gB.length?gB[gB.length-1][1]:0; for(const [b_,i_] of gB){ if(zabs<=b_){gid=i_;break;} } }
-      const inG=zabs<=gH, inCap=cw>0&&zabs<=gH+cw;
+      const cwx=cw>0?Math.max(cw,+S.grid.dxy_um||0):0, cwz=cw>0?Math.max(cw,+S.grid.dz_um||0):0;
+      const inG=zabs<=gH, inCap=cw>0&&zabs<=gH+cwz;
       for(let k=0;k<nP;k++){ let m=mlId;
         if(zabs<=cfTopM[k]) m=cfIdM[k];
         const d=gD[k];
-        if(inG){ if(d<wz/2)m=gid; else if(cw>0&&d<wz/2+cw)m=coatId; }
-        else if(inCap && d<wz/2+cw) m=coatId;
+        if(inG){ if(d<wz/2)m=gid; else if(cw>0&&d<wz/2+cwx)m=coatId; }
+        else if(inCap && d<wz/2+cwx) m=coatId;
         out[off+k]=m; } }
     else { for(let k=0;k<nP;k++){ const surf=plTop+sagM[k]; let m=0;
         if(zc<=surf)m=mlId; else if(zc<=surf+arlT)m=arlId;
@@ -781,7 +784,7 @@ const STEPS=[
       return tr; };
     tbl.appendChild(mkRow("물질","material"));
     tbl.appendChild(mkRow("두께 µm","thickness_um","0.001"));
-    tbl.appendChild(mkRow("응집 κ µm","curvature_um","0.001"));
+    tbl.appendChild(mkRow("곡률 curvature (µm)","curvature_um","0.001"));
     return [ h("div",{class:"row"},[h("label",{},["CF array"]),arr]), tbl,
       h("p",{class:"hint"},["grid 울타리 셀 안 채움. 두께=셀 평균두께(볼륨 보존). 응집 κ>0: 열처리로 중앙에 모임(중앙↑·코너↓), κ<0: 벽 젖음. 표면 프로파일 t+κ(2/3−r²)."]) ]; }},
  {t:"7 · Microlens", d:"radius(footprint) · 평탄층 두께 · ML 돔 두께 → 곡률 자동", body:()=>{ const m=S.stack.ml; if(m.hr==null)m.hr=0.55; if(!(+m.height_um>0))m.height_um=0.40;
@@ -1155,7 +1158,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v52";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v53";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>

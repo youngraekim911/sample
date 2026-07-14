@@ -189,6 +189,7 @@ class WizardBuilder:
             m = np.full_like(si_map, ml_id)
             m[zc <= zTop] = cf_map[zc <= zTop]
             wz = W * (1 - (1 - ratio) * min(zc / gridH, 1.0)) if gridH > 0 else W
+            cws = max(cw, self.dxy) if cw > 0 else 0.0    # 옆면 코팅 최소 1셀
             if zc <= gridH:
                 gid = gbounds[-1][1]
                 for b_, i_ in gbounds:
@@ -197,9 +198,9 @@ class WizardBuilder:
                         break
                 m[dg < wz / 2] = gid
                 if cw > 0:
-                    m[(dg >= wz / 2) & (dg < wz / 2 + cw)] = coat_id
+                    m[(dg >= wz / 2) & (dg < wz / 2 + cws)] = coat_id
             elif cw > 0 and zc <= gridH + cw:
-                m[dg < wz / 2 + cw] = coat_id
+                m[dg < wz / 2 + cws] = coat_id
             layers.append((m.astype(np.uint8), z1 - z0))
         # (4) ML 돔 + ARL conformal — ml_slices 균등 (전체 높이 sagH+arlT)
         top = sagH + arlT

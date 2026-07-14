@@ -247,6 +247,8 @@ class GridCfBlock:
             m = np.full(ctx.X.shape, bg_id, dtype=np.uint8)
             m[zc <= zTop] = cf_map[zc <= zTop]
             wz = W * (1 - (1 - ratio) * min(zc / gridH, 1.0)) if gridH > 0 else W
+            # 옆면 코팅이 래스터 셀보다 얇으면 샘플을 빠져나감 -> 최소 1셀 폭 보장
+            cws = max(cw, ctx.span / ctx.n) if cw > 0 else 0.0
             if zc <= gridH:
                 gid = gbounds[-1][1]
                 for b_, i_ in gbounds:
@@ -255,9 +257,9 @@ class GridCfBlock:
                         break
                 m[dg < wz / 2] = gid
                 if cw > 0:
-                    m[(dg >= wz / 2) & (dg < wz / 2 + cw)] = coat_id
+                    m[(dg >= wz / 2) & (dg < wz / 2 + cws)] = coat_id
             elif cw > 0 and zc <= gridH + cw:
-                m[dg < wz / 2 + cw] = coat_id
+                m[dg < wz / 2 + cws] = coat_id
             layers.append((m, z1 - z0))
         return layers
 

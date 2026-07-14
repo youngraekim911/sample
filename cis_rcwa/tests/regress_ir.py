@@ -21,7 +21,7 @@ from src.sim.simulator import RCWAPlaneWaveSimulator
 from src.structure.ir import StructureIR, Detector
 
 TMP = os.environ.get("TMPDIR", "/tmp")
-CONF = "conf/wizard_config.yaml"
+CONF = "tests/data/regress_v50.yaml"   # v50 기준 구조 고정 (conf 는 소자 사양따라 변함)
 EXPECT_G = 0.7799            # 리팩터링 직전 측정값 (nG=101, ds=2, TE+TM 평균)
 
 
