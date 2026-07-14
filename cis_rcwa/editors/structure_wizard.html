@@ -936,7 +936,10 @@ const prod=el("prodName"); prod.value=S.product||""; prod.oninput=()=>{S.product
 const dlg=el("dlg");
 function pname(){ return (S.product||"structure").trim().replace(/[^\w\-.]/g,"_")||"structure"; }
 function structYAML(){ const exp=structuredClone(S); const disp={};
-  for(const m in exp.materials){ const at=matNK(m),src=exp.materials[m].src; exp.materials[m]={n:+at.n.toFixed(4),k:+at.k.toFixed(4)}; if(src)exp.materials[m].src=src;
+  // 구조가 실제로 참조하는 물질만 yaml 에 동봉 — 미사용 물질은 내보내지 않음
+  const used=new Set(usedMats()); used.add(S.ambient||"air");
+  for(const m in exp.materials){ if(!used.has(m)){ delete exp.materials[m]; continue; }
+    const at=matNK(m),src=exp.materials[m].src; exp.materials[m]={n:+at.n.toFixed(4),k:+at.k.toFixed(4)}; if(src)exp.materials[m].src=src;
     // 브라우저에 λ-테이블이 있으면 yaml 에 dispersion 으로 동봉 -> RCWA 가 '이 값 그대로' 사용
     const t=matTable(m); if(t&&t.length>1) disp[m]=t.map(r=>[+(r[0]).toFixed(4),+(r[1]).toFixed(4),+(r[2]).toFixed(5)]); }
   if(Object.keys(disp).length) exp.dispersion=disp;
@@ -1176,7 +1179,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v59";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v60";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
