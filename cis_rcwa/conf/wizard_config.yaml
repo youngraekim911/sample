@@ -63,10 +63,13 @@ materials:
   ml_arl:
     n: 1.47
     k: 0.0
+  tin:
+    n: 1.9
+    k: 1.1
 stack:
   si:
     material: si
-    thickness_um: 3.8
+    thickness_um: 3.85
   dti:
     mode: 2x2_open
     center_open: true
@@ -74,27 +77,29 @@ stack:
     oxide_liner_um: 0.02
     liner: oxide
     fill: poly
-    center_gap_x_um: 0.25
-    center_gap_y_um: 0.25
+    center_gap_x_um: 0.28
+    center_gap_y_um: 0.28
   barl:
   - material: al2o3
-    thickness_um: 0.01
+    thickness_um: 0.009
   - material: hfox
     thickness_um: 0.055
   - material: peox
-    thickness_um: 0.06
+    thickness_um: 0.063
   - material: hfox
-    thickness_um: 0.01
+    thickness_um: 0.0095
   - material: al2o3
-    thickness_um: 0.01
+    thickness_um: 0.009
   grid:
     pitch: 2
     width_um: 0.15
-    top_ratio: 0.9
-    coat_on: true
+    top_ratio: 1.0
+    coat_on: false
     coat_material: al2o3
     coat_um: 0.005
     stack:
+    - material: tin
+      height_um: 0.008
     - material: teos
       height_um: 0.32
   cf:
@@ -112,19 +117,19 @@ stack:
       curvature_um: 0.0
   ml:
     material: ml
-    planar_um: 0.2
-    height_um: 0.25
+    planar_um: 0.45
+    height_um: 0.42
     hr: 0.55
     sag_height_um: 0.55
     quads:
     - - shape: 2x2
-        scale: 1.6
+        scale: 1.1
       - shape: 2x2
-        scale: 1.6
+        scale: 1.1
     - - shape: 2x2
-        scale: 1.6
+        scale: 1.1
       - shape: 2x2
-        scale: 1.6
+        scale: 1.1
     lenses: null
   arl_top:
     material: ml_arl
