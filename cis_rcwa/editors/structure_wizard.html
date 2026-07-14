@@ -83,6 +83,7 @@
       <span class="hint">3D: 드래그=회전 · 휠=줌</span>
       <label class="hint" style="display:flex;gap:5px;align-items:center"><input type="checkbox" id="cutChk"> 내부 절단</label>
       <button class="btn ghost mini" id="resetView">reset view</button>
+      <button class="btn ghost mini" id="resetAll" title="저장된 설정(localStorage)을 지우고 최신 기본 구조로 복원">⟲ 기본값 복원</button>
       <div class="spacer"></div>
       <label class="hint" style="display:flex;gap:6px;align-items:center">cut <input type="number" id="cutY" step="0.05" value="0.5" style="width:70px"></label>
     </div>
@@ -828,6 +829,7 @@ el("nextBtn").onclick=()=>{ if(curStep<STEPS.length-1){curStep++; renderStep();}
   cv.addEventListener("wheel",e=>{ e.preventDefault(); v3.zoom*=Math.exp(-e.deltaY*0.001); v3.zoom=Math.max(0.3,Math.min(4,v3.zoom)); redraw3D(); },{passive:false});
 })();
 el("resetView").onclick=()=>{ v3.yaw=-0.7; v3.pitch=0.55; v3.zoom=1; redraw3D(); };
+el("resetAll").onclick=()=>{ if(confirm("저장된 설정을 지우고 최신 기본 구조(v50 최적값)로 복원할까요?")){ localStorage.removeItem("cis_wizard_v3"); location.reload(); } };
 el("cutY").oninput=()=>renderViews();
 el("viewQ").onchange=()=>renderViews();
 el("cutChk").onchange=()=>renderViews();
@@ -1154,7 +1156,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v50";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v51";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
