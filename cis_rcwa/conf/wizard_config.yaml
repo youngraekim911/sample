@@ -47,7 +47,7 @@ materials:
     k: 0.0
   poly:
     n: 4.085
-    k: 0.07
+    k: 0.041
   cf_red:
     n: 1.78
     k: 0.32
