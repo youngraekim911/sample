@@ -1,6 +1,8 @@
-# CIS structure · wizard v3 schema — 실측 사양 기준 demo
-# ARL(top) 1200A / ML 돔 4000A / 평탄층 2000A / CF 5000A / BARL 100/100/500/500/100A
-# DTI 100nm(liner 10nm, poly 채움 80nm) 클로버 / grid 100nm폭 200nm 금속 / Bayer 2x2
+# CIS structure · wizard v3 schema — 실측 소자 사양 (사용자 제공 조건)
+# Si 3.8µm / DTI 90nm(liner oxide 20nm, poly 50nm, 클로버 open 0.25)
+# BARL al2o3/hfox/peox/hfox/al2o3 = 100/100/600/550/100 A (물질1 al2o3=air쪽)
+# grid TEOS 3200A(top_ratio 0.9) + al2o3 코팅 50A / CF R/G/B 4800/5000/4300 A
+# ML 평탄 2000A + 돔 6000A 2x2(scale 1.2) / ARL top 1200A
 product: wizard_demo
 grid: { pixel_pitch_um: 1.0, n_pixels: 2, dxy_um: 0.02, dz_um: 0.02, air_margin_um: 0.2 }
 ambient: air
@@ -11,47 +13,45 @@ materials:
   air:        { n: 1.00, k: 0.00 }
   si:         { n: 4.08, k: 0.028 }
   oxide:      { n: 1.46, k: 0.00 }
-  arl_hi:     { n: 2.20, k: 0.00 }
-  arl_lo:     { n: 1.46, k: 0.00 }
-  barl1:      { n: 1.77, k: 0.00 }   # BARL 물질1 (실측 @550)
-  barl2:      { n: 2.06, k: 0.00 }   # BARL 물질2
-  barl3:      { n: 1.46, k: 0.00 }   # BARL 물질3
-  barl4:      { n: 2.06, k: 0.00 }   # BARL 물질4
-  barl5:      { n: 1.77, k: 0.00 }   # BARL 물질5
+  al2o3:      { n: 1.77, k: 0.00 }   # BARL 물질1/5 · grid 코팅 (실측 @550)
+  hfox:       { n: 2.06, k: 0.00 }   # BARL 물질2/4
+  peox:       { n: 1.46, k: 0.00 }   # BARL 물질3
+  teos:       { n: 1.45, k: 0.00 }   # grid 저굴절 (400~700 flat)
   poly:       { n: 4.15, k: 0.07 }   # DTI 채움 poly-Si (근사 — 실측 파일로 교체 권장)
-  grid_metal: { n: 0.40, k: 3.40 }
-  cf_red:     { n: 1.65, k: 0.02 }
-  cf_green:   { n: 1.65, k: 0.02 }
-  cf_blue:    { n: 1.65, k: 0.02 }
-  ml:         { n: 1.60, k: 0.00 }
-  ml_arl:     { n: 1.25, k: 0.00 }
+  cf_red:     { n: 1.78, k: 0.32 }
+  cf_green:   { n: 1.62, k: 0.011 }
+  cf_blue:    { n: 1.49, k: 0.22 }
+  ml:         { n: 1.58, k: 0.00 }   # ML (비밀 물질 — @550 값)
+  ml_arl:     { n: 1.47, k: 0.00 }   # ARL top (비밀 물질 — @550 값)
 stack:
-  si:  { material: si, thickness_um: 4.0 }
-  dti:                       # 100nm 식각 -> 벽면 oxide 10nm -> 가운데 80nm poly(si) 채움
-    { mode: 2x2_open, width_um: 0.10, oxide_liner_um: 0.01, liner: oxide, fill: poly,
-      center_gap_x_um: 0.20, center_gap_y_um: 0.20 }   # 클로버 center open (가로=세로)
-  barl:                      # 5층 AR 최적화(TMM+RCWA): CF->Si 반사 7.8%->~1% — QE_G@550 74->78%
-    - { material: barl5, thickness_um: 0.0020 }   # Si쪽 20A
-    - { material: barl4, thickness_um: 0.0623 }
-    - { material: barl3, thickness_um: 0.0841 }
-    - { material: barl2, thickness_um: 0.1200 }
-    - { material: barl1, thickness_um: 0.0239 }   # CF쪽 239A
-  grid:                      # CF 담는 네모 울타리: 100nm 폭 x 200nm 저굴절(n1.45) + oxide 코팅
-    { pitch: 1, width_um: 0.10, top_ratio: 0.9, coat_on: true, coat_material: oxide, coat_um: 0.02,
-      stack: [ { material: grid_lo, height_um: 0.20 } ] }
-  cf:                        # 5000A
-    R: { material: cf_red,   thickness_um: 0.50, curvature_um: 0.0 }
+  si:  { material: si, thickness_um: 3.8 }
+  dti:                       # 90nm 식각 -> 벽면 oxide 20nm -> 가운데 50nm poly
+    { mode: 2x2_open, center_open: true, width_um: 0.09, oxide_liner_um: 0.02,
+      liner: oxide, fill: poly,
+      center_gap_x_um: 0.25, center_gap_y_um: 0.25 }   # 클로버 center open
+  barl:                      # 물질1(al2o3)=air쪽 (아래->위 = 5,4,3,2,1)
+    - { material: al2o3, thickness_um: 0.010 }   # 물질5 100A (Si쪽)
+    - { material: hfox,  thickness_um: 0.055 }   # 물질4 550A
+    - { material: peox,  thickness_um: 0.060 }   # 물질3 600A
+    - { material: hfox,  thickness_um: 0.010 }   # 물질2 100A
+    - { material: al2o3, thickness_um: 0.010 }   # 물질1 100A (air쪽)
+  grid:                      # TEOS 울타리 150nm 폭 x 3200A + al2o3 코팅 50A
+    { pitch: 1, width_um: 0.15, top_ratio: 0.9, coat_on: true, coat_material: al2o3,
+      coat_um: 0.005, stack: [ { material: teos, height_um: 0.32 } ] }
+  cf:                        # R/G/B = 4800/5000/4300 A
+    R: { material: cf_red,   thickness_um: 0.48, curvature_um: 0.0 }
     G: { material: cf_green, thickness_um: 0.50, curvature_um: 0.0 }
-    B: { material: cf_blue,  thickness_um: 0.50, curvature_um: 0.0 }
-  ml:                        # 평탄층 1000A + 돔 3500A (최적화: QE_G@550=74%, ROC 0.53µm)
+    B: { material: cf_blue,  thickness_um: 0.43, curvature_um: 0.0 }
+  ml:                        # 평탄층 2000A + 돔 6000A, 2x2 렌즈 scale 1.2
     material: ml
-    planar_um: 0.10
-    height_um: 0.35
+    planar_um: 0.20
+    height_um: 0.60
     hr: 0.55
-    quads:                   # 픽셀당 1x1 렌즈 (픽셀 중앙 집광)
-      - - { shape: "1x1", scale: 1 }
-        - { shape: "1x1", scale: 1 }
-      - - { shape: "1x1", scale: 1 }
-        - { shape: "1x1", scale: 1 }
+    sag_height_um: 0.55
+    quads:
+      - - { shape: "2x2", scale: 1.2 }
+        - { shape: "2x2", scale: 1.2 }
+      - - { shape: "2x2", scale: 1.2 }
+        - { shape: "2x2", scale: 1.2 }
     lenses: null
   arl_top: { material: ml_arl, thickness_um: 0.12 }   # ML 표면 conformal 1200A
