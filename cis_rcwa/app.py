@@ -9,11 +9,13 @@
 """
 import argparse
 
-from src.api.server import serve
-
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="CIS wizard + RCWA QE server")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--no-browser", action="store_true")
     a = ap.parse_args()
+    # torch 첫 import 가 10~30초 걸릴 수 있어, 멈춘 것처럼 보이지 않게 먼저 알림
+    print("[cis-rcwa] 로딩중... (torch/numpy import — 첫 실행은 10~30초 걸릴 수 있음)",
+          flush=True)
+    from src.api.server import serve
     serve(port=a.port, open_browser=not a.no_browser)
