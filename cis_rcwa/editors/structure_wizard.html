@@ -157,8 +157,8 @@ const DEFAULT = {
     barl:[ {material:"al2o3",thickness_um:0.010}, {material:"hfox",thickness_um:0.055}, {material:"peox",thickness_um:0.060}, {material:"hfox",thickness_um:0.010}, {material:"al2o3",thickness_um:0.010} ],  // 실측: al2o3/hfox/peox/hfox/al2o3 = 100/100/600/550/100A (물질1 al2o3=air쪽, 아래->위 = 5,4,3,2,1)
     grid:{ pitch:1, width_um:0.15, top_ratio:0.9, coat_on:true, coat_material:"al2o3", coat_um:0.005, stack:[ {material:"teos",height_um:0.32} ] },
     cf:{ R:{material:"cf_red",thickness_um:0.48,curvature_um:0}, G:{material:"cf_green",thickness_um:0.50,curvature_um:0}, B:{material:"cf_blue",thickness_um:0.43,curvature_um:0} },  // 4800/5000/4300A
-    ml:{ material:"ml", planar_um:0.20, hr:0.55, height_um:0.60, sag_height_um:0.55,   // 실측: 평탄 2000A + 돔 6000A 2x2 s1.2 (1x1/0.35/0.10 이 QE_G +5%p)
-         quads:[[{shape:"2x2",scale:1.2},{shape:"2x2",scale:1.2}],[{shape:"2x2",scale:1.2},{shape:"2x2",scale:1.2}]], lenses:null },
+    ml:{ material:"ml", planar_um:0.05, hr:0.55, height_um:0.25, sag_height_um:0.55,   // tetra 0.64 최적: 픽셀당 1x1 s0.95 돔 2500A — QE_G@550 66.5->75.5% (nG201)
+         quads:[[{shape:"1x1",scale:0.95},{shape:"1x1",scale:0.95}],[{shape:"1x1",scale:0.95},{shape:"1x1",scale:0.95}]], lenses:null },
     arl_top:{ material:"ml_arl", thickness_um:0.12 },   // 1200A (1000~1500A)
   }
 };
@@ -1176,7 +1176,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v55";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v56";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
