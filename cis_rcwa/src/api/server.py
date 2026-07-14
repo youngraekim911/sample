@@ -35,11 +35,50 @@ _LOCK = threading.Lock()
 
 
 # --------------------------------------------------------------- QE 작업
+def _auto_nG(job, cfg_path, p):
+    """대표 파장에서 nG 를 올려가며 QE 수렴(Δ<0.5%p) 탐색 -> 'QE real' 용 nG.
+
+    셀이 클수록(작은 pitch × 여러 픽셀) 필요한 차수가 커진다 — 고정 nG 는
+    과소평가 위험. 101→145→201→257 순으로 확인, 연속 두 값의 컬러별 QE
+    최대 변화가 0.5%p 미만이면 수렴으로 판단.
+    """
+    from ..sim.simulator import RCWAPlaneWaveSimulator
+    lam0, lam1 = p["lam0"], p["lam1"]
+    lam_cal = 0.55 if lam0 - 1e-9 <= 0.55 <= lam1 + 1e-9 else 0.5 * (lam0 + lam1)
+    seq = [101, 145, 201, 257]
+    prev = None
+    chosen = seq[-1]
+    hist = []
+    for nG in seq:
+        if job.get("cancel"):
+            return chosen
+        job["note"] = f"nG auto: nG={nG} 수렴 확인중 (λ={lam_cal*1000:.0f}nm)..."
+        sim = RCWAPlaneWaveSimulator(cfg_path, nG=nG, downsample=p["downsample"])
+        o1 = sim.run(lam_cal, theta=p["theta"], pol_te=1.0, pol_tm=0.0)
+        o2 = sim.run(lam_cal, theta=p["theta"], pol_te=0.0, pol_tm=1.0)
+        rgb = o1.get("QE_rgb") or {}
+        q = ({c: 0.5 * (o1["QE_rgb"][c] + o2["QE_rgb"][c]) for c in rgb}
+             if rgb else {"QE": 0.5 * (o1["QE"] + o2["QE"])})
+        chosen = nG
+        if prev is not None:
+            d = max(abs(q[c] - prev[c]) for c in q)
+            hist.append(f"{nG}(Δ{d*100:.1f}%p)")
+            if d < 0.005:
+                break
+        else:
+            hist.append(str(nG))
+        prev = q
+    job["nG_auto"] = " → ".join(hist) + f"  채택 nG={chosen}"
+    return chosen
+
+
 def _run_job(jid, cfg_path, p):
     job = JOBS[jid]
     try:
         from ..sim.simulator import RCWAPlaneWaveSimulator
         job["note"] = "구조 생성 + 층 스택 준비중..."
+        if p.get("nG") == "auto":
+            p["nG"] = _auto_nG(job, cfg_path, p)
         sim = RCWAPlaneWaveSimulator(cfg_path, nG=p["nG"], downsample=p["downsample"])
         job["note"] = (f"device={sim.device} · grid {sim.grid_ny}×{sim.grid_nx} · "
                        f"layers {len(sim.layer_stack)} · nG {sim.nG if hasattr(sim,'nG') else p['nG']}")
@@ -140,7 +179,7 @@ class Handler(BaseHTTPRequestHandler):
             if not job:
                 self._json({"error": "unknown job"}, 404); return
             self._json({k: job[k] for k in
-                        ("state", "progress", "note", "rows", "error", "csv")
+                        ("state", "progress", "note", "rows", "error", "csv", "nG_auto")
                         if k in job})
         else:
             self.send_response(404); self.end_headers()
@@ -177,10 +216,11 @@ class Handler(BaseHTTPRequestHandler):
             yaml_text = data.get("yaml") or ""
             if not yaml_text.strip():
                 self._json({"error": "yaml 이 비었습니다"}, 400); return
+            ng_req = data.get("nG", 101)
             p = {"lam0": float(data.get("lam0", 0.40)),
                  "lam1": float(data.get("lam1", 0.70)),
                  "n": max(1, int(data.get("n", 7))),
-                 "nG": max(9, int(data.get("nG", 101))),
+                 "nG": "auto" if str(ng_req) == "auto" else max(9, int(ng_req)),
                  "downsample": max(1, int(data.get("downsample", 2))),
                  "theta": float(data.get("theta", 0.0)),
                  "pol": str(data.get("pol", "avg"))}

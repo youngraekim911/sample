@@ -111,7 +111,7 @@
       <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 시작 (µm)<input id="qeL0" type="number" step="0.01" value="0.40" style="width:76px"></label>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 끝 (µm)<input id="qeL1" type="number" step="0.01" value="0.70" style="width:76px"></label>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px">파장 수<input id="qeN" type="number" step="1" min="1" value="7" style="width:60px"></label>
-      <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="Fourier 차수 — metal grid 수렴에 101 이상 권장 (클수록 정확·느림)">nG<input id="qeNG" type="number" step="2" min="9" value="101" style="width:66px"></label>
+      <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="Fourier 차수. auto: 대표 파장에서 101→145→201→257 수렴 탐색(ΔQE<0.5%p) 후 그 nG 로 스윕 — 'QE real'">nG<select id="qeNG" style="width:86px"><option value="61">61</option><option value="101" selected>101</option><option value="145">145</option><option value="201">201</option><option value="257">257</option><option value="auto">auto(수렴)</option></select></label>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조 격자 다운샘플 (클수록 빠르고 거침)">downsample<input id="qeDS" type="number" step="1" min="1" value="2" style="width:60px"></label>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px">입사각 θ(°)<input id="qeTH" type="number" step="1" value="0" style="width:56px"></label>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="비편광 표준=TE/TM 평균 · 합산=참조 도구 호환(값 2배, 합=2)">편광
@@ -143,7 +143,7 @@ const DEFAULT = {
   grid:{ pixel_pitch_um:1.0, n_pixels:4, dxy_um:0.02, dz_um:0.02, air_margin_um:0.20 },
   cf_array:"bayer",
   bayer:[["R","G","R","G"],["G","B","G","B"],["R","G","R","G"],["G","B","G","B"]],
-  materials:{ air:{n:1,k:0}, si:{n:4.08,k:0.028}, oxide:{n:1.46,k:0}, poly:{n:4.15,k:0.07},
+  materials:{ air:{n:1,k:0}, si:{n:4.08,k:0.028}, oxide:{n:1.46,k:0}, poly:{n:4.085,k:0.07},
     al2o3:{n:1.77,k:0}, hfox:{n:2.06,k:0}, peox:{n:1.46,k:0}, teos:{n:1.45,k:0},
     cf_red:{n:1.78,k:0.32}, cf_green:{n:1.62,k:0.011}, cf_blue:{n:1.49,k:0.22}, ml:{n:1.58,k:0}, ml_arl:{n:1.47,k:0} },
   stack:{
@@ -259,7 +259,11 @@ function mlTemplateLenses(){ const p=P(),out=[],q=S.stack.ml.quads;
     else if(sh==="2x1"){ if(or==="h")for(let a=0;a<2;a++)add(`q${qy}${qx}_${a}`,cx,y0+(a+.5)*p,p,p/2);
       else for(let b=0;b<2;b++)add(`q${qy}${qx}_${b}`,x0+(b+.5)*p,cy,p/2,p);} }
   return out; }
-function mlLenses(){ const ml=S.stack.ml; return (ml.lenses&&ml.lenses.length)?ml.lenses:mlTemplateLenses(); }
+function normQuads(ml){ const q1=()=>({shape:"1x1",scale:1});   // 구버전/외부 yaml 에 quads 없을 때 복구
+  if(!Array.isArray(ml.quads)||ml.quads.length<2||!Array.isArray(ml.quads[0])||!Array.isArray(ml.quads[1])) ml.quads=[[q1(),q1()],[q1(),q1()]];
+  for(let a=0;a<2;a++)for(let b=0;b<2;b++){ if(!ml.quads[a][b]||!ml.quads[a][b].shape) ml.quads[a][b]=q1(); }
+  return ml.quads; }
+function mlLenses(){ const ml=S.stack.ml; normQuads(ml); return (ml.lenses&&ml.lenses.length)?ml.lenses:mlTemplateLenses(); }
 function mlHR(){ const ml=S.stack.ml; if(ml.hr!=null)return +ml.hr; return (+ml.sag_height_um||0.55)/(P()/2); }
 // 렌즈 높이: height_um>0 이면 고정 높이(µm) -> footprint 에 따라 곡률 변화 / 0=h/r 자동
 function mlH(L){ const hu=+(S.stack.ml.height_um||0); return hu>0? hu : mlHR()*Math.min(L.ax,L.ay); }
@@ -788,6 +792,11 @@ const STEPS=[
     return [ h("div",{class:"row"},[h("label",{},["CF array"]),arr]), tbl,
       h("p",{class:"hint"},["grid 울타리 셀 안 채움. 두께=셀 평균두께(볼륨 보존). 응집 κ>0: 열처리로 중앙에 모임(중앙↑·코너↓), κ<0: 벽 젖음. 표면 프로파일 t+κ(2/3−r²)."]) ]; }},
  {t:"7 · Microlens", d:"radius(footprint) · 평탄층 두께 · ML 돔 두께 → 곡률 자동", body:()=>{ const m=S.stack.ml; if(m.hr==null)m.hr=0.55; if(!(+m.height_um>0))m.height_um=0.40;
+    // 저장본에 quads 없으면(구버전/외부 yaml) 여기서 예외 -> 이하 UI 전체 소실. 기본 1x1 로 복구.
+    const q1=()=>({shape:"1x1",scale:1});
+    if(!Array.isArray(m.quads)||m.quads.length<2||!Array.isArray(m.quads[0])||!Array.isArray(m.quads[1]))
+      m.quads=[[q1(),q1()],[q1(),q1()]];
+    for(let a=0;a<2;a++)for(let b=0;b<2;b++){ if(!m.quads[a][b]||!m.quads[a][b].shape) m.quads[a][b]=q1(); }
     const rows=[ matRow("ML 물질",m,"material"),
       numRow("평탄층 두께 (µm)",m,"planar_um","0.001",0,3),
       numRow("ML 돔 두께 (µm, 평탄층 위~곡률 끝 sag)",m,"height_um","0.01",0.01,3) ];
@@ -1042,7 +1051,7 @@ el("qeClose").onclick=()=>{ qeDlg.close(); };
 el("qeStop").onclick=async()=>{ if(QE.job) try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
 el("qeRun").onclick=async()=>{ if(QE.running)return;
   const body={ yaml:structYAML(), lam0:+el("qeL0").value, lam1:+el("qeL1").value,
-    n:+el("qeN").value, nG:+el("qeNG").value, downsample:+el("qeDS").value, theta:+el("qeTH").value,
+    n:+el("qeN").value, nG:(el("qeNG").value==="auto"?"auto":+el("qeNG").value), downsample:+el("qeDS").value, theta:+el("qeTH").value,
     pol:el("qePol")?el("qePol").value:"avg" };
   let r; try{ r=await(await fetch(qeApiBase()+"/api/qe",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
   catch(e){ el("qeNote").textContent="요청 실패: "+e.message; return; }
@@ -1061,7 +1070,7 @@ el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
   out.style.display="block"; out.textContent="진단 계산중... (단일 λ, 수 초)"; btn.disabled=true;
   const lam=0.5*((+el("qeL0").value)+(+el("qeL1").value));
   let d; try{ d=await(await fetch(qeApiBase()+"/api/qe/diag",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({yaml:structYAML(),lam,nG:+el("qeNG").value,downsample:+el("qeDS").value,theta:+el("qeTH").value})})).json(); }
+    body:JSON.stringify({yaml:structYAML(),lam,nG:(el("qeNG").value==="auto"?101:+el("qeNG").value),downsample:+el("qeDS").value,theta:+el("qeTH").value})})).json(); }
   catch(e){ out.textContent="진단 실패: "+e.message+"\n(서버 실행중인지 확인: python3 app.py)"; btn.disabled=false; return; }
   btn.disabled=false;
   if(d.error){ out.textContent="진단 오류: "+d.error+"\n"+(d.trace||""); return; }
@@ -1158,7 +1167,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v53";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v54";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
