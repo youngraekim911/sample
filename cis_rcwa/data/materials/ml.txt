@@ -1,4 +1,5 @@
 # ML (microlens resin) — 실측 @550 n=1.58 k=0 (flat 근사)
 wavelength n k
-400 1.58 0
-700 1.58 0
+# re-anchored @550nm to measured n=1.582 k=0.0 (모양 유지 스케일)
+    400.0   1.58200   0.000000
+    700.0   1.58200   0.000000
