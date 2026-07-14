@@ -228,8 +228,13 @@ class GridCfBlock:
         if cw > 0:
             bps.add(min(gridH + cw, bandTop))
         if ratio < 1.0 and gridH > 0:
-            for k in range(1, self.tap):
-                bps.add(gridH * k / self.tap)
+            # taper 슬라이스 자동: 벽 이동량(한쪽 W(1-ratio)/2)이 슬라이스당
+            # 래스터 반 셀 이하가 되도록 — 계단을 래스터가 표현 가능한 최소로
+            cell = ctx.span / ctx.n
+            dw_half = W * (1.0 - ratio) / 2.0
+            n_tap = min(48, max(self.tap, int(np.ceil(dw_half / (cell / 2)))))
+            for k in range(1, n_tap):
+                bps.add(gridH * k / n_tap)
         if cfTopMax - cfTopMin > 1e-6:
             for k in range(self.men + 1):
                 z = cfTopMin + (cfTopMax - cfTopMin) * k / self.men

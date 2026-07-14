@@ -171,8 +171,10 @@ class WizardBuilder:
         if cw > 0:
             bps.add(min(gridH + cw, planar))
         if ratio < 1.0 and gridH > 0:              # taper: 폭이 z 에 따라 변함
-            for k in range(1, taper_slices):
-                bps.add(gridH * k / taper_slices)
+            dw_half = W * (1.0 - ratio) / 2.0      # 슬라이스 자동 세분 (blocks 와 동일 규칙)
+            n_tap = min(48, max(taper_slices, int(np.ceil(dw_half / (self.dxy / 2)))))
+            for k in range(1, n_tap):
+                bps.add(gridH * k / n_tap)
         if cfTopMax - cfTopMin > 1e-6:             # CF 응집 곡면
             for k in range(men_slices + 1):
                 z = cfTopMin + (cfTopMax - cfTopMin) * k / men_slices
