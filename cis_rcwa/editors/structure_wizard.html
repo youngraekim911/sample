@@ -168,7 +168,7 @@ const DEFAULT = {
     arl_top:{ material:"ml_arl", thickness_um:0.12 },   // 1200A (1000~1500A)
   },
   // 소수캐리어 수집효율(외부 QE): pinned-PD 표면 dead-layer. enabled=false 면 광학 QE.
-  collection:{ enabled:true, model:"pinned", surf_depth_um:0.15, eta_max:0.85 }
+  collection:{ enabled:false, model:"pinned", surf_depth_um:0.15, eta_max:0.85 }  // 기본 OFF: 광학(내부) QE. 실측 표면재결합 있을 때만 ON
 };
 let refLambda=0.55, folderLib={}, curStep=0, viewMode="iso";
 let S=(function(){ try{const j=localStorage.getItem("cis_wizard_v3"); if(j){const d=JSON.parse(j);
@@ -1199,7 +1199,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v61";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v62";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
