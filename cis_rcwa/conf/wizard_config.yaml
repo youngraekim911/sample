@@ -135,3 +135,10 @@ stack:
     material: ml_arl
     thickness_um: 0.12
 cf_array: tetra
+collection:
+  model: pinned
+  surf_depth_um: 0.15
+  eta_max: 0.85
+  srv_cm_s: 3000000.0
+  dcoeff_cm2_s: 27.0
+  ldiff_um: 10.0

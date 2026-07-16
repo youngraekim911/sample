@@ -22,7 +22,8 @@ from src.structure.ir import StructureIR, Detector
 
 TMP = os.environ.get("TMPDIR", "/tmp")
 CONF = "tests/data/regress_v50.yaml"   # v50 기준 구조 고정 (conf 는 소자 사양따라 변함)
-EXPECT_G = 0.7799            # 리팩터링 직전 측정값 (nG=101, ds=2, TE+TM 평균)
+EXPECT_G = 0.8454            # nG=101 ds=2 TE+TM 평균. 실측 물질(si/cf_green 재앵커)
+                            # 반영 후 값 (이전 근사물질 0.7799). materials 폴더 값 의존.
 
 
 def qe_g(sim):
