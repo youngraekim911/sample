@@ -346,6 +346,7 @@ class RCWAPlaneWaveSimulator:
         solver = o.pop("_solver")
         maps, C = solver.absorption_maps(self.grid_ny, self.grid_nx)
         M = len(self.layer_stack)
+        nS = self.n_si_layers
         A = [float(maps[i].sum() * C) if i in maps else 0.0 for i in range(M)]
 
         # ---- 물질 표 + 의심 플래그 ----
@@ -377,6 +378,8 @@ class RCWAPlaneWaveSimulator:
         ngrid = self.grid_ny * self.grid_nx
 
         # ---- 경계 투과 프로파일 (같은 물질 조합 연속층 묶음) ----
+        # 색별 흡수 누적(셀 면적 정규화) — 마이크로렌즈 '측면 농축'은 미반영이라
+        # 참고용. 농축 반영한 정확한 값은 아래 T_into_si_rgb (Si 유입 flux) 참조.
         rm = self.ir.region_materials
         prof = []
         Tcur = 1.0 - o["R"]
@@ -391,7 +394,7 @@ class RCWAPlaneWaveSimulator:
             if cmask is not None and i in maps:
                 dens = maps[i].detach().cpu().numpy() * C
                 for L, m in cmask.items():
-                    acc[L] += float(dens[m].mean()) * ngrid
+                    acc[L] += float(dens[m].sum())        # 셀 면적 기준 (색면적 스케일 제거)
             rgb = ({L: round(1.0 - o["R"] - acc[L], 5) for L in cmask}
                    if cmask is not None else None)
             if cur and cur["mats"] == nm:
@@ -403,12 +406,26 @@ class RCWAPlaneWaveSimulator:
                 prof.append(cur)
         entry_rgb = ({L: round(1.0 - o["R"], 5) for L in cmask}
                      if cmask is not None else None)
+        # ---- Si 유입 (색별, flux 기반 — 마이크로렌즈 농축 지표) ----
+        # 밴드 top node 하향 Poynting flux 를 셀평균=T_into_si 로 보정 후 색영역 면적정규화.
+        # >100% = 그 색 픽셀로 빛이 농축됨(ML 집광). 주의: 서브파장 피치에선 Si 내부
+        # 측면 회절로 색간 재분배가 있어 색별 QE 의 엄밀 상한은 아님(셀 총합만 엄밀).
+        A_above = sum(A[:M - nS]) if nS else sum(A)
+        T_into_si = 1.0 - o["R"] - A_above
+        into_rgb = None
+        if cmask is not None and nS > 0:
+            fmap = solver.node_flux_map_raw(M - nS, self.grid_ny,
+                                            self.grid_nx).detach().cpu().numpy()
+            fm = float(fmap.mean())
+            cal = T_into_si / fm if abs(fm) > 1e-30 else 0.0
+            fmap = fmap * cal
+            into_rgb = {L: round(float(fmap[m].sum() / fmap.size / max(m.mean(), 1e-9)), 5)
+                        for L, m in cmask.items()}
         for p in prof:
             p["th_um"] = round(p["th_um"], 4); p["A"] = round(p["A"], 5)
             p["T_after"] = round(p["T_after"], 5)
-        nS = self.n_si_layers
-        A_above = sum(A[:M - nS]) if nS else sum(A)
         return {"wavelength": lam, "R": round(o["R"], 5), "materials": mats,
                 "profile": prof, "entry_rgb": entry_rgb,
-                "T_into_si": round(1.0 - o["R"] - A_above, 5),
+                "T_into_si_rgb": into_rgb,          # 색별 Si 유입 (flux, 농축반영) — QE 상한
+                "T_into_si": round(T_into_si, 5),
                 "T_deep": round(o["QE"], 5)}

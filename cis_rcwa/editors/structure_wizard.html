@@ -1127,6 +1127,8 @@ el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
   for(const p of d.profile){ if(!worst||p.A>worst.A)worst=p; }
   for(const p of d.profile){ const tag=`  ↓ ${p.mats} (${(p.th_um*1000).toFixed(0)}nm${p.n_sub>1?"×"+p.n_sub:""})`;
     t+=tag.padEnd(42)+f100(p.T_after)+` ${rgb3(p.T_rgb)}`+(p===worst&&p.A>0.05?"  ← 최대 흡수(A="+p.A.toFixed(3)+")":"")+"\n"; }
+  if(d.T_into_si_rgb){ t+=`  ═ Si 유입 (flux, 농축반영)`.padEnd(42)+f100(d.T_into_si)+` ${rgb3(d.T_into_si_rgb)}\n`;
+    t+=`     (>100% = 그 색으로 ML 집광. 색별 QE 는 이 유입에서 흡수·수집된 값)\n`; }
   t+="\n힌트: 특정 층에서 값이 급락하면 그 층 물질의 k 를 확인하세요.\n"+
      "흔한 원인: ① k 열에 흡수계수(α)나 % 값이 들어감  ② n/k 열 순서 뒤바뀜  ③ λ 단위 오감지(Å/eV)\n"+
      "R·G·B = 각 색 픽셀 기둥 면적당 잔존 파워. 금속 격벽처럼 기둥 경계에 흡수가 몰리면\n"+
@@ -1199,7 +1201,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v62";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v63";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>
