@@ -22,7 +22,7 @@ from src.structure.ir import StructureIR, Detector
 
 TMP = os.environ.get("TMPDIR", "/tmp")
 CONF = "tests/data/regress_v50.yaml"   # v50 기준 구조 고정 (conf 는 소자 사양따라 변함)
-EXPECT_G = 0.8262            # nG=101 ds=2 TE+TM 평균. 실측 물질 + 밴드만(deep 제외)
+EXPECT_G = 0.8338            # 실측 다파장 n,k(400/550/600/700) + 밴드만
                             # 광다이오드 QE. (deep 포함 0.8454, 근사물질 0.7799)
 
 
