@@ -158,9 +158,9 @@ const DEFAULT = {
     barl:[ {material:"al2o3",thickness_um:0.009}, {material:"hfox",thickness_um:0.055}, {material:"peox",thickness_um:0.063}, {material:"hfox",thickness_um:0.0095}, {material:"al2o3",thickness_um:0.009} ],  // 실측: al2o3/hfox/peox/hfox/al2o3 = 100/100/600/550/100A (물질1 al2o3=air쪽, 아래->위 = 5,4,3,2,1)
     grid:{ pitch:2, width_um:0.15, top_ratio:1, coat_on:false, coat_material:"al2o3", coat_um:0.005, stack:[ {material:"tin",height_um:0.008}, {material:"teos",height_um:0.32} ] },
     cf:{ R:{material:"cf_red",thickness_um:0.48,curvature_um:0}, G:{material:"cf_green",thickness_um:0.50,curvature_um:0}, B:{material:"cf_blue",thickness_um:0.43,curvature_um:0} },  // 4800/5000/4300A
-    ml:{ material:"ml", planar_um:0.45, hr:0.55, height_um:0.42, sag_height_um:0.55,   // 실측: 평탄 4500A + 돔 4200A 2x2 s1.1
-         quads:[[{shape:"2x2",scale:1.1},{shape:"2x2",scale:1.1}],[{shape:"2x2",scale:1.1},{shape:"2x2",scale:1.1}]], lenses:null },
-    arl_top:{ material:"ml_arl", thickness_um:0.12 },   // 1200A (1000~1500A)
+    ml:{ material:"ml", planar_um:0.45, hr:0.55, height_um:0.42, sag_height_um:0.55,   // 평탄 4500A + 돔 4200A 2x2 s1.2 (그린 튜닝)
+         quads:[[{shape:"2x2",scale:1.2},{shape:"2x2",scale:1.2}],[{shape:"2x2",scale:1.2},{shape:"2x2",scale:1.2}]], lenses:null },
+    arl_top:{ material:"ml_arl", thickness_um:0.08 },   // 800A: 그린 λ/4n AR 튜닝 (그린↑ 적색↓ 트레이드오프)
   }
 };
 let refLambda=0.55, folderLib={}, curStep=0, viewMode="iso";
@@ -1184,7 +1184,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v67";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v68";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>

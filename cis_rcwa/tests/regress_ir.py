@@ -172,7 +172,9 @@ def main():
         assert all(a >= b - 1e-6 for a, b in zip(seq, seq[1:])), f"{L} T 증가함: {seq}"
     # QE 정합: qe_by_cf(G) ≈ 라벨 평균
     gs = [r["qe"][1] for r in res["qe"] if r["cf"] == "G"]
-    assert abs(res["qe_by_cf"]["G"][1] - np.mean(gs)) < 1e-6
+    # QE 는 5자리 반올림(granularity 1e-5) — 집계값과 픽셀평균은 반올림 경계에서
+    # 최대 ~5e-6 어긋날 수 있으므로 반올림 단위로 허용오차를 둔다.
+    assert abs(res["qe_by_cf"]["G"][1] - np.mean(gs)) < 2e-5
     print(f"[8] 엔진 블록: 경계 {tags} 단조감소, QE_G@550={res['qe_by_cf']['G'][1]:.3f} — OK")
     print("\nALL PASS")
 

@@ -123,15 +123,15 @@ stack:
     sag_height_um: 0.55
     quads:
     - - shape: 2x2
-        scale: 1.1
+        scale: 1.2
       - shape: 2x2
-        scale: 1.1
+        scale: 1.2
     - - shape: 2x2
-        scale: 1.1
+        scale: 1.2
       - shape: 2x2
-        scale: 1.1
+        scale: 1.2
     lenses: null
   arl_top:
     material: ml_arl
-    thickness_um: 0.12
+    thickness_um: 0.08
 cf_array: tetra
