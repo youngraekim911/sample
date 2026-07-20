@@ -83,6 +83,7 @@ class RCWAPlaneWaveSimulator:
         self.span = self.ir.span_x
         det = self.ir.detector
         self.n_si_layers = det.n_layers if det else 0
+        self.n_below_band = det.n_below_band if det else 0   # 밴드 아래 비검출 층(반사경)
         self.si_band_um = det.band_um if det else 0.0
 
     # ------------------------------------------------------------- yaml -> IR
@@ -210,6 +211,7 @@ class RCWAPlaneWaveSimulator:
         maps, C = solver.absorption_maps(self.grid_ny, self.grid_nx)
         M = len(self.layer_stack)
         nS = self.n_si_layers
+        nB = self.n_below_band                           # 반사경 등 밴드 아래 층 (검출 제외)
         T_deep = o["T"] if det.deep_is_detector else 0.0
         ngrid = self.grid_ny * self.grid_nx
         pixidx = det.pixel_map if det.pixel_map is not None else \
@@ -222,7 +224,7 @@ class RCWAPlaneWaveSimulator:
         pix_abs = np.zeros(npix)
         trench_abs = 0.0
         A_band = 0.0
-        for li in range(M - nS, M):                      # 검출 밴드 층들
+        for li in range(M - nS - nB, M - nB):            # 검출 밴드 층들 (반사경 nB 제외)
             if li not in maps:
                 continue
             dens = maps[li].detach().cpu().numpy() * C
@@ -263,6 +265,7 @@ class RCWAPlaneWaveSimulator:
         maps, C = solver.absorption_maps(self.grid_ny, self.grid_nx)
         M = len(self.layer_stack)
         nS = self.n_si_layers
+        nB = self.n_below_band                            # 밴드 아래 반사경 층
         A = [float(maps[i].sum() * C) if i in maps else 0.0 for i in range(M)]
 
         # ---- 물질 표 + 의심 플래그 ----
@@ -326,11 +329,11 @@ class RCWAPlaneWaveSimulator:
         # 밴드 top node 하향 Poynting flux 를 셀평균=T_into_si 로 보정 후 색영역 면적정규화.
         # >100% = 그 색 픽셀로 빛이 농축됨(ML 집광). 주의: 서브파장 피치에선 Si 내부
         # 측면 회절로 색간 재분배가 있어 색별 QE 의 엄밀 상한은 아님(셀 총합만 엄밀).
-        A_above = sum(A[:M - nS]) if nS else sum(A)
+        A_above = sum(A[:M - nS - nB]) if nS else sum(A)
         T_into_si = 1.0 - o["R"] - A_above
         into_rgb = None
         if cmask is not None and nS > 0:
-            fmap = solver.node_flux_map_raw(M - nS, self.grid_ny,
+            fmap = solver.node_flux_map_raw(M - nS - nB, self.grid_ny,
                                             self.grid_nx).detach().cpu().numpy()
             fm = float(fmap.mean())
             cal = T_into_si / fm if abs(fm) > 1e-30 else 0.0

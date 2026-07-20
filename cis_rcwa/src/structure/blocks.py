@@ -45,6 +45,7 @@ class BlockContext:
         self.trench = np.zeros_like(self.X, dtype=bool)   # SiDti -> detector 제외
         self.det_band_um = 0.0                            # SiDti -> detector 밴드
         self.det_n_layers = 0
+        self.det_below = 0                                # 밴드 아래 비검출 층 수(후면 반사경)
         self.cf_top_min = 0.0                             # GridCf -> Planar
         self.band_top = 0.0                               # GridCf -> Planar
         self.dome_sag = None                              # Ml -> Coat/flush
@@ -72,10 +73,29 @@ class SiDtiBlock:
                           겹겹이 (격벽 좌우 각각). 남는 가운데는 fill 로 채움.
     """
 
-    def __init__(self, material, thickness_um, dti=None):
+    def __init__(self, material, thickness_um, dti=None, back_reflector=None):
         self.mat = material
         self.th = float(thickness_um)
         self.dti = dti
+        self.back_reflector = back_reflector          # Si 하부 metal routing 반사경
+
+    def _reflector_layer(self, ctx):
+        """후면 반사경 층 (Si 밴드 아래). Cu 가 면적비율 coverage 만 덮고 나머지는
+        filler(=Si)라 심부로 투과(손실). coverage=1 이면 solid 거울. 반환 (map, th)."""
+        br = self.back_reflector or {}
+        cov = min(max(float(br.get("coverage", 1.0)), 0.0), 1.0)
+        th = float(br.get("thickness_um", 0.15))       # Cu 두께 (>~0.1µm 이면 불투명)
+        metal = br.get("material", "cu")
+        rp = float(br.get("routing_pitch_um", 0) or ctx.p)   # 라우팅 피치(기본 픽셀피치)
+        out = ctx.zeros(self.mat)                      # 갭 = Si (심부로 투과)
+        if cov >= 0.999:
+            out[:] = ctx.mat_id(metal)
+        elif cov > 0:
+            side = float(np.sqrt(cov))                 # 정사각 Cu 패치 변비율 (면적=cov)
+            fx = (ctx.X / rp) % 1.0
+            fy = (ctx.Y / rp) % 1.0
+            out[(fx < side) & (fy < side)] = ctx.mat_id(metal)
+        return (out, th)
 
     def _liners(self):
         d = self.dti or {}
@@ -88,10 +108,14 @@ class SiDtiBlock:
         si_id = ctx.mat_id(self.mat)
         ctx.det_band_um = self.th
         ctx.det_n_layers = 1
+        refl = ([self._reflector_layer(ctx)]                  # 밴드 아래(=맨 아래) 반사경
+                if (self.back_reflector or {}).get("enabled") else [])
+        if refl:
+            ctx.det_below = len(refl)
         d = self.dti
         if not d or (d.get("mode") or "").lower() in ("", "none"):
             ctx.trench = np.zeros_like(ctx.X, dtype=bool)
-            return [(ctx.zeros(self.mat), self.th)]
+            return refl + [(ctx.zeros(self.mat), self.th)]
 
         p = ctx.p
         W = float(d["width_um"])
@@ -143,7 +167,7 @@ class SiDtiBlock:
                 out[endv | endh] = lid
                 lo = float(hi)
         ctx.trench = any_t
-        return [(out, self.th)]
+        return refl + [(out, self.th)]
 
 
 # ==========================================================================
@@ -442,7 +466,8 @@ class BlockStack:
             det = Detector(band_um=ctx.det_band_um, n_layers=ctx.det_n_layers,
                            pixel_map=pixidx, pixel_labels=labels,
                            exclude_mask=ctx.trench,
-                           deep_is_detector=self.collect_deep)
+                           deep_is_detector=self.collect_deep,
+                           n_below_band=ctx.det_below)
         sub = substrate or next((b.mat for b in self.blocks
                                  if isinstance(b, SiDtiBlock)), "si")
         ir = StructureIR(
@@ -463,7 +488,8 @@ def blocks_from_wizard_cfg(cfg, men_slices=8, taper_slices=8):
     s = cfg["stack"]
     ml = s["ml"]
     blocks = [
-        SiDtiBlock(s["si"]["material"], s["si"]["thickness_um"], dti=s.get("dti")),
+        SiDtiBlock(s["si"]["material"], s["si"]["thickness_um"], dti=s.get("dti"),
+                   back_reflector=s["si"].get("back_reflector")),
         BarlBlock(s.get("barl") or []),
         GridCfBlock(s["grid"], s["cf"], bg_material=ml["material"],
                     men_slices=men_slices, taper_slices=taper_slices),
@@ -490,8 +516,6 @@ def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=48, men_slices=8, taper_slices=
                        dispersion=dict(cfg.get("dispersion", {}) or {}),
                        ml_slices=ml_slices,
                        collect_deep=bool(cfg.get("collect_deep_substrate", False)))
-    # Si 하부 metal routing(BSI 후면 반사경): substrate 를 금속(Cu)으로 바꾸면
-    # 밴드 투과광이 되돌아와 2차 흡수 -> red/green 심투과분 QE 상승. 기본 off.
-    br = ((cfg.get("stack") or {}).get("si") or {}).get("back_reflector") or {}
-    sub = (br.get("material", "cu") if br.get("enabled") else None)
-    return stack.to_ir(ctx, substrate=sub)
+    # 후면 반사경은 SiDtiBlock 이 '밴드 아래 패턴 층'으로 삽입 (부분 커버리지 지원).
+    # substrate 는 Si 유지 -> Cu 갭 사이로 투과된 빛은 심부 Si 흡수(손실).
+    return stack.to_ir(ctx)

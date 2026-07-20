@@ -46,6 +46,7 @@ class Detector:
     pixel_labels: list = field(default_factory=list)
     exclude_mask: np.ndarray = None
     deep_is_detector: bool = True
+    n_below_band: int = 0                              # 밴드 아래 비검출 층 수(후면 반사경 등)
 
     @property
     def n_pixels(self):
@@ -145,6 +146,7 @@ class StructureIR:
             "detector": ({"band_um": d.band_um, "n_layers": d.n_layers,
                           "pixel_labels": d.pixel_labels,
                           "deep_is_detector": d.deep_is_detector,
+                          "n_below_band": d.n_below_band,
                           "has_pixel_map": d.pixel_map is not None,
                           "has_exclude": d.exclude_mask is not None}
                          if d is not None else None),
@@ -171,6 +173,7 @@ class StructureIR:
             det = Detector(band_um=dm["band_um"], n_layers=dm["n_layers"],
                            pixel_labels=dm["pixel_labels"],
                            deep_is_detector=dm.get("deep_is_detector", True),
+                           n_below_band=dm.get("n_below_band", 0),
                            pixel_map=z["pixel_map"] if dm["has_pixel_map"] else None,
                            exclude_mask=z["exclude_mask"] if dm["has_exclude"] else None)
         se = meta.get("substrate_eps")
