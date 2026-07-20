@@ -165,13 +165,15 @@ const DEFAULT = {
 };
 let refLambda=0.55, folderLib={}, curStep=0, viewMode="iso";
 let S=(function(){ try{const j=localStorage.getItem("cis_wizard_v3"); if(j){const d=JSON.parse(j);
-  if(d.refLambda)refLambda=d.refLambda; if(d.folderLib)folderLib=d.folderLib; if(d.S)return d.S;} }catch(e){} return structuredClone(DEFAULT); })();
+  if(d.refLambda)refLambda=d.refLambda; if(d.S)return d.S;} }catch(e){} return structuredClone(DEFAULT); })();
+  // folderLib(물질 폴더 테이블)은 절대 localStorage 에서 복원하지 않는다 — 열릴 때/매 run
+  // 직전에 서버 /api/materials 에서 항상 새로 받아온다(옛 캐시로 '걸려있는' 현상 방지).
 // voxel 해상도 가드: 0.01~0.02µm (최소 피처 20nm 보존, nm급은 npy 용량만 세제곱 폭발)
 function clampRes(){ const g=S.grid;
   g.dxy_um=Math.min(0.02,Math.max(0.01,+g.dxy_um||0.02));
   g.dz_um =Math.min(0.02,Math.max(0.01,+g.dz_um ||0.02)); }
 clampRes();
-function save(){ try{localStorage.setItem("cis_wizard_v3",JSON.stringify({S,refLambda,folderLib}));}catch(e){} }
+function save(){ try{localStorage.setItem("cis_wizard_v3",JSON.stringify({S,refLambda}));}catch(e){} }  // folderLib 은 저장 안 함(서버가 소스)
 
 // ============================ 물질 ============================
 function interp1(x,xs,ys){ if(x<=xs[0])return ys[0]; const n=xs.length; if(x>=xs[n-1])return ys[n-1];
@@ -1050,6 +1052,24 @@ function qeColors(){ return qeDark()
   ? {QE:"#2f9e4f",A:"#3987e5",R:"#d9534f"} : {QE:"#1a7f37",A:"#0969da",R:"#cf222e"}; }
 function qeApiBase(){ return location.protocol.startsWith("http")? "" : "http://127.0.0.1:8787"; }
 async function qePing(){ try{ const r=await fetch(qeApiBase()+"/api/ping"); return await r.json(); }catch(e){ return null; } }
+// 서버 data/materials 폴더를 새로 받아 folderLib 갱신 — 열릴 때/매 run 직전 호출.
+// 서버 파일과 동명인 항목은 항상 서버값으로 덮어써 '옛 캐시로 걸려있는' 현상을 없앤다.
+// (수동 import 한, 서버에 없는 이름은 세션 내 유지). 반환: 갱신된 물질 수.
+async function fetchServerMaterials(){
+  let lib; try{ lib=await(await fetch(qeApiBase()+"/api/materials")).json(); }catch(e){ return 0; }
+  if(!lib||typeof lib!=="object")return 0;
+  let n=0;
+  for(const name in lib){ if(Array.isArray(lib[name])&&lib[name].length>1){ folderLib[name]=lib[name]; n++; } }
+  // 역할<->동명 파일 자동 연결
+  for(const role in S.materials){ if(folderLib[role]&&!S.materials[role].src)S.materials[role].src=role; }
+  // 폴더의 '새' 물질을 선택 목록에 등록 (모든 step 드롭다운에서 선택 가능)
+  for(const name in folderLib){ if(!(name in S.materials)){ S.materials[name]={src:name}; assignMatColor(name); } }
+  // 폴더 연동 물질의 상수(n,k)를 현재 λ 로 재계산 — 표시/폴백용(실제 계산은 dispersion 사용)
+  for(const nm in S.materials){ const t=matTable(nm); if(t&&t.length>1){ const L=t.map(r=>r[0]);
+      S.materials[nm].n=+interp1(refLambda,L,t.map(r=>r[1])).toFixed(4);
+      S.materials[nm].k=+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4); } }
+  return n;
+}
 el("qeBtn").onclick=async()=>{ qeDlg.showModal(); drawQEChart();
   const g=el("qeGuide"), p=await qePing();
   if(p){ g.style.display="none"; el("qeNote").textContent=`서버 연결됨 (device=${p.device}). 구조는 현재 위저드 상태가 그대로 사용됩니다.`; el("qeRun").disabled=false; }
@@ -1062,6 +1082,7 @@ el("qeQual").onchange=()=>{ const m=el("qeQual").value==="manual";
   el("qeAdv").style.display = m?"block":"none"; el("qeAdv").open = m; };
 el("qeStop").onclick=async()=>{ if(QE.job) try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
 el("qeRun").onclick=async()=>{ if(QE.running)return;
+  await fetchServerMaterials();                 // run 직전 물질 폴더 새로 반영 (구조도 structYAML 로 최신)
   const body={ yaml:structYAML(), lam0:+el("qeL0").value, lam1:+el("qeL1").value,
     n:+el("qeN").value,
     nG:(el("qeQual").value==="manual"? (2*Math.floor((Math.max(9,+el("qeNG").value||101))/2)+1) : "auto"),  // 홀수 보정
@@ -1083,6 +1104,7 @@ async function qePoll(){ let s; try{ s=await(await fetch(qeApiBase()+"/api/qe/st
     el("qeRun").disabled=false; el("qeStop").disabled=true; el("qeCsv").disabled=QE.rows.length===0; } }
 el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
   out.style.display="block"; out.textContent="진단 계산중... (단일 λ, 수 초)"; btn.disabled=true;
+  await fetchServerMaterials();                 // 진단도 run 직전 물질 폴더 새로 반영
   const lam=0.5*((+el("qeL0").value)+(+el("qeL1").value));
   let d; try{ d=await(await fetch(qeApiBase()+"/api/qe/diag",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({yaml:structYAML(),lam,nG:61,downsample:4,theta:+el("qeTH").value})})).json(); }
@@ -1184,7 +1206,9 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v68";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v69";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
+// 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)
+fetchServerMaterials().then(n=>{ if(n){ save(); renderStep(); renderViews(); } });
 </script>

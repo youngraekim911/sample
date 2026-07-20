@@ -33,6 +33,48 @@ JOBS_DIR = os.path.join(ROOT, "out", "jobs")
 JOBS = {}          # job id -> dict(state, progress, note, rows, error, cancel)
 _LOCK = threading.Lock()
 
+MATERIALS_DIR = os.path.join(ROOT, "data", "materials")
+
+
+def _read_materials_folder():
+    """data/materials/*.txt 를 파싱해 {name: [[wl_um, n, k], ...]} 반환.
+
+    브라우저 parseNK 와 동일 규약: 3열(파장 n k), '#' 주석 무시, 파장 nm(>100)
+    → µm 로 환산, k 는 |k|. **매 호출마다 폴더를 새로 읽어** 항상 최신(캐시 없음)
+    — 위저드가 열릴 때/매 run 직전에 이걸 받아 folderLib 를 갱신한다.
+    """
+    out = {}
+    try:
+        files = sorted(os.listdir(MATERIALS_DIR))
+    except OSError:
+        return out
+    for fn in files:
+        if not fn.lower().endswith(".txt"):
+            continue
+        rows = []
+        try:
+            with open(os.path.join(MATERIALS_DIR, fn), encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line[0] == "#":
+                        continue
+                    parts = line.replace(",", " ").split()
+                    try:
+                        v = [float(x) for x in parts[:3]]
+                    except ValueError:
+                        continue
+                    if len(v) >= 3:
+                        rows.append(v[:3])
+        except OSError:
+            continue
+        if not rows:
+            continue
+        rows.sort(key=lambda r: r[0])
+        sc = 0.001 if max(r[0] for r in rows) > 100 else 1.0
+        out[fn[:-4]] = [[round(r[0] * sc, 4), round(r[1], 4), round(abs(r[2]), 5)]
+                        for r in rows]
+    return out
+
 
 # --------------------------------------------------------------- QE 작업
 def _recommend_mesh(cfg_path, quality="std"):
@@ -176,6 +218,9 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/ping":
             self._json({"ok": True,
                         "device": "cuda" if torch.cuda.is_available() else "cpu"})
+        elif u.path == "/api/materials":
+            # data/materials 폴더를 매번 새로 읽어 반환 (위저드가 열릴 때/run 직전 갱신용)
+            self._json(_read_materials_folder())
         elif u.path == "/api/qe/status":
             jid = (parse_qs(u.query).get("job") or [""])[0]
             job = JOBS.get(jid)
