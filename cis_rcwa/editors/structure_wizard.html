@@ -149,9 +149,10 @@ const DEFAULT = {
   grid:{ pixel_pitch_um:1.0, n_pixels:4, dxy_um:0.02, dz_um:0.02, air_margin_um:0.20 },
   cf_array:"bayer",
   bayer:[["R","G","R","G"],["G","B","G","B"],["R","G","R","G"],["G","B","G","B"]],
-  materials:{ air:{n:1,k:0}, si:{n:4.17,k:0.0413}, oxide:{n:1.4599,k:0}, poly:{n:3.91,k:0},
-    al2o3:{n:1.738,k:0}, hfox:{n:1.89,k:0}, peox:{n:1.46,k:0}, teos:{n:1.45,k:0}, tin:{n:0.9719,k:1.8852},
-    cf_red:{n:1.78,k:0.32}, cf_green:{n:1.676,k:0.005}, cf_blue:{n:1.49,k:0.22}, ml:{n:1.582,k:0}, ml_arl:{n:1.47,k:0} },
+  // n,k 상수는 두지 않는다 — 이름(역할)만 정의하고 실제 n,k 는 오직 물질 폴더(txt)에서 셋업.
+  // 폴더에 없는 물질은 '누락'으로 표시되고 QE/진단 계산이 거부된다 (si 포함 전부 폴더 필수).
+  materials:{ air:{}, si:{}, oxide:{}, poly:{}, al2o3:{}, hfox:{}, peox:{}, teos:{}, tin:{},
+    cf_red:{}, cf_green:{}, cf_blue:{}, ml:{}, ml_arl:{} },
   stack:{
     si:{ material:"si", thickness_um:3.85 },
     dti:{ width_um:0.09, oxide_liner_um:0.02, liner:"oxide", fill:"poly", mode:"2x2_open", center_open:true, center_gap_x_um:0.28, center_gap_y_um:0.28 },  // 90nm 식각, liner 20nm, poly 50nm. depth = si.thickness
@@ -182,6 +183,11 @@ function matTable(name){ const m=S.materials[name]||{}; if(m.src&&folderLib[m.sr
 function matNK(name){ const m=S.materials[name]||{n:1,k:0}; const t=matTable(name);
   // k 는 항상 |k| (음수 부호 규약 파일/과거 저장분 방어)
   if(t&&t.length){const L=t.map(r=>r[0]); return {n:interp1(refLambda,L,t.map(r=>r[1])),k:Math.abs(interp1(refLambda,L,t.map(r=>r[2])))};} return {n:+m.n||0,k:Math.abs(+m.k||0)}; }
+// 물질 n,k 는 폴더에서만 옴 — 폴더/import 테이블이 없으면 '누락'(계산 거부 대상)
+function matMissing(name){ return !matTable(name); }
+// 구조가 참조하는 물질 중 폴더에 없는 것들 (ambient 포함) — 계산 전 가드용
+function missingMats(){ const u=new Set(usedMats()); u.add(S.ambient||"air");
+  return [...u].filter(matMissing); }
 function parseNK(txt){ const rows=[]; txt.split(/\r?\n/).forEach(l=>{l=l.trim(); if(!l||l[0]==="#")return; const p=l.replace(/,/g," ").split(/\s+/).map(Number); if(p.length>=3&&p.slice(0,3).every(v=>!isNaN(v)))rows.push(p.slice(0,3));}); if(!rows.length)return null; rows.sort((a,b)=>a[0]-b[0]); const mx=Math.max(...rows.map(r=>r[0])),sc=mx>100?0.001:1;
   return rows.map(r=>[r[0]*sc,r[1],Math.abs(r[2])]); }   // k<0 (부호 규약 차이) -> |k| 자동 변환
 // jet 컬러맵 (0..1 -> hex) — import 물질 뷰어 색 자동 배정용
@@ -726,7 +732,10 @@ function numRowA(lb,o,k,mx){ const i=h("input",{type:"number",step:"10",value:Ma
   i.onblur=()=>{ i.value=Math.round((o[k]||0)*1e4); };
   return h("div",{class:"row"},[h("label",{},[lb]),i]); }
 function matRow(lb,o,k){ const sel=h("select",{}); Object.keys(S.materials).forEach(m=>{const op=h("option",{value:m},[m+(matTable(m)?" ·λ":"")]); if(o[k]===m)op.selected=true; sel.appendChild(op);}); sel.onchange=()=>{o[k]=sel.value; renderViews();};
-  const nk=matNK(o[k]); return h("div",{class:"row"},[h("label",{},[lb]),sel,h("span",{class:"hint"},[`n${nk.n.toFixed(2)} k${nk.k.toFixed(3)}`])]); }
+  const nk=matNK(o[k]), miss=matMissing(o[k]);
+  return h("div",{class:"row"},[h("label",{},[lb]),sel,h("span",{class:"hint",
+    style:miss?"color:#e5484d;font-weight:600":""},
+    [miss?"⚠ 폴더없음(계산거부)":`n${nk.n.toFixed(2)} k${nk.k.toFixed(3)}`])]); }
 function subEditor(arr, fields, st){ // fields: [['material','mat'],['두께','thickness_um']] etc
   const box=h("div",{class:"sublist"}); function rd(){ box.innerHTML="";
     arr.forEach((it,i)=>{ const row=h("div",{class:"subrow"});
@@ -854,21 +863,15 @@ el("viewQ").onchange=()=>renderViews();
 el("cutChk").onchange=()=>renderViews();
 el("themeBtn").onclick=()=>{ const r=document.documentElement,cur=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"); r.setAttribute("data-theme",cur==="dark"?"light":"dark"); renderViews(); };
 el("matBtn").onclick=()=>el("matFolder").click();
-el("matFolder").onchange=async e=>{ let n=0; for(const f of [...e.target.files]){ if(!/\.txt$/i.test(f.name))continue; let t; try{t=await f.text();}catch(_){continue;} const nk=parseNK(t); if(!nk)continue; folderLib[f.name.replace(/\.txt$/i,"")]=nk; n++; }
-  // 기존 역할 물질 <-> 동명 파일 자동 연결
-  for(const role in S.materials){ if(!S.materials[role].src&&folderLib[role])S.materials[role].src=role; }
-  // 폴더의 '새' 물질을 선택 목록(S.materials)에 자동 등록 -> 모든 step 드롭다운
-  // (step2 Si / step3 liner·fill / step4 BARL / step5 grid stack·코팅 / step6 CF RGB / step7 ML / step8 ARL)
-  // 에서 바로 선택 가능. n,k 상수는 현재 λ 기준 fallback (실제 계산은 λ-보간 테이블 사용).
-  let added=0;
-  for(const name in folderLib){ if(!(name in S.materials)){
-      const t=folderLib[name],L=t.map(r=>r[0]);
-      S.materials[name]={n:+interp1(refLambda,L,t.map(r=>r[1])).toFixed(4),
-                         k:+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4)};
-      assignMatColor(name);                       // 뷰어 색: jet 순서 자동 배정
-      added++; } }
+el("matFolder").onchange=async e=>{ const before=Object.keys(S.materials).length; let n=0;
+  for(const f of [...e.target.files]){ if(!/\.txt$/i.test(f.name))continue; let t; try{t=await f.text();}catch(_){continue;} const nk=parseNK(t); if(!nk)continue; folderLib[f.name.replace(/\.txt$/i,"")]=nk; n++; }
+  linkFolderMaterials();                           // 역할 연결 + 새 물질 등록 + 상수 재계산 (공용)
+  const added=Object.keys(S.materials).length-before;
+  const miss=missingMats();
   save(); e.target.value=""; renderStep(); renderViews();
-  alert(n+" 물질 n,k 로드됨"+(added?` · 새 물질 ${added}종을 선택 목록에 추가`:"")+"\n모든 step 의 물질 선택창에서 사용 가능 (·λ = 파장 테이블 연동)"); };
+  alert(n+" 물질 n,k 로드됨"+(added>0?` · 새 물질 ${added}종 추가`:"")
+        +(miss.length?`\n⚠ 아직 폴더에 없는 물질: ${miss.join(", ")} (이 물질은 계산 거부됨)`:"\n모든 참조 물질이 폴더에서 셋업됨 ✅")
+        +"\n(·λ = 파장 테이블 연동, 실제 계산에 사용)"); };
 // ML shape editor 직접 열기 (새 창) + Export 시 postMessage 로 자동 반영
 let mlWin=null;
 function openMLeditor(){ try{ mlWin=window.open("ml_shape_editor.html","ml_editor","width=1280,height=820");
@@ -1060,15 +1063,18 @@ async function fetchServerMaterials(){
   if(!lib||typeof lib!=="object")return 0;
   let n=0;
   for(const name in lib){ if(Array.isArray(lib[name])&&lib[name].length>1){ folderLib[name]=lib[name]; n++; } }
-  // 역할<->동명 파일 자동 연결
+  linkFolderMaterials();
+  return n;
+}
+// folderLib(서버 폴더 또는 수동 import) 를 역할에 연결하고, 폴더 연동 물질의 표시 상수(n,k)
+// 를 현재 λ 로 재계산. 폴더에 없는 물질은 상수가 없어 '누락' 상태로 남는다.
+function linkFolderMaterials(){
   for(const role in S.materials){ if(folderLib[role]&&!S.materials[role].src)S.materials[role].src=role; }
-  // 폴더의 '새' 물질을 선택 목록에 등록 (모든 step 드롭다운에서 선택 가능)
   for(const name in folderLib){ if(!(name in S.materials)){ S.materials[name]={src:name}; assignMatColor(name); } }
-  // 폴더 연동 물질의 상수(n,k)를 현재 λ 로 재계산 — 표시/폴백용(실제 계산은 dispersion 사용)
   for(const nm in S.materials){ const t=matTable(nm); if(t&&t.length>1){ const L=t.map(r=>r[0]);
       S.materials[nm].n=+interp1(refLambda,L,t.map(r=>r[1])).toFixed(4);
-      S.materials[nm].k=+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4); } }
-  return n;
+      S.materials[nm].k=+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4); }
+    else { delete S.materials[nm].n; delete S.materials[nm].k; } }   // 폴더 없으면 상수 없음(누락)
 }
 el("qeBtn").onclick=async()=>{ qeDlg.showModal(); drawQEChart();
   const g=el("qeGuide"), p=await qePing();
@@ -1083,6 +1089,9 @@ el("qeQual").onchange=()=>{ const m=el("qeQual").value==="manual";
 el("qeStop").onclick=async()=>{ if(QE.job) try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
 el("qeRun").onclick=async()=>{ if(QE.running)return;
   await fetchServerMaterials();                 // run 직전 물질 폴더 새로 반영 (구조도 structYAML 로 최신)
+  const miss=missingMats();                     // 폴더에 없는 물질이 있으면 계산 거부
+  if(miss.length){ el("qeNote").textContent="❌ 물질 폴더에 없는 물질: "+miss.join(", ")
+      +" — 📁 Materials 로 폴더를 선택해 셋업하세요."; return; }
   const body={ yaml:structYAML(), lam0:+el("qeL0").value, lam1:+el("qeL1").value,
     n:+el("qeN").value,
     nG:(el("qeQual").value==="manual"? (2*Math.floor((Math.max(9,+el("qeNG").value||101))/2)+1) : "auto"),  // 홀수 보정
@@ -1105,6 +1114,9 @@ async function qePoll(){ let s; try{ s=await(await fetch(qeApiBase()+"/api/qe/st
 el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
   out.style.display="block"; out.textContent="진단 계산중... (단일 λ, 수 초)"; btn.disabled=true;
   await fetchServerMaterials();                 // 진단도 run 직전 물질 폴더 새로 반영
+  const miss=missingMats();
+  if(miss.length){ out.textContent="❌ 물질 폴더에 없는 물질: "+miss.join(", ")
+      +"\n📁 Materials 로 폴더를 선택해 셋업하세요."; btn.disabled=false; return; }
   const lam=0.5*((+el("qeL0").value)+(+el("qeL1").value));
   let d; try{ d=await(await fetch(qeApiBase()+"/api/qe/diag",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({yaml:structYAML(),lam,nG:61,downsample:4,theta:+el("qeTH").value})})).json(); }
@@ -1206,7 +1218,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v69";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v70";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)
