@@ -490,4 +490,8 @@ def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=48, men_slices=8, taper_slices=
                        dispersion=dict(cfg.get("dispersion", {}) or {}),
                        ml_slices=ml_slices,
                        collect_deep=bool(cfg.get("collect_deep_substrate", False)))
-    return stack.to_ir(ctx)
+    # Si 하부 metal routing(BSI 후면 반사경): substrate 를 금속(Cu)으로 바꾸면
+    # 밴드 투과광이 되돌아와 2차 흡수 -> red/green 심투과분 QE 상승. 기본 off.
+    br = ((cfg.get("stack") or {}).get("si") or {}).get("back_reflector") or {}
+    sub = (br.get("material", "cu") if br.get("enabled") else None)
+    return stack.to_ir(ctx, substrate=sub)
