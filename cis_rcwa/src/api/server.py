@@ -101,6 +101,10 @@ def _recommend_mesh(cfg_path, quality="std"):
 
     if quality == "fast":                       # 미리보기: 수 초/λ
         nG, ds = 61, 4
+    elif quality == "converged":                # 수렴: 구조에 맞춘 수렴 nG 중심 (여러 nG 평균)
+        from ..sim.converge import recommend_center_nG
+        nG = recommend_center_nG(span, feat)
+        return nG, 2, est_s(nG, 2)              # 캡 없음 — 수렴 우선
     elif quality == "high":                     # 수렴 지향: 추천값 그대로 (느림 감수)
         nG, ds = int(base * 1.3), 2
     else:                                       # 표준: 추천값을 ~40s/λ 로 시간 캡
@@ -109,6 +113,43 @@ def _recommend_mesh(cfg_path, quality="std"):
             nG = int(nG * 0.9)
     nG = max(41, min(257, nG | 1))              # 홀수화 + 범위
     return nG, ds, est_s(nG, ds)
+
+
+def _run_converged(jid, job, cfg_path, p, lams):
+    """수렴 모드: 각 λ 를 center nG 주변 여러 nG 창에서 돌려 평균 -> 참값 + 불확도밴드.
+
+    단일 nG(미수렴) 대신 여러 nG 를 평균해 진동을 상쇄 -> 구조에 무관한 재현가능
+    참값. row 에 ±밴드(색채널 nG-std 최대)를 8번째로 부가.
+    """
+    from ..sim.simulator import RCWAPlaneWaveSimulator
+    from ..sim.converge import converged_qe
+    center = int(p["nG"]); ds = int(p["downsample"])
+    n_samples = int(p.get("conv_samples", 4))
+    make_sim = lambda ng: RCWAPlaneWaveSimulator(cfg_path, nG=ng, downsample=ds)
+    for i, lam in enumerate(lams):
+        if job.get("cancel"):
+            job["state"] = "cancelled"; return
+        t0 = time.time()
+        res = converged_qe(make_sim, [float(lam)], center, n_samples=n_samples,
+                           span_frac=0.5, pol=("sum" if p.get("pol") == "sum" else "avg"),
+                           channels="RGB")
+        q = res["qe"][float(lam)]
+        row = [round(float(lam), 5), round(q["refl"]["mean"], 5),
+               round(q["QE_tot"]["mean"], 5), round(q["A_stack"]["mean"], 5)]
+        for c in "RGB":
+            row.append(round(q[c]["mean"], 5))
+        row.append(round(res["band"], 5))            # 8번째: ±수렴 불확도 밴드
+        job["rows"].append(row)
+        job["progress"] = (i + 1) / len(lams)
+        job["note"] = (f"λ={lam*1000:.0f}nm  R/G/B={row[4]:.3f}/{row[5]:.3f}/{row[6]:.3f} "
+                       f"±{res['band']*100:.1f}%p (수렴평균 nG={res['nGs']}, {time.time()-t0:.0f}s)")
+    csv_path = os.path.join(JOBS_DIR, jid + "_qe.csv")
+    with open(csv_path, "w", encoding="utf-8") as f:
+        f.write("lambda_um,R,QE_Si_total,A_stack,QE_R,QE_G,QE_B,conv_band_pp\n")
+        for r in job["rows"]:
+            f.write(",".join(str(x) for x in r) + "\n")
+    job["csv"] = os.path.relpath(csv_path, ROOT)
+    job["state"] = "done"
 
 
 def _run_job(jid, cfg_path, p):
@@ -124,10 +165,13 @@ def _run_job(jid, cfg_path, p):
                 p["downsample"] = ds
             job["nG_auto"] = (f"자동 추천 (품질 {p.get('quality','std')}): "
                               f"nG={p['nG']}, downsample={p['downsample']} · 예상 ~{est:.0f}s/λ")
+        lams = np.linspace(p["lam0"], p["lam1"], p["n"])
+        if p.get("quality") == "converged":
+            _run_converged(jid, job, cfg_path, p, lams)
+            return
         sim = RCWAPlaneWaveSimulator(cfg_path, nG=p["nG"], downsample=p["downsample"])
         job["note"] = (f"device={sim.device} · grid {sim.grid_ny}×{sim.grid_nx} · "
                        f"layers {len(sim.layer_stack)} · nG {sim.nG if hasattr(sim,'nG') else p['nG']}")
-        lams = np.linspace(p["lam0"], p["lam1"], p["n"])
         for i, lam in enumerate(lams):
             if job.get("cancel"):
                 job["state"] = "cancelled"
