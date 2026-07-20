@@ -440,7 +440,6 @@ class RCWASolver:
                    for k in range(len(elems) - 1)]
         self._diag_node_ab = node_ab                  # 경계 flux 맵(진단)용 캐시
         aE = [a + b for a, b in node_ab]              # W0 = I2 -> node 접선 E
-        self._abs_aE = aE                             # 깊이분해 흡수(수집효율) 재사용
         maps = {}
         total = 0.0
         for i, (W, V, lam, th, kind, data) in enumerate(self._modes):
@@ -481,60 +480,6 @@ class RCWASolver:
             total += float(dens.sum())
         C = (1.0 - self._R - self._T) / total if total > 1e-300 else 0.0
         return maps, C
-
-    def layer_depth_absorption(self, i, Ny, Nx, nz, zedges=None):
-        """층 i 를 깊이 슬라이스로 나눈 raw 흡수밀도 (수집효율 가중용).
-
-        absorption_maps 와 동일한 필드복원(cp/cm) 을 쓰되 z 합산 대신 슬라이스별
-        맵을 반환. 절대 스케일은 absorption_maps 의 C 를 곱해 맞춘다 (선행 호출 필요).
-        zedges: 층-정규화 경계 [0..1] (없으면 균일 nz). 표면 조밀 비균일 지원.
-        반환: (zf_mid[k] (층 top=0 ~ bottom=1), thf[k] 각 슬라이스 두께분율,
-               maps[k] 각 (Ny,Nx) float64, th)
-        """
-        assert hasattr(self, "_abs_aE"), "absorption_maps 를 먼저 호출해 aE/C 확보"
-        aE = self._abs_aE
-        N = self.nG
-        W, V, lam, th, kind, data = self._modes[i]
-        if kind == "uniform" or (hasattr(data, "dim") and data.dim() == 0):
-            data = self._uniform_grid(data)
-        ER = fft_funs.conv_matrix(data, self.m, self.n)
-        ERinv = torch.linalg.inv(ER)
-        eps_xy = data
-        if eps_xy.shape != (Ny, Nx):
-            ii = (torch.arange(Ny, device=data.device) * data.shape[0] // Ny)
-            jj = (torch.arange(Nx, device=data.device) * data.shape[1] // Nx)
-            eps_xy = data[ii][:, jj]
-        imeps = eps_xy.imag.to(torch.float64)
-        Winv = torch.linalg.inv(W)
-        ut = Winv @ aE[i]
-        ub = Winv @ aE[i + 1]
-        X = torch.exp(-lam * self.k0 * th)
-        den = 1.0 - X * X
-        den = torch.where(den.abs() < 1e-12, den + 1e-12, den)
-        cp = (ut - X * ub) / den
-        cm = (ub - X * ut) / den
-        if zedges is None:
-            edges = [(k / nz) for k in range(nz + 1)]
-        else:
-            edges = list(zedges)
-        zf_mid, thf, maps = [], [], []
-        for a, b in zip(edges[:-1], edges[1:]):
-            if b - a < 1e-12:
-                continue
-            zf = 0.5 * (a + b)
-            ep = torch.exp(-lam * self.k0 * (zf * th))
-            em = torch.exp(-lam * self.k0 * ((1 - zf) * th))
-            Et = W @ (ep * cp + em * cm)
-            Ht = V @ (ep * cp - em * cm)
-            ez = ERinv @ (self.Kx @ Ht[N:] - self.Ky @ Ht[:N])
-            Ex = fft_funs.field_ifft(Et[:N], self.m, self.n, Ny, Nx)
-            Ey = fft_funs.field_ifft(Et[N:], self.m, self.n, Ny, Nx)
-            Ez = fft_funs.field_ifft(ez, self.m, self.n, Ny, Nx)
-            dens = imeps * (Ex.abs()**2 + Ey.abs()**2 + Ez.abs()**2) * (th * (b - a))
-            zf_mid.append(zf)
-            thf.append(b - a)
-            maps.append(dens.to(torch.float64))
-        return zf_mid, thf, maps, th
 
     def layer_internal_fields(self, i, zfracs, Ny, Nx):
         """층 i 내부 depth(zfracs∈[0,1]) 에서 E 접선필드 실공간 재구성.

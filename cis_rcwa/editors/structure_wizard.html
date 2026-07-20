@@ -125,12 +125,6 @@
       <button class="btn" id="qeStop" disabled>■ Stop</button>
       <button class="btn" id="qeDiag" title="QE가 0 등 이상할 때: 물질 n,k 점검 + air→…→Si 경계 투과 프로파일">🔍 진단</button>
     </div>
-    <div id="qeColRow" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-      <label class="hint" style="display:flex;gap:5px;align-items:center" title="켜면 표면 재결합(청색 손실) 반영한 '외부 QE'. 끄면 '광학/내부 QE'(η≡1)">
-        <input type="checkbox" id="qeCol"> 외부 QE (표면 수집효율)</label>
-      <label class="hint" id="qeColZ0w" style="display:flex;flex-direction:column;gap:3px" title="표면 dead-layer 회복깊이 — 클수록 청색 QE↓ (실측 청색@400 맞춤용)">회복깊이 z₀(nm)<input id="qeColZ0" type="number" step="10" value="150" style="width:70px"></label>
-      <label class="hint" id="qeColEmw" style="display:flex;flex-direction:column;gap:3px" title="공핍장 아래 수집효율(피크 천장) — 녹/적색 QE 레벨">η_max<input id="qeColEm" type="number" step="0.01" value="0.85" style="width:64px"></label>
-    </div>
     <div id="qeDiagOut" style="display:none;font:11px/1.6 var(--mono);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:300px;overflow:auto;white-space:pre-wrap"></div>
     <div style="height:8px;background:var(--panel-2);border:1px solid var(--line);border-radius:5px;overflow:hidden">
       <div id="qeProg" style="height:100%;width:0%;background:var(--accent);transition:width .3s"></div></div>
@@ -166,9 +160,7 @@ const DEFAULT = {
     ml:{ material:"ml", planar_um:0.45, hr:0.55, height_um:0.42, sag_height_um:0.55,   // 실측: 평탄 4500A + 돔 4200A 2x2 s1.1
          quads:[[{shape:"2x2",scale:1.1},{shape:"2x2",scale:1.1}],[{shape:"2x2",scale:1.1},{shape:"2x2",scale:1.1}]], lenses:null },
     arl_top:{ material:"ml_arl", thickness_um:0.12 },   // 1200A (1000~1500A)
-  },
-  // 소수캐리어 수집효율(외부 QE): pinned-PD 표면 dead-layer. enabled=false 면 광학 QE.
-  collection:{ enabled:false, model:"pinned", surf_depth_um:0.15, eta_max:0.85 }  // 기본 OFF: 광학(내부) QE. 실측 표면재결합 있을 때만 ON
+  }
 };
 let refLambda=0.55, folderLib={}, curStep=0, viewMode="iso";
 let S=(function(){ try{const j=localStorage.getItem("cis_wizard_v3"); if(j){const d=JSON.parse(j);
@@ -952,8 +944,6 @@ function structYAML(){ const exp=structuredClone(S); const disp={};
     const t=matTable(m); if(t&&t.length>1) disp[m]=t.map(r=>[+(r[0]).toFixed(4),+(r[1]).toFixed(4),+(r[2]).toFixed(5)]); }
   if(Object.keys(disp).length) exp.dispersion=disp;
   // 수집효율: enabled=false 면 yaml 에서 제거 -> 서버는 광학 QE (η≡1)
-  if(exp.collection){ if(exp.collection.enabled===false){ delete exp.collection; }
-    else { const co={...exp.collection}; delete co.enabled; exp.collection=co; } }
   return "# CIS structure · product: "+(S.product||"")+"\n# n,k 우선순위: dispersion(브라우저 import 테이블) > materials 폴더 > 아래 상수(λ="+refLambda+"µm)\n"+toYAML(exp); }
 function download(name,text,type){ const blob=new Blob([text],{type:type||"text/yaml"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
 el("yamlBtn").onclick=async()=>{ const text=structYAML();
@@ -1060,7 +1050,6 @@ function qeColors(){ return qeDark()
 function qeApiBase(){ return location.protocol.startsWith("http")? "" : "http://127.0.0.1:8787"; }
 async function qePing(){ try{ const r=await fetch(qeApiBase()+"/api/ping"); return await r.json(); }catch(e){ return null; } }
 el("qeBtn").onclick=async()=>{ qeDlg.showModal(); drawQEChart();
-  syncColUI();
   const g=el("qeGuide"), p=await qePing();
   if(p){ g.style.display="none"; el("qeNote").textContent=`서버 연결됨 (device=${p.device}). 구조는 현재 위저드 상태가 그대로 사용됩니다.`; el("qeRun").disabled=false; }
   else{ g.style.display="block"; el("qeRun").disabled=true;
@@ -1069,14 +1058,6 @@ el("qeBtn").onclick=async()=>{ qeDlg.showModal(); drawQEChart();
     el("qeNote").textContent="서버 미연결"; } };
 el("qeClose").onclick=()=>{ qeDlg.close(); };
 el("qeQual").onchange=()=>{ el("qeAdv").style.display = el("qeQual").value==="manual"?"block":"none"; };
-// 수집효율(외부 QE) UI <-> S.collection 동기
-function syncColUI(){ if(!S.collection)S.collection={enabled:true,model:"pinned",surf_depth_um:0.15,eta_max:0.85};
-  const c=S.collection; el("qeCol").checked=c.enabled!==false;
-  el("qeColZ0").value=Math.round((+c.surf_depth_um||0.15)*1000); el("qeColEm").value=(+c.eta_max||0.85);
-  const on=c.enabled!==false; el("qeColZ0w").style.opacity=on?1:0.4; el("qeColEmw").style.opacity=on?1:0.4; }
-el("qeCol").onchange=()=>{ if(!S.collection)S.collection={}; S.collection.enabled=el("qeCol").checked; save(); syncColUI(); };
-el("qeColZ0").oninput=()=>{ S.collection.surf_depth_um=(+el("qeColZ0").value||150)/1000; save(); };
-el("qeColEm").oninput=()=>{ S.collection.eta_max=+el("qeColEm").value||0.85; save(); };
 el("qeStop").onclick=async()=>{ if(QE.job) try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
 el("qeRun").onclick=async()=>{ if(QE.running)return;
   const body={ yaml:structYAML(), lam0:+el("qeL0").value, lam1:+el("qeL1").value,
@@ -1201,7 +1182,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v63";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v64";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>

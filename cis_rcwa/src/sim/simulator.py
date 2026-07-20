@@ -34,14 +34,12 @@ from ..materials.resolver import MaterialResolver
 class RCWAPlaneWaveSimulator:
     def __init__(self, config, nG=101, downsample=2, trunc="circular",
                  device=None, dtype=torch.complex128, materials_dir=None,
-                 mesh="auto", lateral_um=0.005, fff=True, collection=None):
+                 mesh="auto", lateral_um=0.005, fff=True):
         """config: StructureIR | 위저드 yaml 경로 | <name>_eps.npy 경로 | IR .npz 경로.
 
         mesh="auto"  : (yaml) z 해석적 층 경계 + 가로 미세 래스터 (권장)
         mesh="voxel" : (yaml) 구버전 복셀 z-slice 병합
-        collection   : 소수캐리어 수집효율 모델 {srv_cm_s, ldiff_um, dcoeff_cm2_s}.
-                       주면 Si 흡수를 깊이별 η(z) 로 가중 -> 광학 QE -> 외부 QE.
-                       None 이면 η≡1 (광학/내부 QE, 기존 동작).
+        QE = 광학(내부) QE = Si 흡수율. (캐리어 수집효율은 별도 물리로 미포함.)
         """
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = dtype
@@ -49,7 +47,6 @@ class RCWAPlaneWaveSimulator:
         self.trunc = trunc
         self.ds = max(1, int(downsample))
         self.fff = fff
-        self.collection = collection
         base_dir = "."
 
         # ---------- 구조 -> IR (세 가지 입구, 이후 코드는 IR 만 사용) ----------
@@ -64,8 +61,6 @@ class RCWAPlaneWaveSimulator:
             cfg = load_config(config)
             base_dir = os.path.dirname(os.path.abspath(config))
             ir = self._ir_from_yaml(cfg, base_dir, mesh, lateral_um)
-            if collection is None and cfg.get("collection"):   # yaml 에 수집모델 있으면 채택
-                self.collection = cfg["collection"]
         self.ir = ir.validate()
 
         # ---------- 물질 해석기 (materials 폴더 자동 탐색) ----------
@@ -203,64 +198,13 @@ class RCWAPlaneWaveSimulator:
             out.update(self._detector_qe(solver, o))
         return out
 
-    # ------------------------------------------------------------- 수집효율 η(z)
-    def _depth_edges(self, th):
-        """Si 밴드 깊이 슬라이스 경계 [0..1] — 표면 10nm급 조밀, 심부 성김.
-
-        청색은 표면 55nm 안에서 흡수 -> η(z) 급변 구간을 세밀히. 성능: ~40슬라이스.
-        """
-        fine = 0.01 / th                              # 표면부 10nm 스텝
-        e = []
-        z = 0.0
-        step = fine
-        while z < 1.0 - 1e-9:
-            e.append(z)
-            z += step
-            step = min(step * 1.35, 0.08)             # 기하증가 -> 심부 성김
-        e.append(1.0)
-        return e
-
-    def _collection_eta(self, z_um):
-        """소수캐리어 수집확률 η(z). model 로 두 물리모델 선택 (기본 pinned).
-
-        z=0: 조사면(Si 밴드 top, BARL/Si 계면), 표면재결합속도 S. 깊을수록 η↑.
-
-        model="pinned" (CIS pinned-photodiode, 권장):
-            표면 재결합층에서 회복깊이 z0 로 수집효율이 지수적으로 회복,
-            그 아래(공핍장)는 eta_max 로 완전수집:
-                η(z) = eta_max·(1 − exp(−z/z0))
-            z0 = 표면재결합 회복깊이 (직접: surf_depth_um, 또는 D/S 로 유도).
-            얕은 청색(~55nm)만 z0 만큼 깎이고, 녹/적색(깊음)은 eta_max 수집.
-        model="diffusion" (field-free 후면접합, W=밴드두께):
-            η(z) = [cosh(z/L)+s·sinh(z/L)]/[cosh(W/L)+s·sinh(W/L)], s=S·L/D
-        """
-        c = self.collection or {}
-        model = str(c.get("model", "pinned"))
-        z = np.clip(np.asarray(z_um, float), 0.0, None)
-        if model == "diffusion":
-            S = float(c.get("srv_cm_s", 0.0)); L = float(c.get("ldiff_um", 10.0))
-            D = float(c.get("dcoeff_cm2_s", 27.0)); W = float(self.si_band_um)
-            s = S * (L * 1e-4) / max(D, 1e-9)
-            zc = np.clip(z, 0.0, W)
-            return (np.cosh(zc / L) + s * np.sinh(zc / L)) / \
-                   (np.cosh(W / L) + s * np.sinh(W / L))
-        # pinned (기본) — 표면 dead-layer 지수 회복
-        emax = float(c.get("eta_max", 0.82))
-        if c.get("surf_depth_um") is not None:
-            z0 = float(c["surf_depth_um"])
-        else:                                        # z0 = D/S (표면 확산길이)
-            S = float(c.get("srv_cm_s", 3e6)); D = float(c.get("dcoeff_cm2_s", 27.0))
-            z0 = (D / max(S, 1e-9)) * 1e4            # cm -> µm
-        z0 = max(z0, 1e-4)
-        return emax * (1.0 - np.exp(-z / z0))
-
     # ------------------------------------------------------------- QE 집계
     def _detector_qe(self, solver, o):
-        """IR.detector 규약으로 픽셀/라벨별 QE 집계 (구조 지식 불필요).
+        """IR.detector 규약으로 픽셀/라벨별 광학 QE 집계 (구조 지식 불필요).
 
         QE = 밴드 3D 흡수 + 심부(T) — 픽셀 창(제외 마스크 제거) 귀속,
         절대 스케일은 에너지 보존으로 고정. 라벨별 = 같은 라벨 픽셀 평균.
-        collection 모델이 있으면 밴드 흡수를 깊이별 η(z) 로 가중 (외부 QE).
+        (광학/내부 QE = Si 흡수율. 캐리어 수집효율은 별도 물리, 여기선 미포함.)
         """
         det = self.ir.detector
         maps, C = solver.absorption_maps(self.grid_ny, self.grid_nx)
@@ -274,58 +218,30 @@ class RCWAPlaneWaveSimulator:
         npix = len(labels)
         excl = det.exclude_mask if det.exclude_mask is not None else \
             np.zeros_like(pixidx, dtype=bool)
-        use_col = bool(self.collection)
 
         pix_abs = np.zeros(npix)
         trench_abs = 0.0
         A_band = 0.0
-        z_top = 0.0                                      # 현재 Si 층 top 의 표면깊이(µm)
-        for li in range(M - nS, M):                      # 검출 밴드 층들 (top->deep)
+        for li in range(M - nS, M):                      # 검출 밴드 층들
             if li not in maps:
                 continue
-            if use_col:
-                # 깊이분해 흡수 -> η(z) 가중 (표면 얕은 흡수 = 재결합 손실).
-                # 표면(청색 55nm 흡수) 조밀 + 심부 성김 비균일 격자 -> 정확도/속도.
-                th = float(self.layer_stack[li][1])
-                edges = self._depth_edges(th)
-                zf, thf, dmaps, _ = solver.layer_depth_absorption(
-                    li, self.grid_ny, self.grid_nx, 0, zedges=edges)
-                for zk, dm in zip(zf, dmaps):
-                    d = dm.detach().cpu().numpy() * C
-                    eta = float(self._collection_eta(z_top + zk * th))
-                    A_band += d.sum()                    # 광학 흡수 (참고)
-                    for p in range(npix):
-                        m = (pixidx == p) & (~excl)
-                        pix_abs[p] += d[m].sum() * eta   # 수집분만
-                    trench_abs += d[excl].sum() * eta
-                z_top += th
-            else:
-                dens = maps[li].detach().cpu().numpy() * C
-                A_band += dens.sum()
-                for p in range(npix):
-                    m = (pixidx == p) & (~excl)          # 픽셀 창 (제외분 제거)
-                    pix_abs[p] += dens[m].sum()
-                trench_abs += dens[excl].sum()
+            dens = maps[li].detach().cpu().numpy() * C
+            A_band += dens.sum()
+            for p in range(npix):
+                m = (pixidx == p) & (~excl)              # 픽셀 창 (제외분 제거)
+                pix_abs[p] += dens[m].sum()
+            trench_abs += dens[excl].sum()
         if det.deep_is_detector:
             # 심부 흡수: 밴드 바닥 투과 flux 를 픽셀 귀속 (그 깊이엔 구조 없음)
-            eta_deep = float(self._collection_eta(self.si_band_um)) if use_col else 1.0
             Sz = solver.transmitted_flux_map(self.grid_ny, self.grid_nx)
             Sz = Sz.detach().cpu().numpy()
             for p in range(npix):
-                pix_abs[p] += Sz[pixidx == p].sum() / ngrid * eta_deep
+                pix_abs[p] += Sz[pixidx == p].sum() / ngrid
         # 픽셀 면적 정규화 (pixel_map 분할 면적 기준 — 비정방 픽셀도 지원)
         area = np.array([max(1, (pixidx == p).sum()) for p in range(npix)]) / ngrid
         qe_pix = [float(v / a) for v, a in zip(pix_abs, area)]
         qe_lab = {L: float(np.mean([q for q, l in zip(qe_pix, labels) if l == L]))
                   for L in dict.fromkeys(labels)}
-        if use_col:
-            qe_total = float(sum(pix_abs))              # 외부 QE (수집된 캐리어, 트렌치 제외)
-            out = {"QE": qe_total,
-                   "QE_optical": float(A_band + T_deep),  # 광학/내부 QE (수집 전, 참고)
-                   "A_stack": float(1.0 - o["R"] - (A_band + T_deep)),
-                   "QE_pixels": qe_pix, "QE_rgb": qe_lab,
-                   "QE_trench": float(trench_abs), "QE_deep": float(T_deep)}
-            return out
         qe_total = float(A_band + T_deep)
         return {"QE": qe_total,
                 "A_stack": float(1.0 - o["R"] - qe_total),
