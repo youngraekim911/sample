@@ -370,11 +370,15 @@ class BlockStack:
     """블록 조립 -> StructureIR. blocks 는 아래(Si)->위(공기) 순."""
 
     def __init__(self, blocks, ambient="air", materials=None, dispersion=None,
-                 ml_slices=48):
+                 ml_slices=48, collect_deep=False):
         self.blocks = blocks
         self.ambient = ambient
         self.materials = materials or {}
         self.dispersion = dispersion or {}
+        # collect_deep: 광다이오드 밴드 아래 반무한 기판 흡수를 QE 로 셀지.
+        #   False(기본)=밴드만(유한 광다이오드 — 적색이 기판 뚫으면 손실, 실측형 rolloff)
+        #   True=밴드+심부 전체 Si 흡수 (반무한 수집 가정)
+        self.collect_deep = collect_deep
         self.ml_slices = ml_slices
 
     def _flush_dome(self, ctx):
@@ -437,7 +441,8 @@ class BlockStack:
             labels = [ctx.bayer[r][c] for r in range(ctx.npx) for c in range(ctx.npx)]
             det = Detector(band_um=ctx.det_band_um, n_layers=ctx.det_n_layers,
                            pixel_map=pixidx, pixel_labels=labels,
-                           exclude_mask=ctx.trench)
+                           exclude_mask=ctx.trench,
+                           deep_is_detector=self.collect_deep)
         sub = substrate or next((b.mat for b in self.blocks
                                  if isinstance(b, SiDtiBlock)), "si")
         ir = StructureIR(
@@ -483,5 +488,6 @@ def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=48, men_slices=8, taper_slices=
                        ambient=cfg.get("ambient", "air") or "air",
                        materials=dict(cfg.get("materials", {}) or {}),
                        dispersion=dict(cfg.get("dispersion", {}) or {}),
-                       ml_slices=ml_slices)
+                       ml_slices=ml_slices,
+                       collect_deep=bool(cfg.get("collect_deep_substrate", False)))
     return stack.to_ir(ctx)
