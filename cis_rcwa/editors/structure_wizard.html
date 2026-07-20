@@ -115,7 +115,8 @@
         <select id="qeQual" style="width:120px"><option value="fast">빠름 (미리보기)</option><option value="std" selected>표준 (추천)</option><option value="high">정밀 (수렴 지향)</option><option value="manual">수동 (고급)</option></select></label>
       <details id="qeAdv" style="display:none"><summary class="hint">고급</summary>
         <div style="display:flex;gap:10px;align-items:flex-end;padding-top:6px">
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="Fourier 차수 — 빛을 몇 개의 회절 성분으로 전개할지. 클수록 정확·느림(≈세제곱)">nG<select id="qeNG" style="width:80px"><option value="61">61</option><option value="101" selected>101</option><option value="145">145</option><option value="201">201</option><option value="257">257</option></select></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="Fourier 차수 — 빛을 몇 개의 회절 성분으로 전개할지. 클수록 정확·느림(≈세제곱). 임의 홀수 입력(9~601 권장), 짝수는 자동 보정">nG<input id="qeNG" type="number" step="2" min="9" max="1001" value="101" list="qeNGlist" style="width:80px">
+          <datalist id="qeNGlist"><option value="61"><option value="101"><option value="145"><option value="201"><option value="257"><option value="301"></datalist></label>
         <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조 격자 다운샘플 (클수록 빠르고 거침)">downsample<input id="qeDS" type="number" step="1" min="1" value="2" style="width:60px"></label>
         </div></details>
       <label class="hint" style="display:flex;flex-direction:column;gap:3px">입사각 θ(°)<input id="qeTH" type="number" step="1" value="0" style="width:56px"></label>
@@ -1057,12 +1058,13 @@ el("qeBtn").onclick=async()=>{ qeDlg.showModal(); drawQEChart();
       "  cd cis_rcwa && python3 app.py\n\n(pip install torch numpy pyyaml · GPU 있으면 자동 사용 · 그 뒤 이 버튼을 다시 누르세요)";
     el("qeNote").textContent="서버 미연결"; } };
 el("qeClose").onclick=()=>{ qeDlg.close(); };
-el("qeQual").onchange=()=>{ el("qeAdv").style.display = el("qeQual").value==="manual"?"block":"none"; };
+el("qeQual").onchange=()=>{ const m=el("qeQual").value==="manual";
+  el("qeAdv").style.display = m?"block":"none"; el("qeAdv").open = m; };
 el("qeStop").onclick=async()=>{ if(QE.job) try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
 el("qeRun").onclick=async()=>{ if(QE.running)return;
   const body={ yaml:structYAML(), lam0:+el("qeL0").value, lam1:+el("qeL1").value,
     n:+el("qeN").value,
-    nG:(el("qeQual").value==="manual"? +el("qeNG").value : "auto"),
+    nG:(el("qeQual").value==="manual"? (2*Math.floor((Math.max(9,+el("qeNG").value||101))/2)+1) : "auto"),  // 홀수 보정
     quality:el("qeQual").value,
     downsample:(el("qeQual").value==="manual"? +el("qeDS").value : "auto"), theta:+el("qeTH").value,
     pol:el("qePol")?el("qePol").value:"avg" };
@@ -1182,7 +1184,7 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
 // ============================ init ============================
-const WIZ_VERSION="v64";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v65";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep();
 </script>

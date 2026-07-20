@@ -224,7 +224,9 @@ class Handler(BaseHTTPRequestHandler):
             p = {"lam0": float(data.get("lam0", 0.40)),
                  "lam1": float(data.get("lam1", 0.70)),
                  "n": max(1, int(data.get("n", 7))),
-                 "nG": "auto" if str(ng_req) == "auto" else max(9, int(ng_req)),
+                 "nG": "auto" if str(ng_req) == "auto"
+                       else (lambda v: v if v % 2 else v + 1)(max(9, int(ng_req))),  # 홀수
+
                  "downsample": "auto" if str(ds_req) == "auto" else max(1, int(ds_req)),
                  "quality": str(data.get("quality", "std")),
                  "theta": float(data.get("theta", 0.0)),
