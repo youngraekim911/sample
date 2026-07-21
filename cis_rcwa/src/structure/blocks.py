@@ -108,8 +108,9 @@ class SiDtiBlock:
         si_id = ctx.mat_id(self.mat)
         ctx.det_band_um = self.th
         ctx.det_n_layers = 1
+        br = self.back_reflector or {}
         refl = ([self._reflector_layer(ctx)]                  # 밴드 아래(=맨 아래) 반사경
-                if (self.back_reflector or {}).get("enabled") else [])
+                if br.get("enabled") and float(br.get("coverage", 1.0)) > 0 else [])
         if refl:
             ctx.det_below = len(refl)
         d = self.dti

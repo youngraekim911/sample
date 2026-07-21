@@ -104,6 +104,9 @@ class RCWAPlaneWaveSimulator:
             ir = b.to_ir()                                # 마스크만 재사용
             matid = b.build()[:, ::self.ds, ::self.ds]
             det = ir.detector
+            if det.n_below_band:                          # voxel build 는 후면 반사경 층을
+                print("[warn] voxel 경로는 back_reflector 미지원 — 반사경 무시(auto 메쉬 사용 권장)")
+                det.n_below_band = 0                      # 만들지 않음 -> 밴드 인덱싱 붕괴 방지
             det.pixel_map = det.pixel_map[::self.ds, ::self.ds]
             det.exclude_mask = det.exclude_mask[::self.ds, ::self.ds]
             return ir_from_voxels(matid, b.dz, b.dxy * self.ds,
@@ -151,7 +154,7 @@ class RCWAPlaneWaveSimulator:
 
     # ------------------------------------------------------------- 실행
     def run(self, wavelength, theta=0.0, phi=0.0, pol_te=1.0, pol_tm=0.0,
-            pixel_qe=True):
+            pixel_qe=True, _wood_depth=0):
         """단일 파장 RCWA -> R, QE(검출기 흡수), A_stack (+픽셀/라벨별 QE)."""
         lam = float(wavelength)
         if self.ir.mode == "eps" and self.ir.eps_lambda_um and \
@@ -185,10 +188,14 @@ class RCWAPlaneWaveSimulator:
         except Exception:
             bad = True
         if bad:
+            if _wood_depth >= 3:                        # 재귀 무한루프 가드
+                raise RuntimeError(
+                    f"λ={lam}µm: R/T 비유한값이 λ 미세이동 {_wood_depth}회 후에도 지속 "
+                    f"— Wood anomaly 가 아니라 물질 n,k/구조 문제일 수 있음")
             lam_shift = lam * (1 + 5e-4)
             print(f"[warn] λ={lam}µm Wood anomaly -> λ={lam_shift:.5f}µm 로 재계산")
-            return self.run(lam_shift, theta=theta, phi=phi,
-                            pol_te=pol_te, pol_tm=pol_tm, pixel_qe=pixel_qe)
+            return self.run(lam_shift, theta=theta, phi=phi, pol_te=pol_te,
+                            pol_tm=pol_tm, pixel_qe=pixel_qe, _wood_depth=_wood_depth + 1)
         out = {"wavelength": lam, "R": o["R"], "QE": o["T"],
                "A_stack": o["A"], "nG": solver.nG, "n_layers": len(self.layer_stack)}
 

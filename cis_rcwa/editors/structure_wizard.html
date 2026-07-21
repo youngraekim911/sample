@@ -1151,8 +1151,9 @@ el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
      "R·G·B = 각 색 픽셀 기둥 면적당 잔존 파워. 금속 격벽처럼 기둥 경계에 흡수가 몰리면\n"+
      "가로로 흘러든 빛까지 그 기둥에 귀속돼 0 으로 표시될 수 있음 (최종 색별 QE 는 Run 결과가 기준).";
   out.textContent=t; };
-el("qeCsv").onclick=()=>{ const rgb=QE.rows.length&&QE.rows[0].length>=7;
-  let t="lambda_um,R,QE_Si_total,A_stack"+(rgb?",QE_R,QE_G,QE_B":"")+"\n"+QE.rows.map(r=>r.join(",")).join("\n");
+el("qeCsv").onclick=()=>{ const w=QE.rows.length?QE.rows[0].length:0, rgb=w>=7, band=w>=8;
+  let t="lambda_um,R,QE_Si_total,A_stack"+(rgb?",QE_R,QE_G,QE_B":"")+(band?",conv_band_pp":"")
+    +"\n"+QE.rows.map(r=>r.join(",")).join("\n");
   download(pname()+"_qe_spectrum.csv",t,"text/csv"); };
 function qeTableFill(){ const d=el("qeTable"); if(!QE.rows.length){d.textContent="";return;}
   const rgb=QE.rows[0].length>=7;

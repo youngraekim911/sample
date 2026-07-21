@@ -109,6 +109,8 @@ class StructureIR:
         d = self.detector
         if d is not None:
             assert d.n_layers <= len(self.layers), "detector.n_layers > 층 수"
+            assert d.n_layers + d.n_below_band <= len(self.layers), \
+                "detector.n_layers + n_below_band > 층 수 (밴드 인덱싱 붕괴)"
             if d.pixel_map is not None:
                 assert d.pixel_map.shape == (ny, nx), "pixel_map 격자 불일치"
                 assert int(d.pixel_map.max()) + 1 <= len(d.pixel_labels), \

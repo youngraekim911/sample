@@ -308,18 +308,27 @@ class Handler(BaseHTTPRequestHandler):
             yaml_text = data.get("yaml") or ""
             if not yaml_text.strip():
                 self._json({"error": "yaml 이 비었습니다"}, 400); return
-            ng_req = data.get("nG", "auto")
-            ds_req = data.get("downsample", "auto")
-            p = {"lam0": float(data.get("lam0", 0.40)),
-                 "lam1": float(data.get("lam1", 0.70)),
-                 "n": max(1, int(data.get("n", 7))),
-                 "nG": "auto" if str(ng_req) == "auto"
-                       else (lambda v: v if v % 2 else v + 1)(max(9, int(ng_req))),  # 홀수
-
-                 "downsample": "auto" if str(ds_req) == "auto" else max(1, int(ds_req)),
-                 "quality": str(data.get("quality", "std")),
-                 "theta": float(data.get("theta", 0.0)),
-                 "pol": str(data.get("pol", "avg"))}
+            # 빈칸/NaN 입력(프론트가 null 로 직렬화)에도 안전하게 — 기본값으로 코어스
+            def _num(key, dflt, cast=float):
+                v = data.get(key, dflt)
+                try:
+                    return cast(v) if v is not None else dflt
+                except (TypeError, ValueError):
+                    return dflt
+            try:
+                ng_req = data.get("nG", "auto")
+                ds_req = data.get("downsample", "auto")
+                p = {"lam0": _num("lam0", 0.40),
+                     "lam1": _num("lam1", 0.70),
+                     "n": max(1, _num("n", 7, int)),
+                     "nG": "auto" if str(ng_req) == "auto"
+                           else (lambda v: v if v % 2 else v + 1)(max(9, int(ng_req))),
+                     "downsample": "auto" if str(ds_req) == "auto" else max(1, int(ds_req)),
+                     "quality": str(data.get("quality", "std")),
+                     "theta": _num("theta", 0.0),
+                     "pol": str(data.get("pol", "avg"))}
+            except (TypeError, ValueError) as e:
+                self._json({"error": f"파라미터 오류: {e}"}, 400); return
             jid = start_job(yaml_text, p)
             self._json({"job": jid})
         elif u.path == "/api/qe/cancel":
