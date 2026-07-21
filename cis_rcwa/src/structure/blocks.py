@@ -457,6 +457,16 @@ class BlockStack:
                              if isinstance(b, (MlBlock, ConformalCoatBlock))]) or "ml"
         tags += [dome_tag] * len(dome)
         assert layers, "블록이 층을 하나도 만들지 않음"
+        # 인접 동일 맵 층 머지 — flat CF meniscus의 redundant 슬라이스나 동일 blanket 을
+        # 하나의 두꺼운 층으로 합쳐 patterned 층 수(=eig/solve 횟수)를 줄인다. 물리 동일
+        # (같은 lateral 맵 = 같은 S-matrix). 밴드/반사경 층은 맵이 distinct 라 안 합쳐짐.
+        mlayers, mtags = [], []
+        for (m, th), tg in zip(layers, tags):
+            if mlayers and np.array_equal(mlayers[-1][0], m):
+                mlayers[-1] = (mlayers[-1][0], mlayers[-1][1] + float(th))
+            else:
+                mlayers.append((m, float(th))); mtags.append(tg)
+        layers, tags = mlayers, mtags
         # detector: 픽셀 분할(bayer) + SiDti 공표값
         det = None
         if ctx.det_band_um > 0 and ctx.bayer:

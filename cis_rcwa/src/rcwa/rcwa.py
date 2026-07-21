@@ -164,20 +164,24 @@ class RCWASolver:
     def _layer_smatrix(self, W, V, lam, thickness):
         """gap 기준 층 S-matrix (2N block). A = Wᵢ⁻¹W₀ + Vᵢ⁻¹V₀.
 
-        W0=I2 이므로 Winv@W0=Winv (matmul 생략). uniform 층은 W=I2 → Winv=I2 로
-        역행렬도 생략 (층당 inv 1회 절감)."""
+        최적화: W0=I2 이므로 Winv@W0=Winv (matmul 생략), uniform 층(W=I2)은 inv(W)
+        생략. 명시적 역행렬 대신 LU 재사용 solve — A⁻¹·[XB|XA|B], D⁻¹·[·|·] 를
+        각각 한 번의 인수분해로 처리 (역행렬 형성 회피 → 더 빠르고 안정)."""
         Winv = self.I2 if W is self.I2 else torch.linalg.inv(W)   # W0=I2 → Winv@W0=Winv
-        ViV0 = torch.linalg.inv(V) @ self.V0
+        ViV0 = torch.linalg.solve(V, self.V0)                     # V⁻¹V0 (inv 안 만듦)
         A = Winv + ViV0
         B = Winv - ViV0
         X = torch.diag(torch.exp(-lam * self.k0 * thickness))
-        Ai = torch.linalg.inv(A)
         XB = X @ B
         XA = X @ A
-        D = A - XB @ Ai @ XB
-        Dinv = torch.linalg.inv(D)
-        S11 = Dinv @ (XB @ Ai @ XA - B)
-        S12 = Dinv @ X @ (A - B @ Ai @ B)
+        n2 = A.shape[0]
+        # A 인수분해 1회로 A⁻¹·XB, A⁻¹·XA, A⁻¹·B 동시 (LU 재사용)
+        AiN = torch.linalg.solve(A, torch.cat([XB, XA, B], dim=1))
+        Ai_XB, Ai_XA, Ai_B = AiN[:, :n2], AiN[:, n2:2 * n2], AiN[:, 2 * n2:]
+        D = A - XB @ Ai_XB
+        rhs = torch.cat([XB @ Ai_XA - B, X @ (A - B @ Ai_B)], dim=1)
+        DiN = torch.linalg.solve(D, rhs)                          # D⁻¹·[S11rhs|S12rhs]
+        S11, S12 = DiN[:, :n2], DiN[:, n2:]
         return {"11": S11, "12": S12, "21": S12, "22": S11}
 
     @staticmethod
