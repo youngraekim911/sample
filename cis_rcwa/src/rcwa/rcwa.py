@@ -162,11 +162,14 @@ class RCWASolver:
         return W, V, lam
 
     def _layer_smatrix(self, W, V, lam, thickness):
-        """gap 기준 층 S-matrix (2N block). A = Wᵢ⁻¹W₀ + Vᵢ⁻¹V₀."""
-        Winv = torch.linalg.inv(W)
-        Vinv = torch.linalg.inv(V)
-        A = Winv @ self.W0 + Vinv @ self.V0
-        B = Winv @ self.W0 - Vinv @ self.V0
+        """gap 기준 층 S-matrix (2N block). A = Wᵢ⁻¹W₀ + Vᵢ⁻¹V₀.
+
+        W0=I2 이므로 Winv@W0=Winv (matmul 생략). uniform 층은 W=I2 → Winv=I2 로
+        역행렬도 생략 (층당 inv 1회 절감)."""
+        Winv = self.I2 if W is self.I2 else torch.linalg.inv(W)   # W0=I2 → Winv@W0=Winv
+        ViV0 = torch.linalg.inv(V) @ self.V0
+        A = Winv + ViV0
+        B = Winv - ViV0
         X = torch.diag(torch.exp(-lam * self.k0 * thickness))
         Ai = torch.linalg.inv(A)
         XB = X @ B

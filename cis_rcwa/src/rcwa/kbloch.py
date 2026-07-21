@@ -37,7 +37,12 @@ def get_G(nG_target, g1, g2, trunc="circular"):
             mag.append(float(gx * gx + gy * gy))
     idx = sorted(range(len(mag)), key=lambda i: mag[i])
     if trunc == "circular":
-        keep = idx[:nG_target]
+        # 축퇴 shell(같은 |G|²)을 중간에서 자르면 ±G 대칭이 깨져 nG-jitter(수렴 진동)
+        # 발생 -> 경계에 걸친 shell 은 '통째로' 포함해 대칭 유지 (실제 N ≥ nG_target).
+        nkeep = min(max(int(nG_target), 1), len(idx))
+        cut = mag[idx[nkeep - 1]]
+        tol = 1e-9 * max(cut, 1.0)
+        keep = [i for i in idx if mag[i] <= cut + tol]
     else:  # rectangular: |m|,|n| <= M0
         M0 = int(round(math.sqrt(nG_target)) // 2)
         keep = [i for i in idx if abs(ms[i]) <= M0 and abs(ns[i]) <= M0]
