@@ -38,7 +38,7 @@ class MeshPolicy:
     """
 
     def __init__(self, nG=101, downsample=2, lateral_um=0.005,
-                 ml_slices=48, men_slices=8, taper_slices=8, fff=True):
+                 ml_slices=16, men_slices=8, taper_slices=8, fff=True):
         self.nG = nG
         self.ds = downsample
         self.lateral_um = lateral_um
