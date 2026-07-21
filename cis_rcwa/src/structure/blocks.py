@@ -554,3 +554,41 @@ def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=8, men_slices=8, taper_slices=8
     # 후면 반사경은 SiDtiBlock 이 '밴드 아래 패턴 층'으로 삽입 (부분 커버리지 지원).
     # substrate 는 Si 유지 -> Cu 갭 사이로 투과된 빛은 심부 Si 흡수(손실).
     return stack.to_ir(ctx)
+
+
+# ==========================================================================
+def apply_cra_shift(ir, shift_ml_um=(0.0, 0.0), shift_cfgrid_um=(0.0, 0.0)):
+    """CRA 렌즈 shift(shrink): ML 그룹과 CF+grid 그룹 층을 횡방향으로 순환이동.
+
+    빗각(CRA) 입사 시 초점이 틀어지는 걸 상부 구조를 빛 오는 쪽으로 밀어 Si 중심에
+    다시 모으는 lens-shift 보정. Si/DTI/BARL/검출기(pixel_map)는 고정.
+
+    RCWA 는 supercell 을 상하좌우·대각 무한반복 -> shift 는 np.roll(주기 wrap):
+    unit 밖으로 나간 부분이 반대편서 들어옴 = '옆 unit 침범'을 물리적으로 정확히 표현.
+    Si/BARL 은 안 밀어 원래 주기 유지 -> 주기성 자동 정합. region 인덱스 맵이라
+    정수픽셀 이동(보간 없음; N 세밀하면 오차 <픽셀).
+
+    shift_*_um = (dx, dy) µm. dx>0 = +x 방향. ML 이 CF+grid 보다 크게(더 위라).
+    반환: 층 맵만 교체한 새 IR (원본 불변).
+    """
+    tags = getattr(ir, "layer_tags", None)
+    if not tags:
+        raise ValueError("layer_tags 없음 — 블록 조립 IR(ir_from_wizard_cfg) 필요")
+    ny, nx = ir.grid_shape
+    dxp, dyp = ir.span_x / nx, ir.span_y / ny
+
+    def rollpx(m, sh):
+        sx, sy = int(round(sh[0] / dxp)), int(round(sh[1] / dyp))
+        return m if (sx == 0 and sy == 0) else np.roll(m, (sy, sx), axis=(0, 1))
+
+    new_layers = []
+    for (m, th), tg in zip(ir.layers, tags):
+        if "cf_grid" in tg:
+            m = rollpx(m, shift_cfgrid_um)
+        elif "ml" in tg or tg == "planar":               # ML 돔+상부 코팅+planar
+            m = rollpx(m, shift_ml_um)
+        new_layers.append((m, th))
+    import copy
+    ir2 = copy.copy(ir)
+    ir2.layers = new_layers
+    return ir2
