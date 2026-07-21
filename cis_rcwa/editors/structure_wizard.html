@@ -153,6 +153,7 @@
 </div>
   <div class="wfoot">
     <button class="btn ghost" id="buildBack">← 시작</button>
+    <button class="btn ghost" id="saveBtn" title="현재 구조를 .yaml 로 저장 (시작 페이지에서 다시 열 수 있음)">💾 구조 저장</button>
     <div class="spacer"></div>
     <span class="hint">구조·물질 편집을 마치면</span>
     <button class="btn primary" id="buildDone">완료 · 시뮬레이션 →</button>
@@ -1058,14 +1059,17 @@ function structYAML(){ const exp=structuredClone(S); const disp={};
   // 수집효율: enabled=false 면 yaml 에서 제거 -> 서버는 광학 QE (η≡1)
   return "# CIS structure · product: "+(S.product||"")+"\n# n,k 우선순위: dispersion(브라우저 import 테이블) > materials 폴더 > 아래 상수(λ="+refLambda+"µm)\n"+toYAML(exp); }
 function download(name,text,type){ const blob=new Blob([text],{type:type||"text/yaml"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
-if(el("yamlBtn"))el("yamlBtn").onclick=async()=>{ const text=structYAML();
+async function saveStructYAML(){ const text=structYAML();
   if(window.showSaveFilePicker){ // 저장 경로 선택 (취소=중단)
     try{ const fh=await window.showSaveFilePicker({suggestedName:pname()+".yaml",
            types:[{description:"YAML",accept:{"text/yaml":[".yaml",".yml"]}}]});
-      const w=await fh.createWritable(); await w.write(text); await w.close(); }
+      const w=await fh.createWritable(); await w.write(text); await w.close();
+      if(el("status"))el("status").textContent="💾 구조 저장됨: "+pname()+".yaml"; return; }
     catch(err){ if(err&&err.name==="AbortError")return; download(pname()+".yaml",text); } }
   else download(pname()+".yaml",text);
-  el("dlgTitle").textContent="Export · "+pname()+".yaml"; el("dlgHint").textContent="구조 YAML 저장됨. Import 로 다시 불러올 수 있음."; el("dlgText").value=text; dlg.showModal(); };
+  if(el("status"))el("status").textContent="💾 구조 저장됨(다운로드): "+pname()+".yaml"; }
+if(el("yamlBtn"))el("yamlBtn").onclick=saveStructYAML;
+if(el("saveBtn"))el("saveBtn").onclick=saveStructYAML;
 // YAML import
 if(el("importBtn"))el("importBtn").onclick=()=>el("yamlFile").click();
 const yamlFileIn=h("input",{type:"file",id:"yamlFile",accept:".yaml,.yml",style:"display:none"}); document.body.appendChild(yamlFileIn);
@@ -1392,7 +1396,7 @@ el("resultBack").onclick=()=>goPage("wpage-set");
 el("resultRerun").onclick=()=>goPage("wpage-set");
 
 // ============================ init ============================
-const WIZ_VERSION="v73";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v74";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)
