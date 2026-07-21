@@ -114,7 +114,10 @@ class SiDtiBlock:
         if refl:
             ctx.det_below = len(refl)
         d = self.dti
-        if not d or (d.get("mode") or "").lower() in ("", "none"):
+        # optical=False -> DTI 를 광학 스택에 넣지 않음(전기적 격리만). 밴드는 균일 Si,
+        # 트렌치 흡수/산란/제외 없음 -> 매끈한 Si 광학모델(상용 CIS QE 툴 관행).
+        if not d or (d.get("mode") or "").lower() in ("", "none") \
+                or d.get("optical") is False:
             ctx.trench = np.zeros_like(ctx.X, dtype=bool)
             return refl + [(ctx.zeros(self.mat), self.th)]
 
