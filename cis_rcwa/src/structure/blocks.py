@@ -242,6 +242,20 @@ class GridCfBlock:
         v = (ctx.Y - (np.floor(ctx.Y / cf_per) + 0.5) * cf_per) / (cf_per / 2)
         pin = (2.0 / 3.0) - (u * u + v * v)
         zTop = np.maximum(0.002, th[colcode] + cv[colcode] * pin)
+        # CF 상부 모서리 chamfer: grid 벽 근처(안쪽 reach 이내) 상면을 angle 로 각지게
+        # 컷 -> 가장자리 빛을 픽셀 중앙으로 funnel(크로스톡↓). chamfer_um=수평 reach,
+        # chamfer_angle=경사(도). 0 이면 없음.
+        ch_um = np.array([float(cf[c].get("chamfer_um", 0) or 0) for c in "RGB"])
+        if np.any(ch_um > 0):
+            ch_ang = np.array([float(cf[c].get("chamfer_angle", 45) or 45) for c in "RGB"])
+            cr = ch_um[colcode]
+            tang = np.tan(np.deg2rad(np.clip(ch_ang[colcode], 1.0, 89.0)))
+            edge = dg - W / 2.0                       # grid 벽에서 CF 안쪽으로의 거리
+            cut = np.maximum(0.0, cr - np.maximum(edge, 0.0)) * tang
+            zTop = np.maximum(0.002, zTop - cut)
+            cfTopMin = float(max(0.002, np.min(zTop)))   # 슬라이싱 범위를 chamfer 까지 확장
+            cfTopMax = float(np.max(zTop))
+            ctx.cf_top_min = cfTopMin
         cf_ids = np.array([ctx.mat_id(cf[c]["material"]) for c in "RGB"], dtype=np.uint8)
         cf_map = cf_ids[colcode]
         bg_id = ctx.mat_id(self.bg)
