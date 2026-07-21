@@ -23,49 +23,22 @@ bayer:
   - G
   - B
   - B
+# 물질 n,k 상수 (폴백용 예시값 — 실제 계산은 data/materials/*.txt 폴더가 우선).
 materials:
-  air:
-    n: 1.0
-    k: 0.0
-  si:
-    n: 4.17
-    k: 0.0413
-  oxide:
-    n: 1.4599
-    k: 0.0
-  al2o3:
-    n: 1.738
-    k: 0.0
-  hfox:
-    n: 1.89
-    k: 0.0
-  peox:
-    n: 1.46
-    k: 0.0
-  teos:
-    n: 1.45
-    k: 0.0
-  poly:
-    n: 3.91
-    k: 0.0
-  cf_red:
-    n: 1.78
-    k: 0.32
-  cf_green:
-    n: 1.676
-    k: 0.005
-  cf_blue:
-    n: 1.49
-    k: 0.22
-  ml:
-    n: 1.582
-    k: 0.0
-  ml_arl:
-    n: 1.47
-    k: 0.0
-  tin:
-    n: 0.9719
-    k: 1.8852
+  air:      {n: 1.00, k: 0.00}
+  si:       {n: 4.30, k: 0.10}
+  oxide:    {n: 1.46, k: 0.00}
+  al2o3:    {n: 1.65, k: 0.00}
+  hfox:     {n: 1.90, k: 0.00}
+  peox:     {n: 1.46, k: 0.00}
+  teos:     {n: 1.46, k: 0.00}
+  poly:     {n: 4.00, k: 0.05}
+  cf_red:   {n: 1.80, k: 0.20}
+  cf_green: {n: 1.65, k: 0.03}
+  cf_blue:  {n: 1.55, k: 0.15}
+  ml:       {n: 1.55, k: 0.00}
+  ml_arl:   {n: 1.47, k: 0.00}
+  tin:      {n: 1.70, k: 2.50}
 stack:
   si:
     material: si

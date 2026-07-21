@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """IR 리팩터링 회귀 테스트 — python3 tests/regress_ir.py (repo 루트에서).
 
-1) v50 위저드 yaml -> QE_G@550 이 리팩터링 전 값(77.99%)과 일치
+1) 고정 fixture yaml -> QE_G@550 이 기준 baseline 과 일치 (드리프트 가드)
 2) IR save/load(npz) 라운드트립 -> 동일 QE
 3) remap_material (물질 교체, 기하 재생성 없음) -> QE 반응
 4) 합성 eps 모드 IR -> 에너지 보존
@@ -22,8 +22,8 @@ from src.structure.ir import StructureIR, Detector
 
 TMP = os.environ.get("TMPDIR", "/tmp")
 CONF = "tests/data/regress_v50.yaml"   # v50 기준 구조 고정 (conf 는 소자 사양따라 변함)
-EXPECT_G = 0.8338            # 실측 다파장 n,k(400/550/600/700) + 밴드만
-                            # 광다이오드 QE. (deep 포함 0.8454, 근사물질 0.7799)
+EXPECT_G = 0.6472            # 예시 플레이스홀더 물질(data/materials/*.txt) + 밴드만
+                            # 광다이오드 QE. 폴더 물질을 바꾸면 이 값도 바뀜(baseline 갱신).
 
 
 def qe_g(sim):

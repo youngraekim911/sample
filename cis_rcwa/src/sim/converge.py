@@ -19,7 +19,7 @@ import numpy as np
 def recommend_center_nG(span_um, feat_um):
     """수렴 목표 nG 중심 추천 — 셀 클수록·최소피처 작을수록 크게.
 
-    기준점: 2µm 셀·100nm 피처에서 nG~300 이 수렴 근처(실측 수렴 스터디 기반).
+    기준점: 2µm 셀·100nm 피처에서 nG~300 이 수렴 근처 (수렴 스터디 기반).
     nG ∝ (셀면적) × (100nm/최소피처).  범위 [151, 701] 로 캡.
     """
     base = 300.0 * (float(span_um) / 2.0) ** 2 * min(max(0.10 / float(feat_um), 0.5), 3.0)
