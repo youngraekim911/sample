@@ -31,7 +31,16 @@ CIS(CMOS 이미지센서) 구조를 위저드로 만들고 RCWA(FMM)로 파장�
 - **back_reflector**(conf `stack.si.back_reflector:{enabled,material:cu,coverage}`): Si하부 Cu가 심투과 red 되돌려 2차흡수. coverage 0~1로 red@700 조절. solid=과다.
 - **ML 초점**: 2x2렌즈는 매질(n≈1.58) 때문에 초점이 Si표면보다 ~1µm 깊음(그린 흡수구간과 일치→OK). 곡률=height/footprint.
 - **ARL top 두께**: 그린 λ/4n AR. 얇으면 그린↑ 적색↓(공유층 트레이드오프).
+- **DTI `optical`**(`stack.dti.optical`): false=DTI를 광학스택에서 뺌(전기격리만, 매끈 Si). 전depth poly DTI는 in-band 흡수(그린 ~14%)+크로스톡 왜곡 -> 상용 QE툴은 대개 광학 무시. true(기본)=기존 패턴 DTI 물리.
+- **수집효율 η(z)**(`collection:{r0,ld_um}`, Detector.collect_*): 소자 QE=광학흡수×η(z), η=1-r0·exp(-z/Ld), z=Si표면깊이. r0=0(기본)=순수광학. 단파장(얕은흡수) 표면 dead-layer 손실 모델. Si밴드 z-분해흡수로 슬라이스별 적용(추가 eig 없음). 출력 QE=수집, QE_optical=광학, QE_recomb=손실.
 - **nG(푸리에차수)**: 클수록 정확·느림(≈nG³). 이 큰 셀(2.56µm)은 nG≤250에서 ±3% 진동(미수렴). 참값은 converged 모드(다중 nG 평균) 또는 nG↑.
+
+## 타 SW 레퍼런스 정합 (qcell)
+레퍼(nG=500, 소자QE)와 <2~3% 정합의 3요소:
+1. **DTI 광학off** (그린/적색): poly DTI 광학제거 -> 그린 0.68->0.80, 적색 정합. 최대 기여.
+2. **수집효율 η(z)** (단파장 블루): r0≈0.35 ld≈0.175µm -> 블루 400~450 dead-layer 억제.
+3. **nG↑ 500** (GPU): 잔여 그린/적색 ~3% 진동 해소.
+피팅 스크립트: 깊이분해 흡수 추출(파장당1회) 후 numpy로 η 스캔. GPU에서 nG=500 재피팅 권장.
 
 ## 지금까지 개선(무엇으로 뭘)
 1. 물질 폴더화: /api/materials + 매 run 재fetch, localStorage 캐시 제거 → '옛 물질 걸림' 제거
