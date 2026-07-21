@@ -47,6 +47,11 @@ class Detector:
     exclude_mask: np.ndarray = None
     deep_is_detector: bool = True
     n_below_band: int = 0                              # 밴드 아래 비검출 층 수(후면 반사경 등)
+    # 캐리어 수집효율 η(z) (광학 QE -> 소자 QE). 광입사 Si 표면(밴드 상단)의
+    # dead-layer/표면재결합 모델: η(z) = 1 - r0·exp(-z/Ld), z=밴드상단 깊이.
+    # r0=0(기본) -> η≡1 -> 순수 광학 QE(하위호환). r0>0 -> 단파장(얕은흡수) 억제.
+    collect_r0: float = 0.0                            # 표면 재결합 계수 0~1 (η(0)=1-r0)
+    collect_ld_um: float = 0.0                         # 수집 감쇠 길이 (µm)
 
     @property
     def n_pixels(self):
@@ -149,6 +154,8 @@ class StructureIR:
                           "pixel_labels": d.pixel_labels,
                           "deep_is_detector": d.deep_is_detector,
                           "n_below_band": d.n_below_band,
+                          "collect_r0": d.collect_r0,
+                          "collect_ld_um": d.collect_ld_um,
                           "has_pixel_map": d.pixel_map is not None,
                           "has_exclude": d.exclude_mask is not None}
                          if d is not None else None),
@@ -176,6 +183,8 @@ class StructureIR:
                            pixel_labels=dm["pixel_labels"],
                            deep_is_detector=dm.get("deep_is_detector", True),
                            n_below_band=dm.get("n_below_band", 0),
+                           collect_r0=dm.get("collect_r0", 0.0),
+                           collect_ld_um=dm.get("collect_ld_um", 0.0),
                            pixel_map=z["pixel_map"] if dm["has_pixel_map"] else None,
                            exclude_mask=z["exclude_mask"] if dm["has_exclude"] else None)
         se = meta.get("substrate_eps")

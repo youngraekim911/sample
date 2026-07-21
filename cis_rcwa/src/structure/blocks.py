@@ -409,7 +409,7 @@ class BlockStack:
     """블록 조립 -> StructureIR. blocks 는 아래(Si)->위(공기) 순."""
 
     def __init__(self, blocks, ambient="air", materials=None, dispersion=None,
-                 ml_slices=8, collect_deep=False):
+                 ml_slices=8, collect_deep=False, collect_r0=0.0, collect_ld_um=0.0):
         self.blocks = blocks
         self.ambient = ambient
         self.materials = materials or {}
@@ -418,6 +418,9 @@ class BlockStack:
         #   False(기본)=밴드만(유한 광다이오드 — 적색이 기판 뚫으면 손실, 실측형 rolloff)
         #   True=밴드+심부 전체 Si 흡수 (반무한 수집 가정)
         self.collect_deep = collect_deep
+        # 캐리어 수집효율 η(z)=1-r0·exp(-z/Ld) (광학 QE -> 소자 QE). r0=0 이면 순수광학.
+        self.collect_r0 = float(collect_r0 or 0.0)
+        self.collect_ld_um = float(collect_ld_um or 0.0)
         self.ml_slices = ml_slices
 
     def _flush_dome(self, ctx):
@@ -492,7 +495,9 @@ class BlockStack:
                            pixel_map=pixidx, pixel_labels=labels,
                            exclude_mask=ctx.trench,
                            deep_is_detector=self.collect_deep,
-                           n_below_band=ctx.det_below)
+                           n_below_band=ctx.det_below,
+                           collect_r0=self.collect_r0,
+                           collect_ld_um=self.collect_ld_um)
         sub = substrate or next((b.mat for b in self.blocks
                                  if isinstance(b, SiDtiBlock)), "si")
         ir = StructureIR(
@@ -540,7 +545,9 @@ def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=8, men_slices=8, taper_slices=8
                        materials=dict(cfg.get("materials", {}) or {}),
                        dispersion=dict(cfg.get("dispersion", {}) or {}),
                        ml_slices=ml_slices,
-                       collect_deep=bool(cfg.get("collect_deep_substrate", False)))
+                       collect_deep=bool(cfg.get("collect_deep_substrate", False)),
+                       collect_r0=float((cfg.get("collection") or {}).get("r0", 0.0)),
+                       collect_ld_um=float((cfg.get("collection") or {}).get("ld_um", 0.0)))
     # 후면 반사경은 SiDtiBlock 이 '밴드 아래 패턴 층'으로 삽입 (부분 커버리지 지원).
     # substrate 는 Si 유지 -> Cu 갭 사이로 투과된 빛은 심부 Si 흡수(손실).
     return stack.to_ir(ctx)

@@ -228,32 +228,52 @@ class RCWAPlaneWaveSimulator:
         excl = det.exclude_mask if det.exclude_mask is not None else \
             np.zeros_like(pixidx, dtype=bool)
 
-        pix_abs = np.zeros(npix)
+        # 캐리어 수집효율 η(z): 광입사 Si 표면(밴드 상단)의 dead-layer 모델.
+        # r0=0(기본) -> η≡1 -> 순수 광학 QE. r0>0 -> 얕은흡수(단파장) 수집손실.
+        r0 = float(getattr(det, "collect_r0", 0.0) or 0.0)
+        ld = float(getattr(det, "collect_ld_um", 0.0) or 0.0)
+        use_coll = r0 > 0.0 and ld > 0.0
+        band_lis = list(range(M - nS - nB, M - nB))      # 밴드 층 (상단->하단)
+        zc, acc = {}, 0.0                                # 각 밴드층 중심 깊이(표면 기준)
+        for li in band_lis:
+            t = float(self.layer_stack[li][1])
+            zc[li] = acc + 0.5 * t
+            acc += t
+
+        pix_abs = np.zeros(npix)                         # 수집(collected) 흡수
         trench_abs = 0.0
-        A_band = 0.0
-        for li in range(M - nS - nB, M - nB):            # 검출 밴드 층들 (반사경 nB 제외)
+        A_band = 0.0                                     # 광학 총 밴드 흡수(에너지보존)
+        A_coll = 0.0                                     # 수집 총 밴드 흡수
+        for li in band_lis:                              # 검출 밴드 층들 (반사경 nB 제외)
             if li not in maps:
                 continue
             dens = maps[li].detach().cpu().numpy() * C
+            e = 1.0 - r0 * np.exp(-zc[li] / ld) if use_coll else 1.0
             A_band += dens.sum()
+            A_coll += dens.sum() * e
             for p in range(npix):
                 m = (pixidx == p) & (~excl)              # 픽셀 창 (제외분 제거)
-                pix_abs[p] += dens[m].sum()
+                pix_abs[p] += dens[m].sum() * e
             trench_abs += dens[excl].sum()
         if det.deep_is_detector:
-            # 심부 흡수: 밴드 바닥 투과 flux 를 픽셀 귀속 (그 깊이엔 구조 없음)
+            # 심부 흡수: 밴드 바닥 투과 flux 를 픽셀 귀속 (그 깊이엔 구조 없음).
+            # 심부는 접합 근처 -> η≈1 (수집손실 없음).
             Sz = solver.transmitted_flux_map(self.grid_ny, self.grid_nx)
             Sz = Sz.detach().cpu().numpy()
             for p in range(npix):
                 pix_abs[p] += Sz[pixidx == p].sum() / ngrid
+            A_coll += Sz.sum() / ngrid
         # 픽셀 면적 정규화 (pixel_map 분할 면적 기준 — 비정방 픽셀도 지원)
         area = np.array([max(1, (pixidx == p).sum()) for p in range(npix)]) / ngrid
         qe_pix = [float(v / a) for v, a in zip(pix_abs, area)]
         qe_lab = {L: float(np.mean([q for q, l in zip(qe_pix, labels) if l == L]))
                   for L in dict.fromkeys(labels)}
-        qe_total = float(A_band + T_deep)
+        qe_opt = float(A_band + T_deep)                  # 광학 QE (에너지보존)
+        qe_total = float(A_coll + T_deep)                # 수집(소자) QE = 레퍼런스 정의
         return {"QE": qe_total,
-                "A_stack": float(1.0 - o["R"] - qe_total),
+                "QE_optical": qe_opt,                    # 순수 광학 흡수 (수집전)
+                "A_stack": float(1.0 - o["R"] - qe_opt),  # R+QE_optical+A_stack=1 항등
+                "QE_recomb": float(qe_opt - qe_total),   # 수집손실(재결합)
                 "QE_pixels": qe_pix,
                 "QE_rgb": qe_lab,                        # 라벨별 (RGB 는 그 부분집합)
                 "QE_trench": float(trench_abs),
