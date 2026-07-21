@@ -51,23 +51,80 @@
   .dlg-h{display:flex;align-items:center;padding:12px 15px;border-bottom:1px solid var(--line);gap:8px}
   .dlg-h h3{margin:0;font-size:13px}.dlg-b{padding:14px}
   textarea{width:100%;height:340px;font-family:var(--mono);font-size:11.5px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px}
+  /* ===== 페이지 라우터 (진입→구조→시뮬선택→설정→실행→결과) ===== */
+  .wnav{display:flex;align-items:center;gap:6px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel);overflow-x:auto}
+  .wstep{display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:20px;cursor:pointer;white-space:nowrap;color:var(--ink-faint);border:1px solid transparent;font-size:12px;transition:background .15s,color .15s}
+  .wstep .wn{width:19px;height:19px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:10.5px;background:var(--panel-2);border:1px solid var(--line);flex-shrink:0}
+  .wstep.on{color:var(--ink);background:var(--panel-2);border-color:var(--accent-dim)}
+  .wstep.on .wn{background:var(--accent);color:#04211f;border-color:transparent;font-weight:700}
+  .wstep.done{color:var(--accent)}.wstep.done .wn{border-color:var(--accent-dim);color:var(--accent)}
+  .wstep.disabled{opacity:.4;cursor:not-allowed}
+  .wsep{color:var(--ink-faint);opacity:.5;font-size:11px}
+  .wpage{flex:1;min-height:0;display:none;flex-direction:column}
+  .wpage.on{display:flex}
+  .wpad{flex:1;overflow-y:auto;padding:32px;display:flex;flex-direction:column;align-items:center}
+  .wcard{width:100%;max-width:640px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px;margin-bottom:18px}
+  .wcard h2{font-size:17px;margin:0 0 4px}.wcard .sub{color:var(--ink-faint);font-size:12.5px;margin:0 0 20px}
+  .wbig{display:flex;flex-direction:column;gap:12px}
+  .wtile{display:flex;align-items:center;gap:14px;padding:17px 19px;border:1px solid var(--line);border-radius:11px;background:var(--panel-2);cursor:pointer;text-align:left;transition:border-color .15s,transform .1s}
+  .wtile:hover{border-color:var(--accent-dim);transform:translateY(-1px)}
+  .wtile .ic{font-size:24px;width:34px;text-align:center}
+  .wtile .tt{font-weight:600;font-size:14px}.wtile .td{font-size:12px;color:var(--ink-faint);margin-top:2px}
+  .wtile.soon{opacity:.5;cursor:not-allowed}.wtile.soon:hover{transform:none;border-color:var(--line)}
+  .wbadge{font-size:11px;padding:2px 9px;border-radius:20px;border:1px solid var(--line);color:var(--ink-dim)}
+  .wbadge.ok{color:var(--accent);border-color:var(--accent-dim)}
+  .wbadge.warn{color:var(--amber);border-color:var(--amber)}
+  .wfoot{display:flex;gap:9px;padding:13px 16px;border-top:1px solid var(--line);background:var(--panel);align-items:center}
+  .wgauge{height:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:7px;overflow:hidden}
+  .wgauge>div{height:100%;width:0%;background:linear-gradient(90deg,var(--accent-dim),var(--accent));transition:width .35s}
+  .wfield{display:flex;flex-direction:column;gap:4px}.wfield>span{font-size:11px;color:var(--ink-dim)}
 </style>
 
 <div class="topbar">
-  <div class="brand"><h1>CIS Structure Wizard</h1><span class="sub">step by step → 3D → npy · <span id="wizVer"></span></span></div>
+  <div class="brand"><h1>CIS Simulator</h1><span class="sub"><span id="wizVer"></span></span></div>
   <div class="spacer"></div>
-  <input id="prodName" type="text" placeholder="product name" style="width:150px">
-  <select id="viewQ" title="viewer 해상도 (npy 해상도는 step1 dxy/dz)" style="font-size:12px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px">
+  <span id="matBadge" class="wbadge warn" title="물질 폴더(data/materials) 상태">물질 확인중…</span>
+  <input id="prodName" type="text" placeholder="product name" style="width:140px">
+  <select id="viewQ" title="viewer 해상도" style="font-size:12px;background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px">
     <option value="1">뷰 보통</option><option value="2" selected>뷰 고품질</option>
   </select>
   <button class="btn ghost" id="themeBtn">◐</button>
-  <button class="btn ghost" id="matBtn">📁 Materials</button>
-  <button class="btn ghost" id="importBtn">⤒ Import</button>
-  <button class="btn ghost" id="yamlBtn">⤓ YAML</button>
-  <button class="btn primary" id="npyBtn">⤓ npy + yaml</button>
-  <button class="btn primary" id="qeBtn">▶ QE 해석</button>
 </div>
 
+<!-- 페이지 스텝퍼 -->
+<div class="wnav" id="wnav"></div>
+
+<!-- ══════════ 페이지 0: 시작 (구조 로드 + 물질 바인드) ══════════ -->
+<div class="wpage" id="wpage-start">
+  <div class="wpad">
+    <div class="wcard">
+      <h2>1 · 구조 불러오기</h2>
+      <p class="sub">저장된 구조(yaml)를 열거나 새로 시작합니다. 이후 단계에서 언제든 편집할 수 있습니다.</p>
+      <div class="wbig">
+        <button class="wtile" id="tileNew"><span class="ic">✨</span><div><div class="tt">새 구조로 시작</div><div class="td">기본 예시 구조에서 시작해 단계별로 편집</div></div></button>
+        <button class="wtile" id="tileOpen"><span class="ic">📂</span><div><div class="tt">기존 구조 파일 열기</div><div class="td">.yaml 구조 파일을 불러와 이어서 편집</div></div></button>
+      </div>
+      <p class="hint" id="startLoaded" style="margin-top:12px"></p>
+    </div>
+    <div class="wcard">
+      <h2>2 · 물질 폴더 <span class="hint" style="font-weight:400">(n,k 소스 · 필수)</span></h2>
+      <p class="sub">모든 물질의 n,k 는 폴더의 txt 에서만 옵니다(하드코딩 없음). 서버 <code>data/materials/</code> 를 자동으로 물리며, 직접 폴더를 선택해 교체할 수도 있습니다.</p>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <button class="btn" id="matBtn">📁 물질 폴더 선택</button>
+        <button class="btn ghost" id="matReload">↻ 서버 폴더 다시 물리기</button>
+        <span id="matStat" class="wbadge">-</span>
+      </div>
+      <p class="hint" id="matMiss" style="margin-top:10px;color:var(--amber)"></p>
+    </div>
+  </div>
+  <div class="wfoot">
+    <div class="spacer"></div>
+    <button class="btn primary" id="startNext">구조 편집 시작 →</button>
+  </div>
+</div>
+
+<!-- ══════════ 페이지 1: 구조 편집 (기존 위저드) ══════════ -->
+<div class="wpage" id="wpage-build">
 <div class="layout">
   <aside class="side">
     <div class="steps" id="steps"></div>
@@ -94,51 +151,99 @@
     <div class="statusbar" id="status"></div>
   </div>
 </div>
+  <div class="wfoot">
+    <button class="btn ghost" id="buildBack">← 시작</button>
+    <div class="spacer"></div>
+    <span class="hint">구조·물질 편집을 마치면</span>
+    <button class="btn primary" id="buildDone">완료 · 시뮬레이션 →</button>
+  </div>
+</div><!-- #wpage-build -->
+
+<!-- ══════════ 페이지 2: 시뮬레이션 선택 (분기점) ══════════ -->
+<div class="wpage" id="wpage-sim">
+  <div class="wpad">
+    <div class="wcard">
+      <h2>시뮬레이션 선택</h2>
+      <p class="sub">현재 구조에 적용할 해석을 고르세요. (추후 다른 시뮬레이션이 여기에 추가됩니다)</p>
+      <div class="wbig">
+        <button class="wtile" id="simQE"><span class="ic">📈</span><div><div class="tt">QE 시뮬레이션</div><div class="td">파장별 양자효율(R/G/B) · RCWA</div></div></button>
+        <button class="wtile soon"><span class="ic">🌈</span><div><div class="tt">각도·편광 응답 <span class="wbadge">예정</span></div><div class="td">입사각/편광별 응답 (준비중)</div></div></button>
+        <button class="wtile soon"><span class="ic">🔬</span><div><div class="tt">근접장 분포 <span class="wbadge">예정</span></div><div class="td">구조 내부 |E|² 필드 (준비중)</div></div></button>
+      </div>
+    </div>
+  </div>
+  <div class="wfoot"><button class="btn ghost" id="simBack">← 구조</button><div class="spacer"></div></div>
+</div>
+
+<!-- ══════════ 페이지 3: QE 설정 + Run ══════════ -->
+<div class="wpage" id="wpage-set">
+  <div class="wpad">
+    <div class="wcard" style="max-width:780px">
+      <h2>QE 시뮬레이션 설정</h2>
+      <p class="sub">파장 범위·품질을 정하고 실행합니다. 실행 시 물질~구조를 다시 물려 현재 편집 상태가 반영됩니다.</p>
+      <div id="qeGuide" class="hint" style="display:none;white-space:pre-wrap;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px"></div>
+      <div id="qeCtl" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 시작 (µm)<input id="qeL0" type="number" step="0.01" value="0.40" style="width:76px"></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 끝 (µm)<input id="qeL1" type="number" step="0.01" value="0.70" style="width:76px"></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px">파장 수<input id="qeN" type="number" step="1" min="1" value="7" style="width:60px"></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조에서 정확도/속도 자동 산정 — 세부는 [고급]">품질
+          <select id="qeQual" style="width:170px"><option value="fast">빠름 (미리보기)</option><option value="std" selected>표준 (추천)</option><option value="high">정밀 (수렴 지향)</option><option value="converged">수렴 (참값·재현, 느림)</option><option value="manual">수동 (고급)</option></select></label>
+        <details id="qeAdv" style="display:none"><summary class="hint">고급</summary>
+          <div style="display:flex;gap:10px;align-items:flex-end;padding-top:6px">
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="Fourier 차수 — 클수록 정확·느림(≈세제곱). 홀수 입력, 짝수는 자동 보정">nG<input id="qeNG" type="number" step="2" min="9" max="1001" value="101" list="qeNGlist" style="width:80px">
+            <datalist id="qeNGlist"><option value="61"><option value="101"><option value="145"><option value="201"><option value="257"><option value="301"></datalist></label>
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조 격자 다운샘플 (클수록 빠르고 거침)">downsample<input id="qeDS" type="number" step="1" min="1" value="2" style="width:60px"></label>
+          </div></details>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px">입사각 θ(°)<input id="qeTH" type="number" step="1" value="0" style="width:56px"></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="비편광 표준=TE/TM 평균 · 합산=참조 호환(값 2배)">편광
+          <select id="qePol" style="font-size:12px"><option value="avg" selected>평균(비편광)</option><option value="sum">합산(참조호환)</option></select></label>
+      </div>
+      <div id="qeDiagOut" style="display:none;font:11px/1.6 var(--mono);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:300px;overflow:auto;white-space:pre-wrap;margin-top:12px"></div>
+      <div style="display:flex;gap:9px;margin-top:18px">
+        <button class="btn primary" id="qeRun">▶ Run</button>
+        <button class="btn" id="qeDiag" title="QE가 0 등 이상할 때: 물질 n,k 점검 + 경계 투과 프로파일">🔍 진단</button>
+      </div>
+    </div>
+  </div>
+  <div class="wfoot"><button class="btn ghost" id="setBack">← 시뮬 선택</button><div class="spacer"></div></div>
+</div>
+
+<!-- ══════════ 페이지 4: 실행중 (로딩 게이지) ══════════ -->
+<div class="wpage" id="wpage-run">
+  <div class="wpad">
+    <div class="wcard" style="text-align:center;max-width:560px">
+      <h2>시뮬레이션 실행중…</h2>
+      <p class="sub" id="runSub">RCWA 계산이 진행 중입니다.</p>
+      <div class="wgauge" style="margin:20px 0 10px"><div id="qeProg"></div></div>
+      <div class="hint" id="qeNote" style="min-height:18px">-</div>
+      <div style="margin-top:18px"><button class="btn" id="qeStop">■ 중단</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 페이지 5: 결과 ══════════ -->
+<div class="wpage" id="wpage-result">
+  <div class="wpad">
+    <div class="wcard" style="max-width:920px">
+      <h2>QE 결과</h2>
+      <div id="qeLegend" style="display:flex;gap:16px;font-size:12px;align-items:center;margin-bottom:8px"></div>
+      <div style="position:relative">
+        <canvas id="qeChart" width="820" height="340" style="width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel)"></canvas>
+        <div id="qeTip" style="position:absolute;display:none;pointer-events:none;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:11px;line-height:1.5;z-index:3"></div>
+      </div>
+      <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">결과 표 (표로 보기)</summary>
+        <div id="qeTable" style="max-height:220px;overflow:auto;font:11px/1.7 var(--mono);margin-top:6px"></div></details>
+      <div style="margin-top:14px"><button class="btn ghost" id="qeCsv" disabled>⤓ CSV</button></div>
+    </div>
+  </div>
+  <div class="wfoot"><button class="btn ghost" id="resultBack">← 설정</button><div class="spacer"></div><button class="btn primary" id="resultRerun">↻ 다시 실행</button></div>
+</div>
 
 <input type="file" id="matFolder" webkitdirectory directory multiple style="display:none">
+<input type="file" id="openFile" accept=".yaml,.yml,.json" style="display:none">
 <dialog id="dlg"><div class="dlg-h"><h3 id="dlgTitle">YAML</h3><div class="spacer"></div>
   <button class="btn ghost" id="dlgCopy">Copy</button><button class="btn ghost" id="dlgClose">Close</button></div>
   <div class="dlg-b"><p class="hint" id="dlgHint" style="margin:0 0 9px"></p><textarea id="dlgText" spellcheck="false"></textarea></div></dialog>
-
-<!-- ===== QE 해석 패널: structure(현재 위저드 상태) -> RCWA 서버 -> QE 스펙트럼 ===== -->
-<dialog id="qeDlg" style="width:min(880px,95vw)">
-  <div class="dlg-h"><h3>▶ QE 해석 · structure → RCWA → QE</h3><div class="spacer"></div>
-    <button class="btn ghost" id="qeCsv" disabled>⤓ CSV</button>
-    <button class="btn ghost" id="qeClose">Close</button></div>
-  <div class="dlg-b" style="display:flex;flex-direction:column;gap:10px">
-    <div id="qeGuide" class="hint" style="display:none;white-space:pre-wrap;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px"></div>
-    <div id="qeCtl" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-      <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 시작 (µm)<input id="qeL0" type="number" step="0.01" value="0.40" style="width:76px"></label>
-      <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 끝 (µm)<input id="qeL1" type="number" step="0.01" value="0.70" style="width:76px"></label>
-      <label class="hint" style="display:flex;flex-direction:column;gap:3px">파장 수<input id="qeN" type="number" step="1" min="1" value="7" style="width:60px"></label>
-      <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조(pitch·최소 피처·셀 크기)에서 정확도/속도를 자동 산정 — 세부는 [고급]">품질
-        <select id="qeQual" style="width:150px"><option value="fast">빠름 (미리보기)</option><option value="std" selected>표준 (추천)</option><option value="high">정밀 (수렴 지향)</option><option value="converged">수렴 (참값·재현, 느림)</option><option value="manual">수동 (고급)</option></select></label>
-      <details id="qeAdv" style="display:none"><summary class="hint">고급</summary>
-        <div style="display:flex;gap:10px;align-items:flex-end;padding-top:6px">
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="Fourier 차수 — 빛을 몇 개의 회절 성분으로 전개할지. 클수록 정확·느림(≈세제곱). 임의 홀수 입력(9~601 권장), 짝수는 자동 보정">nG<input id="qeNG" type="number" step="2" min="9" max="1001" value="101" list="qeNGlist" style="width:80px">
-          <datalist id="qeNGlist"><option value="61"><option value="101"><option value="145"><option value="201"><option value="257"><option value="301"></datalist></label>
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조 격자 다운샘플 (클수록 빠르고 거침)">downsample<input id="qeDS" type="number" step="1" min="1" value="2" style="width:60px"></label>
-        </div></details>
-      <label class="hint" style="display:flex;flex-direction:column;gap:3px">입사각 θ(°)<input id="qeTH" type="number" step="1" value="0" style="width:56px"></label>
-      <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="비편광 표준=TE/TM 평균 · 합산=참조 도구 호환(값 2배, 합=2)">편광
-        <select id="qePol" style="font-size:12px"><option value="avg" selected>평균(비편광)</option><option value="sum">합산(참조호환)</option></select></label>
-      <button class="btn primary" id="qeRun">▶ Run</button>
-      <button class="btn" id="qeStop" disabled>■ Stop</button>
-      <button class="btn" id="qeDiag" title="QE가 0 등 이상할 때: 물질 n,k 점검 + air→…→Si 경계 투과 프로파일">🔍 진단</button>
-    </div>
-    <div id="qeDiagOut" style="display:none;font:11px/1.6 var(--mono);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:300px;overflow:auto;white-space:pre-wrap"></div>
-    <div style="height:8px;background:var(--panel-2);border:1px solid var(--line);border-radius:5px;overflow:hidden">
-      <div id="qeProg" style="height:100%;width:0%;background:var(--accent);transition:width .3s"></div></div>
-    <div class="hint" id="qeNote">-</div>
-    <div id="qeLegend" style="display:flex;gap:16px;font-size:12px;align-items:center"></div>
-    <div style="position:relative">
-      <canvas id="qeChart" width="820" height="340" style="width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel)"></canvas>
-      <div id="qeTip" style="position:absolute;display:none;pointer-events:none;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:11px;line-height:1.5;z-index:3"></div>
-    </div>
-    <details><summary class="hint" style="cursor:pointer">결과 표 (표로 보기)</summary>
-      <div id="qeTable" style="max-height:200px;overflow:auto;font:11px/1.7 var(--mono);margin-top:6px"></div></details>
-  </div>
-</dialog>
 
 <script>
 "use strict";
@@ -847,7 +952,7 @@ function renderStep(){ buildSteps(); const b=el("stepBody"); b.innerHTML=""; con
 
 // ============================ 이벤트 ============================
 el("backBtn").onclick=()=>{ if(curStep>0){curStep--; renderStep();} };
-el("nextBtn").onclick=()=>{ if(curStep<STEPS.length-1){curStep++; renderStep();} else el("npyBtn").click(); };
+el("nextBtn").onclick=()=>{ if(curStep<STEPS.length-1){curStep++; renderStep();} else goPage("wpage-sim"); };
 // 3D 인터랙션
 (function(){ const cv=el("iso3d"); let drag=null;
   cv.addEventListener("pointerdown",e=>{ drag={x:e.clientX,y:e.clientY}; cv.setPointerCapture(e.pointerId); });
@@ -869,6 +974,7 @@ el("matFolder").onchange=async e=>{ const before=Object.keys(S.materials).length
   const added=Object.keys(S.materials).length-before;
   const miss=missingMats();
   save(); e.target.value=""; renderStep(); renderViews();
+  if(typeof updateMatBadge==="function")updateMatBadge();
   alert(n+" 물질 n,k 로드됨"+(added>0?` · 새 물질 ${added}종 추가`:"")
         +(miss.length?`\n⚠ 아직 폴더에 없는 물질: ${miss.join(", ")} (이 물질은 계산 거부됨)`:"\n모든 참조 물질이 폴더에서 셋업됨 ✅")
         +"\n(·λ = 파장 테이블 연동, 실제 계산에 사용)"); };
@@ -952,7 +1058,7 @@ function structYAML(){ const exp=structuredClone(S); const disp={};
   // 수집효율: enabled=false 면 yaml 에서 제거 -> 서버는 광학 QE (η≡1)
   return "# CIS structure · product: "+(S.product||"")+"\n# n,k 우선순위: dispersion(브라우저 import 테이블) > materials 폴더 > 아래 상수(λ="+refLambda+"µm)\n"+toYAML(exp); }
 function download(name,text,type){ const blob=new Blob([text],{type:type||"text/yaml"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
-el("yamlBtn").onclick=async()=>{ const text=structYAML();
+if(el("yamlBtn"))el("yamlBtn").onclick=async()=>{ const text=structYAML();
   if(window.showSaveFilePicker){ // 저장 경로 선택 (취소=중단)
     try{ const fh=await window.showSaveFilePicker({suggestedName:pname()+".yaml",
            types:[{description:"YAML",accept:{"text/yaml":[".yaml",".yml"]}}]});
@@ -961,9 +1067,11 @@ el("yamlBtn").onclick=async()=>{ const text=structYAML();
   else download(pname()+".yaml",text);
   el("dlgTitle").textContent="Export · "+pname()+".yaml"; el("dlgHint").textContent="구조 YAML 저장됨. Import 로 다시 불러올 수 있음."; el("dlgText").value=text; dlg.showModal(); };
 // YAML import
-el("importBtn").onclick=()=>el("yamlFile").click();
+if(el("importBtn"))el("importBtn").onclick=()=>el("yamlFile").click();
 const yamlFileIn=h("input",{type:"file",id:"yamlFile",accept:".yaml,.yml",style:"display:none"}); document.body.appendChild(yamlFileIn);
-yamlFileIn.onchange=async e=>{ const f=e.target.files[0]; if(!f)return; try{ loadStruct(parseYAML(await f.text())); alert("구조 불러옴: "+(S.product||f.name)); }catch(err){alert("YAML 오류: "+err.message);} e.target.value=""; };
+yamlFileIn.onchange=async e=>{ const f=e.target.files[0]; if(!f)return;
+  try{ loadStruct(parseYAML(await f.text())); await fetchServerMaterials(); if(el("startLoaded"))el("startLoaded").textContent="✓ 불러옴: "+(S.product||f.name); if(typeof updateMatBadge==="function")updateMatBadge(); renderStep(); renderViews(); }
+  catch(err){alert("YAML 오류: "+err.message);} e.target.value=""; };
 el("dlgCopy").onclick=async()=>{ const t=el("dlgText"); t.select(); try{await navigator.clipboard.writeText(t.value);}catch(e){document.execCommand("copy");} };
 el("dlgClose").onclick=()=>dlg.close();
 function metaJSON(v){ const nm=pname(); return JSON.stringify({product:S.product,shape_zyx:v.shape,
@@ -976,7 +1084,7 @@ function metaJSON(v){ const nm=pname(); return JSON.stringify({product:S.product
   materials:v.names.map((n,i)=>({id:i,name:n,color:matColor(n),...matNK(n)}))},null,2); }
 async function writeFileTo(dir,name,data){ const fh=await dir.getFileHandle(name,{create:true});
   const w=await fh.createWritable(); await w.write(data); await w.close(); }
-el("npyBtn").onclick=async()=>{ const btn=el("npyBtn"), t0=btn.textContent;
+if(el("npyBtn"))el("npyBtn").onclick=async()=>{ const btn=el("npyBtn"), t0=btn.textContent;
   const span=P()*NP(), nx=Math.round(span/S.grid.dxy_um), nz=Math.round(totalH()/S.grid.dz_um);
   const bytes=nx*nx*nz, big=!isFinite(bytes)||bytes>4.0e9, nm=pname();
   // 저장 폴더 선택 (Chrome/Edge): 클릭 제스처 안에서 '가장 먼저' 호출해야 함
@@ -1076,22 +1184,23 @@ function linkFolderMaterials(){
       S.materials[nm].k=+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4); }
     else { delete S.materials[nm].n; delete S.materials[nm].k; } }   // 폴더 없으면 상수 없음(누락)
 }
-el("qeBtn").onclick=async()=>{ qeDlg.showModal(); drawQEChart();
+// 설정 페이지 진입 시 서버 연결 확인 + 안내
+async function qeEnterSettings(){
   const g=el("qeGuide"), p=await qePing();
-  if(p){ g.style.display="none"; el("qeNote").textContent=`서버 연결됨 (device=${p.device}). 구조는 현재 위저드 상태가 그대로 사용됩니다.`; el("qeRun").disabled=false; }
+  if(p){ g.style.display="none"; el("qeRun").disabled=false; }
   else{ g.style.display="block"; el("qeRun").disabled=true;
-    g.textContent="RCWA 서버가 꺼져 있습니다. 터미널에서 아래 한 줄을 실행하면 이 화면이 서버 모드로 열립니다:\n\n"+
-      "  cd cis_rcwa && python3 app.py\n\n(pip install torch numpy pyyaml · GPU 있으면 자동 사용 · 그 뒤 이 버튼을 다시 누르세요)";
-    el("qeNote").textContent="서버 미연결"; } };
-el("qeClose").onclick=()=>{ qeDlg.close(); };
+    g.textContent="RCWA 서버가 꺼져 있습니다. 터미널에서 아래 한 줄을 실행하면 서버 모드로 동작합니다:\n\n"+
+      "  cd cis_rcwa && python app.py\n\n(pip install torch numpy pyyaml · GPU 있으면 자동 사용)"; }
+}
 el("qeQual").onchange=()=>{ const m=el("qeQual").value==="manual";
   el("qeAdv").style.display = m?"block":"none"; el("qeAdv").open = m; };
 el("qeStop").onclick=async()=>{ if(QE.job) try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
+let QE_T0=0;
 el("qeRun").onclick=async()=>{ if(QE.running)return;
-  await fetchServerMaterials();                 // run 직전 물질 폴더 새로 반영 (구조도 structYAML 로 최신)
+  el("qeRun").disabled=true;
+  await fetchServerMaterials();                 // run 직전 물질 폴더 새로 반영 (구조도 structYAML 로 최신 재바인드)
   const miss=missingMats();                     // 폴더에 없는 물질이 있으면 계산 거부
-  if(miss.length){ el("qeNote").textContent="❌ 물질 폴더에 없는 물질: "+miss.join(", ")
-      +" — 📁 Materials 로 폴더를 선택해 셋업하세요."; return; }
+  if(miss.length){ alert("❌ 물질 폴더에 없는 물질: "+miss.join(", ")+"\n📁 물질 폴더를 선택해 셋업하세요."); el("qeRun").disabled=false; return; }
   const body={ yaml:structYAML(), lam0:+el("qeL0").value, lam1:+el("qeL1").value,
     n:+el("qeN").value,
     nG:(el("qeQual").value==="manual"? (2*Math.floor((Math.max(9,+el("qeNG").value||101))/2)+1) : "auto"),  // 홀수 보정
@@ -1099,18 +1208,24 @@ el("qeRun").onclick=async()=>{ if(QE.running)return;
     downsample:(el("qeQual").value==="manual"? +el("qeDS").value : "auto"), theta:+el("qeTH").value,
     pol:el("qePol")?el("qePol").value:"avg" };
   let r; try{ r=await(await fetch(qeApiBase()+"/api/qe",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
-  catch(e){ el("qeNote").textContent="요청 실패: "+e.message; return; }
-  if(!r.job){ el("qeNote").textContent="오류: "+(r.error||"?"); return; }
-  QE.job=r.job; QE.rows=[]; QE.running=true;
-  el("qeRun").disabled=true; el("qeStop").disabled=false; el("qeCsv").disabled=true;
+  catch(e){ alert("요청 실패: "+e.message); el("qeRun").disabled=false; return; }
+  if(!r.job){ alert("오류: "+(r.error||"?")); el("qeRun").disabled=false; return; }
+  QE.job=r.job; QE.rows=[]; QE.running=true; QE_T0=performance.now();
+  el("qeProg").style.width="0%"; el("qeNote").textContent="시작중…"; el("runSub").textContent="RCWA 계산이 진행 중입니다.";
+  goPage("wpage-run");
   QE.timer=setInterval(qePoll,700); };
 async function qePoll(){ let s; try{ s=await(await fetch(qeApiBase()+"/api/qe/status?job="+QE.job)).json(); }catch(e){ return; }
   QE.rows=s.rows||QE.rows;
-  el("qeProg").style.width=Math.round((s.progress||0)*100)+"%";
-  el("qeNote").textContent=(s.nG_auto?("["+s.nG_auto+"]  "):"")+(s.state==="running"?"":"["+s.state+"] ")+(s.error||s.note||"");
+  const pct=Math.round((s.progress||0)*100), el_s=(performance.now()-QE_T0)/1000;
+  el("qeProg").style.width=pct+"%";
+  const eta=(s.progress>0.02? `  ·  경과 ${el_s.toFixed(0)}s / 예상 ${(el_s/s.progress).toFixed(0)}s`:`  ·  경과 ${el_s.toFixed(0)}s`);
+  el("qeNote").textContent=(s.nG_auto?("["+s.nG_auto+"]  "):"")+(s.error||s.note||"")+(s.state==="running"?eta:"");
   drawQEChart(); qeTableFill();
-  if(s.state!=="running"){ clearInterval(QE.timer); QE.running=false;
-    el("qeRun").disabled=false; el("qeStop").disabled=true; el("qeCsv").disabled=QE.rows.length===0; } }
+  if(s.state!=="running"){ clearInterval(QE.timer); QE.running=false; el("qeRun").disabled=false;
+    el("qeCsv").disabled=QE.rows.length===0;
+    if(s.state==="error"){ alert("계산 오류:\n"+(s.error||"?")); goPage("wpage-set"); }
+    else if(s.state==="cancelled"){ goPage("wpage-set"); }
+    else { goPage("wpage-result"); drawQEChart(); qeTableFill(); } } }
 el("qeDiag").onclick=async()=>{ const btn=el("qeDiag"),out=el("qeDiagOut");
   out.style.display="block"; out.textContent="진단 계산중... (단일 λ, 수 초)"; btn.disabled=true;
   await fetchServerMaterials();                 // 진단도 run 직전 물질 폴더 새로 반영
@@ -1218,10 +1333,68 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
     `QE전체 ${r[2].toFixed(3)} · R(반사) ${r[1].toFixed(3)}<br>A ${r[3].toFixed(3)} · 합 ${(r[1]+r[2]+r[3]).toFixed(3)}`; });
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 
+// ============================ 페이지 라우터 ============================
+const PAGES=[
+  {id:"wpage-start",  label:"시작", n:"0"},
+  {id:"wpage-build",  label:"구조", n:"1"},
+  {id:"wpage-sim",    label:"시뮬", n:"2"},
+  {id:"wpage-set",    label:"설정", n:"3"},
+  {id:"wpage-run",    label:"실행", n:"4"},
+  {id:"wpage-result", label:"결과", n:"5"},
+];
+let curPage="wpage-start"; const pageReached={"wpage-start":true};
+function pageIdx(id){ return PAGES.findIndex(p=>p.id===id); }
+function goPage(id){
+  curPage=id; pageReached[id]=true;
+  for(const p of PAGES){ const e=el(p.id); if(e)e.classList.toggle("on", p.id===id); }
+  if(id==="wpage-set") qeEnterSettings();
+  if(id==="wpage-build"){ renderStep(); renderViews(); }
+  if(id==="wpage-result"){ drawQEChart(); qeTableFill(); }
+  renderNav(); window.scrollTo(0,0);
+}
+function renderNav(){
+  const nav=el("wnav"); if(!nav)return; nav.innerHTML=""; const ci=pageIdx(curPage);
+  PAGES.forEach((p,i)=>{
+    if(i>0) nav.appendChild(h("span",{class:"wsep"},["›"]));
+    const reached=!!pageReached[p.id];
+    const chip=h("div",{class:"wstep"+(p.id===curPage?" on":(reached&&i<ci?" done":""))+(reached?"":" disabled")},
+      [h("span",{class:"wn"},[p.n]), p.label]);
+    if(reached) chip.onclick=()=>goPage(p.id);
+    nav.appendChild(chip);
+  });
+}
+// 물질 상태 배지 갱신 (상단 + 시작페이지)
+function updateMatBadge(){
+  const miss=missingMats(), n=Object.keys(folderLib).length;
+  const b=el("matBadge"), st=el("matStat"), mm=el("matMiss");
+  const set=(cls,txt)=>{ if(b){b.className="wbadge "+cls; b.textContent=txt;} };
+  if(n===0){ set("warn","물질 미로드"); if(st){st.className="wbadge warn";st.textContent="폴더 미연결";}
+    if(mm)mm.textContent="서버가 꺼져있거나 폴더가 비었습니다. python app.py 로 서버를 켜거나 📁 로 폴더를 선택하세요."; }
+  else if(miss.length){ set("warn",`물질 ${miss.length}개 누락`); if(st){st.className="wbadge warn";st.textContent=`${n}종 로드 · ${miss.length}개 누락`;}
+    if(mm)mm.textContent="폴더에 없는 물질: "+miss.join(", "); }
+  else { set("ok",`물질 ${n}종 ✓`); if(st){st.className="wbadge ok";st.textContent=`${n}종 로드 · 누락 없음`;} if(mm)mm.textContent=""; }
+  if(el("startNext")) el("startNext").disabled=(n===0);
+}
+// 페이지 버튼 배선
+el("tileNew").onclick=()=>{ if(confirm("새 구조로 시작할까요? 현재 편집 내용은 기본값으로 초기화됩니다.")){
+  localStorage.removeItem("cis_wizard_v3"); S=structuredClone(DEFAULT);
+  fetchServerMaterials().then(()=>{ el("startLoaded").textContent="✓ 새 기본 구조로 시작"; updateMatBadge(); renderStep(); renderViews(); }); } };
+el("tileOpen").onclick=()=>el("yamlFile").click();
+el("startNext").onclick=()=>goPage("wpage-build");
+el("matReload").onclick=async()=>{ const n=await fetchServerMaterials(); save(); updateMatBadge(); renderStep();
+  alert(n?`서버 폴더에서 ${n}종 물질을 다시 물렸습니다.`:"서버 폴더를 못 읽었습니다 (python app.py 실행 확인)."); };
+el("buildBack").onclick=()=>goPage("wpage-start");
+el("buildDone").onclick=()=>goPage("wpage-sim");
+el("simBack").onclick=()=>goPage("wpage-build");
+el("simQE").onclick=()=>goPage("wpage-set");
+el("setBack").onclick=()=>goPage("wpage-sim");
+el("resultBack").onclick=()=>goPage("wpage-set");
+el("resultRerun").onclick=()=>goPage("wpage-set");
+
 // ============================ init ============================
-const WIZ_VERSION="v72";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v73";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
-renderStep();
+renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)
-fetchServerMaterials().then(n=>{ if(n){ save(); renderStep(); renderViews(); } });
+fetchServerMaterials().then(n=>{ if(n){ save(); renderStep(); renderViews(); } updateMatBadge(); });
 </script>
