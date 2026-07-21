@@ -395,7 +395,7 @@ class BlockStack:
     """블록 조립 -> StructureIR. blocks 는 아래(Si)->위(공기) 순."""
 
     def __init__(self, blocks, ambient="air", materials=None, dispersion=None,
-                 ml_slices=16, collect_deep=False):
+                 ml_slices=8, collect_deep=False):
         self.blocks = blocks
         self.ambient = ambient
         self.materials = materials or {}
@@ -515,7 +515,7 @@ def blocks_from_wizard_cfg(cfg, men_slices=8, taper_slices=8):
     return blocks
 
 
-def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=16, men_slices=8, taper_slices=8):
+def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=8, men_slices=8, taper_slices=8):
     """yaml v3 -> (블록 조립) -> IR."""
     g = cfg["grid"]
     ctx = BlockContext(pitch_um=g["pixel_pitch_um"], n_pixels=g["n_pixels"],

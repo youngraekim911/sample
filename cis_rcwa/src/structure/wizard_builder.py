@@ -96,7 +96,7 @@ class WizardBuilder:
         self.__dict__.pop("_trench", None)
         return self
 
-    def rcwa_layers(self, ml_slices=16, men_slices=8, taper_slices=8):
+    def rcwa_layers(self, ml_slices=8, men_slices=8, taper_slices=8):
         """해석적 z-경계의 RCWA 층 리스트 — z 복셀화 없음 (적응 mesh).
 
         각 물리 층(BARL Å 단위, grid stack, 20nm 코팅 cap, Si 밴드)의 두께를
@@ -220,7 +220,7 @@ class WizardBuilder:
         return list(reversed(layers)), si_n
 
     # ----------------------------------------------------- IR (구조/RCWA 계약)
-    def to_ir(self, lateral_n=None, ml_slices=16, men_slices=8, taper_slices=8):
+    def to_ir(self, lateral_n=None, ml_slices=8, men_slices=8, taper_slices=8):
         """위저드 구조 -> StructureIR — 블록 조립(src/structure/blocks.py)에 위임.
 
         위저드 yaml 은 6개 블록(SiDti/Barl/GridCf/Planar/Ml/Coat) 조립의 한

@@ -138,9 +138,19 @@ class RCWASolver:
             V = -(self._homogeneous_Q(er) @ torch.diag(1.0 / lam))
             return W, V, lam
 
+        OM2, Q = self._patterned_OM2_Q(data)
+        lam2, W = eig(OM2)
+        lam = sqrt_decaying(lam2)               # Re(lam)>=0, X=exp(-lam k0 L) 안정
+        # V 부호: gap/영역(lam=1j*Kz)과 분기 반대 -> 정합 위해 음부호
+        V = -(Q @ W @ torch.diag(1.0 / lam))
+        return W, V, lam
+
+    def _patterned_OM2_Q(self, data):
+        """패턴층의 OM2=P@Q 와 Q 를 만든다 (eig 입력). eig 는 층 독립이라 solve()
+        에서 여러 층 OM2 를 배치로 묶어 한 번에 분해(GPU 병렬)할 때 재사용."""
+        Kx, Ky, I = self.Kx, self.Ky, self.I
         if getattr(self, "fff", False):
             # Li 인수분해(FFF): Q 의 eps·Ey 항엔 y-inverse, eps·Ex 항엔 x-inverse
-            # (Q@[ex;ey]: row1 의 ER 은 ey 에, row2 의 ER 은 ex 에 곱해짐)
             ER, EX, EY = fft_funs.conv_matrix_fff(data, self.m, self.n)
             ERinv = torch.linalg.inv(ER)
             E_ey, E_ex = EY, EX
@@ -154,12 +164,27 @@ class RCWASolver:
         Q = torch.cat([
             torch.cat([Kx @ Ky,        E_ey - Kx @ Kx], dim=1),
             torch.cat([Ky @ Ky - E_ex, -Ky @ Kx],       dim=1)], dim=0)
-        OM2 = P @ Q
-        lam2, W = eig(OM2)
-        lam = sqrt_decaying(lam2)               # Re(lam)>=0, X=exp(-lam k0 L) 안정
-        # V 부호: gap/영역(lam=1j*Kz)과 분기 반대 -> 정합 위해 음부호
-        V = -(Q @ W @ torch.diag(1.0 / lam))
-        return W, V, lam
+        return P @ Q, Q
+
+    def _all_layer_modes(self):
+        """전 층의 (W,V,lam) 를 계산. **patterned 층 eig 는 배치로 묶어 한 번에**
+        분해 -> GPU 가 층들을 병렬 처리(순차 eig N회 -> 배치 eig 1회). uniform 층은
+        해석식(즉시). S-matrix 사슬(순차)과 분리해 독립적인 eig 만 병렬화한다."""
+        modes = [None] * len(self.layers)
+        om2_list, q_list, idx_list = [], [], []
+        for i, (kind, data, th) in enumerate(self.layers):
+            if kind == "uniform":
+                modes[i] = self._layer_modes("uniform", data)
+            else:
+                om2, Q = self._patterned_OM2_Q(data)
+                om2_list.append(om2); q_list.append(Q); idx_list.append(i)
+        if om2_list:
+            lam2b, Wb = eig(torch.stack(om2_list))       # 배치 eig [P,2N,2N]
+            for j, i in enumerate(idx_list):
+                lam = sqrt_decaying(lam2b[j])
+                V = -(q_list[j] @ Wb[j] @ torch.diag(1.0 / lam))
+                modes[i] = (Wb[j], V, lam)
+        return modes
 
     def _layer_smatrix(self, W, V, lam, thickness):
         """gap 기준 층 S-matrix (2N block). A = Wᵢ⁻¹W₀ + Vᵢ⁻¹V₀.
@@ -235,8 +260,8 @@ class RCWASolver:
         self._layerS = []
         self.n_regularized = 0
         S = Sref
-        for kind, data, th in self.layers:
-            W, V, lam = self._layer_modes(kind, data)
+        all_modes = self._all_layer_modes()         # patterned eig 배치(GPU 병렬) 후 순차 조립
+        for (kind, data, th), (W, V, lam) in zip(self.layers, all_modes):
             SL = self._layer_smatrix(W, V, lam, th)
             # 준-균일(quasi-uniform) 패턴층 가드: 소수 픽셀만 다른 층은 OM2 고유값이
             # near-degenerate -> 고유벡터 행렬 병적 조건수 -> S 폭발.
