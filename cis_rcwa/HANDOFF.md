@@ -42,6 +42,18 @@ CIS(CMOS 이미지센서) 구조를 위저드로 만들고 RCWA(FMM)로 파장�
 3. **nG↑ 500** (GPU): 잔여 그린/적색 ~3% 진동 해소.
 피팅 스크립트: 깊이분해 흡수 추출(파장당1회) 후 numpy로 η 스캔. GPU에서 nG=500 재피팅 권장.
 
+### DTI optical off 의 유효범위 (중요)
+- `optical:false` 는 **수직입사(θ=0) 이상화** 임. ref(그린 0.786)는 매끈 Si 광학으로만 재현되고,
+  실제 DTI 구조(poly/oxide/ONO 무엇이든)를 광학에 넣으면 그린<ref (poly흡수+서브파장 회절).
+  즉 **ref = 수직·DTI광학무시 모델**. ref 재현엔 optical:false, 실제 소자 예측엔 optical:true.
+- **빗각(CRA)**: θ↑ 하면 빛이 DTI 벽을 가로질러 DTI가 광학적으로 작동 -> optical:false 깨짐.
+  각도 스윕(θ=0/12/24° @525): off는 ~12°까지 안정(G0.80) 24°서 저하(0.71)+크로스톡↑(순수 기하누설);
+  on(poly)은 전각도 G낮음+크로스톡 더 큼(poly 도파). 각도 QE 는 `run(theta_deg,phi_deg)`(deg).
+- **TIR 격리**: Si(4.2)/oxide(1.46) 임계각~20°지만 DTI폭 0.085µm≪λ 라 기하 TIR 불성립
+  (얇은 저굴절 슬롯=회절/터널). 라이너 두껍게(δ~30nm↑) 또는 DTI를 λ급 확대해야 TIR 격리 작동.
+- **ONO(oxide/nitride/oxide) 라이너**: 단일 oxide 대비 그린 +0.02·크로스톡 -0.02 (graded-index로
+  약간 개선) — 2차 효과, ref 갭은 못 메움. 다층 라이너는 dti.liners=[{material,thickness_um},..] 로 지원.
+
 ## 지금까지 개선(무엇으로 뭘)
 1. 물질 폴더화: /api/materials + 매 run 재fetch, localStorage 캐시 제거 → '옛 물질 걸림' 제거
 2. CF k 실제화 → 그린 청색누설 39~54%→6~12%, blue 피크 470
