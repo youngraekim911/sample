@@ -215,7 +215,6 @@ class RCWAPlaneWaveSimulator:
         (광학/내부 QE = Si 흡수율. 캐리어 수집효율은 별도 물리, 여기선 미포함.)
         """
         det = self.ir.detector
-        maps, C = solver.absorption_maps(self.grid_ny, self.grid_nx)
         M = len(self.layer_stack)
         nS = self.n_si_layers
         nB = self.n_below_band                           # 반사경 등 밴드 아래 층 (검출 제외)
@@ -230,31 +229,36 @@ class RCWAPlaneWaveSimulator:
 
         # 캐리어 수집효율 η(z): 광입사 Si 표면(밴드 상단)의 dead-layer 모델.
         # r0=0(기본) -> η≡1 -> 순수 광학 QE. r0>0 -> 얕은흡수(단파장) 수집손실.
+        # 밴드층은 z-분해 흡수(층 내부 슬라이스)로 절대깊이별 η 적용 — 추가 eig 없음.
         r0 = float(getattr(det, "collect_r0", 0.0) or 0.0)
         ld = float(getattr(det, "collect_ld_um", 0.0) or 0.0)
         use_coll = r0 > 0.0 and ld > 0.0
         band_lis = list(range(M - nS - nB, M - nB))      # 밴드 층 (상단->하단)
-        zc, acc = {}, 0.0                                # 각 밴드층 중심 깊이(표면 기준)
+        z_off, acc = {}, 0.0                             # 각 밴드층 상단의 절대깊이(Si표면=0)
         for li in band_lis:
-            t = float(self.layer_stack[li][1])
-            zc[li] = acc + 0.5 * t
-            acc += t
+            z_off[li] = acc
+            acc += float(self.layer_stack[li][1])
+        zres, C = solver.absorption_maps_zresolved(self.grid_ny, self.grid_nx, band_lis)
+        pmask = [(pixidx == p) & (~excl) for p in range(npix)]
 
         pix_abs = np.zeros(npix)                         # 수집(collected) 흡수
         trench_abs = 0.0
         A_band = 0.0                                     # 광학 총 밴드 흡수(에너지보존)
         A_coll = 0.0                                     # 수집 총 밴드 흡수
         for li in band_lis:                              # 검출 밴드 층들 (반사경 nB 제외)
-            if li not in maps:
+            if li not in zres:
                 continue
-            dens = maps[li].detach().cpu().numpy() * C
-            e = 1.0 - r0 * np.exp(-zc[li] / ld) if use_coll else 1.0
-            A_band += dens.sum()
-            A_coll += dens.sum() * e
-            for p in range(npix):
-                m = (pixidx == p) & (~excl)              # 픽셀 창 (제외분 제거)
-                pix_abs[p] += dens[m].sum() * e
-            trench_abs += dens[excl].sum()
+            zc_list, slices = zres[li]
+            for zc_local, dens_t in zip(zc_list, slices):
+                dens = dens_t.detach().cpu().numpy() * C
+                z_abs = z_off[li] + zc_local             # Si 표면 기준 절대깊이
+                e = 1.0 - r0 * np.exp(-z_abs / ld) if use_coll else 1.0
+                s = float(dens.sum())
+                A_band += s
+                A_coll += s * e
+                for p in range(npix):
+                    pix_abs[p] += dens[pmask[p]].sum() * e
+                trench_abs += dens[excl].sum()
         if det.deep_is_detector:
             # 심부 흡수: 밴드 바닥 투과 flux 를 픽셀 귀속 (그 깊이엔 구조 없음).
             # 심부는 접합 근처 -> η≈1 (수집손실 없음).
