@@ -390,6 +390,59 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             self._json({"error": "bad json"}, 400); return
+        if u.path == "/api/attribute":
+            # A. 에너지 귀속 — 한 파장 QE 가 왜 그 값인지 (빛이 어디로 갔나). 동기.
+            try:
+                os.makedirs(JOBS_DIR, exist_ok=True)
+                cfg_path = os.path.join(JOBS_DIR, "attr_" + uuid.uuid4().hex[:8] + ".yaml")
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    f.write(data.get("yaml") or "")
+                from ..sim.simulator import RCWAPlaneWaveSimulator
+                from ..sim.attribute import energy_attribution
+                ng = max(9, int(data.get("nG", 101)))
+                sim = RCWAPlaneWaveSimulator(cfg_path, nG=ng if ng % 2 else ng + 1,
+                                             downsample=max(1, int(data.get("downsample", 2))))
+                self._json(energy_attribution(sim, float(data.get("wavelength_nm", 525))))
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}",
+                            "trace": traceback.format_exc()[-1500:]}, 500)
+            return
+        if u.path == "/api/sensitivity":
+            # B. 파라미터 민감도. surrogate 있으면 즉시(B-1), 없으면 유한차분(B-2).
+            try:
+                from ..sim import sensitivity as sens
+                wl = float(data.get("wavelength_nm", 525))
+                ch = str(data.get("channel", "G"))
+                sur = data.get("surrogate")
+                if sur:
+                    self._json(sens.sensitivity_from_surrogate(sur, wl, ch))
+                else:
+                    import yaml as _yaml
+                    cfg = _yaml.safe_load(data.get("yaml") or "") or {}
+                    from ..sim.simulator import RCWAPlaneWaveSimulator
+                    RCWAPlaneWaveSimulator._auto_model_defaults(cfg)
+                    self._json(sens.local_sensitivity(
+                        cfg, wl, ch, nG=max(9, int(data.get("nG", 81))),
+                        downsample=max(1, int(data.get("downsample", 3)))))
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}",
+                            "trace": traceback.format_exc()[-1500:]}, 500)
+            return
+        if u.path == "/api/inverse":
+            # ②. 역설계 — 목표 QE 곡선 -> 근접 구조 (surrogate 필요). 즉시.
+            try:
+                from ..sim.inverse import invert
+                sur = data.get("surrogate")
+                if not sur:
+                    self._json({"error": "surrogate 가 필요합니다 (먼저 DOE 실행)."}, 400)
+                    return
+                self._json(invert(sur, data.get("target") or {},
+                                  weights=data.get("weights"),
+                                  channels=tuple(data.get("channels") or ("R", "G", "B"))))
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}",
+                            "trace": traceback.format_exc()[-1500:]}, 500)
+            return
         if u.path == "/api/lint":
             # 구조 사전 점검 — 위저드/사용자가 run 전에 문제를 미리 확인
             try:
