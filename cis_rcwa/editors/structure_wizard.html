@@ -168,6 +168,7 @@
       <p class="sub">현재 구조에 적용할 해석을 고르세요. (추후 다른 시뮬레이션이 여기에 추가됩니다)</p>
       <div class="wbig">
         <button class="wtile" id="simQE"><span class="ic">📈</span><div><div class="tt">QE 시뮬레이션</div><div class="td">파장별 양자효율(R/G/B) · RCWA</div></div></button>
+        <button class="wtile" id="simDOE"><span class="ic">🧪</span><div><div class="tt">DOE · Surrogate 스윕</div><div class="td">CF/평탄층/ML두께/radius 4축 흔들기 → 반응모델 추출</div></div></button>
         <button class="wtile soon"><span class="ic">🌈</span><div><div class="tt">각도·편광 응답 <span class="wbadge">예정</span></div><div class="td">입사각/편광별 응답 (준비중)</div></div></button>
         <button class="wtile soon"><span class="ic">🔬</span><div><div class="tt">근접장 분포 <span class="wbadge">예정</span></div><div class="td">구조 내부 |E|² 필드 (준비중)</div></div></button>
       </div>
@@ -203,6 +204,37 @@
       <div style="display:flex;gap:9px;margin-top:18px">
         <button class="btn primary" id="qeRun">▶ Run</button>
         <button class="btn" id="qeDiag" title="QE가 0 등 이상할 때: 물질 n,k 점검 + 경계 투과 프로파일">🔍 진단</button>
+      </div>
+    </div>
+
+    <div class="wcard" id="doeCard" style="max-width:780px;margin-top:14px">
+      <h2>🧪 DOE · Surrogate 스윕</h2>
+      <p class="sub">현 구조 중심으로 4축을 5레벨(-2..+2)로 흔들어 QE 반응을 수집하고 2차 반응모델(surrogate)을 추출합니다.
+      축: CF RGB 두께 ±600Å(300Å 스텝) · ML 평탄층 ±0.05µm · ML 두께 ±0.05µm · ML radius ±0.05 (각 0.025 스텝)</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="axis=주효과만 · surrogate=2차모델 피팅용(권장) · full=전조합(GPU)">모드
+          <select id="doeMode" style="width:200px">
+            <option value="axis">axis — 17회 (주효과 스크리닝)</option>
+            <option value="surrogate" selected>surrogate — 41회 (2차모델, 권장)</option>
+            <option value="full">full — 625회 (전조합, GPU)</option>
+          </select></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px">파장 스텝<input id="doeN" type="number" step="1" min="4" value="16" style="width:60px"></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="λ범위·nG·downsample은 위 QE 설정(고급 포함)을 그대로 사용">설정
+          <span style="font:11px var(--mono);padding:6px 0">λ·nG·ds = 위 QE 설정 공유</span></label>
+        <button class="btn primary" id="doeRun">🧪 DOE Run</button>
+        <button class="btn" id="doeCancel" style="display:none">■ 중단</button>
+      </div>
+      <div id="doeProg" style="display:none;margin-top:12px">
+        <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:8px;height:14px;overflow:hidden">
+          <div id="doeBar" style="height:100%;width:0%;background:var(--accent,#4c8dff);transition:width .4s"></div></div>
+        <div id="doeNote" class="hint" style="margin-top:6px">대기…</div>
+      </div>
+      <div id="doeDone" style="display:none;margin-top:12px">
+        <span class="hint" id="doeSummary"></span>
+        <div style="display:flex;gap:9px;margin-top:8px">
+          <a class="btn" id="doeCsv" download="doe.csv">⤓ CSV (원자료)</a>
+          <a class="btn" id="doeSur" download="surrogate.json" style="display:none">⤓ Surrogate JSON</a>
+        </div>
       </div>
     </div>
   </div>
@@ -1399,12 +1431,49 @@ el("buildBack").onclick=()=>goPage("wpage-start");
 el("buildDone").onclick=()=>goPage("wpage-sim");
 el("simBack").onclick=()=>goPage("wpage-build");
 el("simQE").onclick=()=>goPage("wpage-set");
+el("simDOE").onclick=()=>{ goPage("wpage-set"); setTimeout(()=>el("doeCard").scrollIntoView({behavior:"smooth"}),80); };
 el("setBack").onclick=()=>goPage("wpage-sim");
+
+// ===== DOE · Surrogate 스윕 =====
+const DOE={running:false,timer:null,job:null};
+function doeFmtSec(s){ s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600),m=Math.floor(s%3600/60); return (h?h+"시간 ":"")+(m?m+"분 ":"")+(s%60)+"초"; }
+el("doeRun").onclick=async()=>{ if(DOE.running)return;
+  await fetchServerMaterials();                                  // 물질 최신화 (run 과 동일 규약)
+  const miss=usedMats().filter(matMissing);
+  if(miss.length){ alert("❌ 물질 폴더에 없는 물질: "+miss.join(", ")); return; }
+  const manual=el("qeQual").value==="manual";
+  const body={ yaml:structYAML(), mode:el("doeMode").value, n:+el("doeN").value||16,
+    lam0:+el("qeL0").value, lam1:+el("qeL1").value,
+    nG: manual? +el("qeNG").value : 151, downsample: manual? +el("qeDS").value : 2 };
+  let r; try{ r=await (await fetch("/api/doe",{method:"POST",body:JSON.stringify(body)})).json(); }
+  catch(e){ alert("요청 실패: "+e.message); return; }
+  if(!r.job){ alert("오류: "+(r.error||"?")); return; }
+  DOE.running=true; DOE.job=r.job;
+  el("doeRun").disabled=true; el("doeCancel").style.display="";
+  el("doeProg").style.display=""; el("doeDone").style.display="none";
+  el("doeNote").textContent=`시작 — ${r.total}개 조건 (1번째 조건 완료 후 예상시간 표시)`;
+  DOE.timer=setInterval(async()=>{
+    let s; try{ s=await (await fetch("/api/doe/status?job="+DOE.job)).json(); }catch(e){ return; }
+    el("doeBar").style.width=Math.round((s.progress||0)*100)+"%";
+    if(s.state==="running"){ el("doeNote").textContent=(s.note||"")+(s.eta_s!=null?"  ·  남은 ~"+doeFmtSec(s.eta_s):""); return; }
+    clearInterval(DOE.timer); DOE.running=false;
+    el("doeRun").disabled=false; el("doeCancel").style.display="none";
+    if(s.state==="error"){ el("doeNote").textContent="❌ "+(s.error||"오류"); return; }
+    el("doeProg").style.display="none"; el("doeDone").style.display="";
+    el("doeSummary").textContent=(s.state==="cancelled"?"중단됨 · ":"완료 · ")
+      +`${s.doe_done}/${s.doe_total}조건 · ${doeFmtSec(s.elapsed_s||0)}`
+      +(s.r2_G_mid!=null?` · surrogate R²(G,중앙λ)=${s.r2_G_mid}`:"");
+    el("doeCsv").href="/api/doe/file?job="+DOE.job+"&kind=csv";
+    const hasSur=s.r2_G_mid!=null;
+    el("doeSur").style.display=hasSur?"":"none";
+    if(hasSur) el("doeSur").href="/api/doe/file?job="+DOE.job+"&kind=surrogate";
+  },1500); };
+el("doeCancel").onclick=()=>{ if(DOE.job) fetch("/api/doe/cancel",{method:"POST",body:JSON.stringify({job:DOE.job})}); };
 el("resultBack").onclick=()=>goPage("wpage-set");
 el("resultRerun").onclick=()=>goPage("wpage-set");
 
 // ============================ init ============================
-const WIZ_VERSION="v79";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v80";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)

@@ -225,6 +225,71 @@ def start_job(yaml_text, p):
     return jid
 
 
+# --------------------------------------------------------------- DOE job
+def _run_doe_job(jid, cfg_path, p):
+    """DOE 스윕 + surrogate 피팅 (백그라운드 스레드)."""
+    job = JOBS[jid]
+    try:
+        from ..config.loader import load_config
+        from ..sim.simulator import RCWAPlaneWaveSimulator
+        from ..sim import doe as doe_mod
+        cfg = load_config(cfg_path)
+        RCWAPlaneWaveSimulator._auto_model_defaults(cfg)   # QE 경로와 동일 자동 모델
+        n = max(2, int(p.get("n", 16)))
+        lam0, lam1 = float(p.get("lam0", 0.40)), float(p.get("lam1", 0.70))
+        waves = [round(lam0 * 1000 + i * (lam1 - lam0) * 1000 / (n - 1))
+                 for i in range(n)]
+        total = len(doe_mod.doe_points(p["mode"]))
+        job["note"] = f"{total}개 조건 × {n}λ — 1번째 조건 완료 후 예상시간 표시"
+        job["doe_total"] = total
+        job["doe_done"] = 0
+
+        def prog(done, tot, eta, point):
+            job["doe_done"] = done
+            job["progress"] = done / tot
+            job["eta_s"] = round(eta)
+            job["note"] = (f"{done}/{tot} 조건 · 남은시간 ~{int(eta//60)}분"
+                           f"{int(eta % 60)}초 · 현재 {list(point)}")
+
+        res = doe_mod.run_doe(cfg, waves, mode=p["mode"], nG=p["nG"],
+                              downsample=p["downsample"], lateral_n=p.get("lateral_n", 256),
+                              progress=prog, cancel=lambda: job["cancel"])
+        csv_path = os.path.join(JOBS_DIR, jid + "_doe.csv")
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write(doe_mod.doe_csv(res))
+        job["csv"] = csv_path
+        if not res.get("cancelled") and p["mode"] != "axis":
+            sur = doe_mod.fit_surrogate(res)
+            sur_path = os.path.join(JOBS_DIR, jid + "_surrogate.json")
+            with open(sur_path, "w", encoding="utf-8") as f:
+                json.dump(sur, f)
+            job["surrogate"] = sur_path
+            # 대표 R² (그린 채널 중앙 파장) 리포트
+            ws = sur["wavelengths_nm"]
+            job["r2_G_mid"] = sur["r2"]["G"][int(ws[len(ws) // 2])]
+        job["elapsed_s"] = res.get("elapsed_s")
+        job["state"] = "cancelled" if res.get("cancelled") else "done"
+        job["note"] = (f"{'중단' if res.get('cancelled') else '완료'} · "
+                       f"{job['doe_done']}/{total} 조건 · {res.get('elapsed_s', 0)}s")
+    except Exception as e:
+        job["error"] = f"{type(e).__name__}: {e}"
+        job["trace"] = traceback.format_exc()[-2000:]
+        job["state"] = "error"
+
+
+def start_doe_job(yaml_text, p):
+    os.makedirs(JOBS_DIR, exist_ok=True)
+    jid = "doe" + uuid.uuid4().hex[:9]
+    cfg_path = os.path.join(JOBS_DIR, jid + ".yaml")
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        f.write(yaml_text)
+    JOBS[jid] = {"state": "running", "progress": 0.0, "note": "시작중...",
+                 "error": None, "cancel": False, "params": p}
+    th = threading.Thread(target=_run_doe_job, args=(jid, cfg_path, p), daemon=True)
+    th.start()
+    return jid
+
+
 # --------------------------------------------------------------- HTTP
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):          # 조용히
@@ -273,6 +338,25 @@ class Handler(BaseHTTPRequestHandler):
             self._json({k: job[k] for k in
                         ("state", "progress", "note", "rows", "error", "csv", "nG_auto")
                         if k in job})
+        elif u.path == "/api/doe/status":
+            jid = (parse_qs(u.query).get("job") or [""])[0]
+            job = JOBS.get(jid)
+            if not job:
+                self._json({"error": "unknown job"}, 404); return
+            self._json({k: job[k] for k in
+                        ("state", "progress", "note", "error", "eta_s", "elapsed_s",
+                         "doe_done", "doe_total", "r2_G_mid")
+                        if k in job})
+        elif u.path == "/api/doe/file":
+            q = parse_qs(u.query)
+            jid = (q.get("job") or [""])[0]
+            kind = (q.get("kind") or ["csv"])[0]
+            job = JOBS.get(jid)
+            key = "surrogate" if kind == "surrogate" else "csv"
+            if not job or key not in job:
+                self.send_response(404); self.end_headers(); return
+            self._file(job[key], "application/json" if kind == "surrogate"
+                       else "text/csv; charset=utf-8")
         else:
             self.send_response(404); self.end_headers()
 
@@ -332,6 +416,29 @@ class Handler(BaseHTTPRequestHandler):
             jid = start_job(yaml_text, p)
             self._json({"job": jid})
         elif u.path == "/api/qe/cancel":
+            job = JOBS.get(data.get("job") or "")
+            if job:
+                job["cancel"] = True
+            self._json({"ok": bool(job)})
+        elif u.path == "/api/doe":
+            yaml_text = data.get("yaml") or ""
+            if not yaml_text.strip():
+                self._json({"error": "yaml 이 비었습니다"}, 400); return
+            try:
+                mode = str(data.get("mode", "surrogate"))
+                assert mode in ("axis", "surrogate", "full"), "mode"
+                ng = max(9, int(data.get("nG", 151)))
+                p = {"mode": mode, "nG": ng if ng % 2 else ng + 1,
+                     "downsample": max(1, int(data.get("downsample", 2))),
+                     "n": max(2, int(data.get("n", 16))),
+                     "lam0": float(data.get("lam0", 0.40)),
+                     "lam1": float(data.get("lam1", 0.70))}
+            except (TypeError, ValueError, AssertionError) as e:
+                self._json({"error": f"파라미터 오류: {e}"}, 400); return
+            jid = start_doe_job(yaml_text, p)
+            from ..sim.doe import doe_points
+            self._json({"job": jid, "total": len(doe_points(p["mode"]))})
+        elif u.path == "/api/doe/cancel":
             job = JOBS.get(data.get("job") or "")
             if job:
                 job["cancel"] = True
