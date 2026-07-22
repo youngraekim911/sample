@@ -262,6 +262,12 @@ class GridCfBlock:
         cf_ids = np.array([ctx.mat_id(cf[c]["material"]) for c in "RGB"], dtype=np.uint8)
         cf_map = cf_ids[colcode]
         bg_id = ctx.mat_id(self.bg)
+        # CF 풋프린트 scale (ML scale 과 동일 개념): 색별 가로/세로 배율.
+        # u,v 는 CF 셀 중심 기준 정규화(-1..1) -> |u|<=sx & |v|<=sy 안쪽만 CF,
+        # 바깥은 bg(ML 평탄층 물질). 기본 1.0 = 기존과 동일(셀 가득).
+        sx = np.array([float(cf[c].get("scale_x", 1) or 1) for c in "RGB"])[colcode]
+        sy = np.array([float(cf[c].get("scale_y", 1) or 1) for c in "RGB"])[colcode]
+        cf_in = (np.abs(u) <= sx) & (np.abs(v) <= sy)
 
         # ---- z 경계점: 정확 경계 + 연속 구간(taper/meniscus)만 세분 ----
         bps = {0.0, bandTop}
@@ -292,7 +298,8 @@ class GridCfBlock:
                 continue
             zc = 0.5 * (z0 + z1)
             m = np.full(ctx.X.shape, bg_id, dtype=np.uint8)
-            m[zc <= zTop] = cf_map[zc <= zTop]
+            sel = (zc <= zTop) & cf_in
+            m[sel] = cf_map[sel]
             wz = W * (1 - (1 - ratio) * min(zc / gridH, 1.0)) if gridH > 0 else W
             # 옆면 코팅이 래스터 셀보다 얇으면 샘플을 빠져나감 -> 최소 1셀 폭 보장
             cws = max(cw, ctx.span / ctx.n) if cw > 0 else 0.0
@@ -355,10 +362,12 @@ class MlBlock:
                 sc = float(sp.get("scale", 1) or 1)
                 sh = sp["shape"]
                 orient = sp.get("orient", "h")
+                qh = float(sp.get("height_um", 0) or 0)   # quad별 돔 두께 (0=전역값)
                 x0, y0 = qx * 2 * p, qy * 2 * p
                 cx, cy = x0 + p, y0 + p
                 add = lambda ccx, ccy, ax, ay: out.append(
-                    {"cx": ccx, "cy": ccy, "ax": ax * sc, "ay": ay * sc})
+                    {"cx": ccx, "cy": ccy, "ax": ax * sc, "ay": ay * sc,
+                     **({"h": qh} if qh > 0 else {})})
                 if sh == "2x2":
                     add(cx, cy, p, p)
                 elif sh == "1x1":
@@ -376,6 +385,10 @@ class MlBlock:
         return out
 
     def _height(self, L):
+        # 우선순위: 렌즈/quad 개별 h(height_um) > 전역 height_um > hr×min(반경)
+        lh = float(L.get("h", L.get("height_um", 0)) or 0)
+        if lh > 0:
+            return lh
         if self.h > 0:
             return self.h
         return self.hr * min(float(L["ax"]), float(L["ay"]))

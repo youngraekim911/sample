@@ -407,7 +407,8 @@ function gridAt(x,y,zabs){ const g=S.stack.grid,p=P(),per=(g.pitch||1)*p,W=+g.wi
 // 높이 h = hr × min(ax,ay) (h/r 비율) -> 곡률 자동. footprint 만 정하면 3D 결정.
 function mlTemplateLenses(){ const p=P(),out=[],q=S.stack.ml.quads;
   for(let qy=0;qy<2;qy++)for(let qx=0;qx<2;qx++){ const sp=q[qy][qx],sc=+(sp.scale||1),x0=qx*2*p,y0=qy*2*p,cx=x0+p,cy=y0+p,sh=sp.shape,or=sp.orient||"h";
-    const add=(id,ccx,ccy,ax,ay)=>out.push({id,cx:ccx,cy:ccy,ax:ax*sc,ay:ay*sc});
+    const qh=+(sp.height_um||0);   // quad별 돔두께 (0=전역)
+    const add=(id,ccx,ccy,ax,ay)=>{ const L={id,cx:ccx,cy:ccy,ax:ax*sc,ay:ay*sc}; if(qh>0)L.h=qh; out.push(L); };
     if(sh==="2x2")add(`q${qy}${qx}_0`,cx,cy,p,p);
     else if(sh==="1x1"){for(let a=0;a<2;a++)for(let b=0;b<2;b++)add(`q${qy}${qx}_${a*2+b}`,x0+(b+.5)*p,y0+(a+.5)*p,p/2,p/2);}
     else if(sh==="2x1"){ if(or==="h")for(let a=0;a<2;a++)add(`q${qy}${qx}_${a}`,cx,y0+(a+.5)*p,p,p/2);
@@ -420,7 +421,8 @@ function normQuads(ml){ const q1=()=>({shape:"1x1",scale:1});   // 구버전/외
 function mlLenses(){ const ml=S.stack.ml; normQuads(ml); return (ml.lenses&&ml.lenses.length)?ml.lenses:mlTemplateLenses(); }
 function mlHR(){ const ml=S.stack.ml; if(ml.hr!=null)return +ml.hr; return (+ml.sag_height_um||0.55)/(P()/2); }
 // 렌즈 높이: height_um>0 이면 고정 높이(µm) -> footprint 에 따라 곡률 변화 / 0=h/r 자동
-function mlH(L){ const hu=+(S.stack.ml.height_um||0); return hu>0? hu : mlHR()*Math.min(L.ax,L.ay); }
+function mlH(L){ const lh=+(L.h||L.height_um||0); if(lh>0)return lh;   // 렌즈/quad 개별 > 전역 > h/r 자동
+  const hu=+(S.stack.ml.height_um||0); return hu>0? hu : mlHR()*Math.min(L.ax,L.ay); }
 function mlMaxH(){ let m=0; for(const L of mlLenses())m=Math.max(m,mlH(L)); return m; }
 function mlSag(x,y){ let s=0;
   for(const L of mlLenses()){ const u=(x-L.cx)/L.ax,v=(y-L.cy)/L.ay,r2=u*u+v*v;
@@ -448,7 +450,8 @@ function matAt(x,y,zc,upto){ if(upto==null)upto=99; const s=S.stack,p=P(),np=NP(
       // 응집(cohesion) 모델: 셀 평균두께 = thickness (볼륨 보존). k>0 중앙 응집/k<0 벽 젖음
       const per=((S.cf_array==="tetra")?2:1)*p, u=(x-(Math.floor(x/per)+0.5)*per)/(per/2), v=(y-(Math.floor(y/per)+0.5)*per)/(per/2);
       const zTop=Math.max(0.002, +cfc.thickness_um + (+(cfc.curvature_um||0))*(2/3-(u*u+v*v)));
-      if(zabs<=zTop)return col; }  // 울타리 안 CF (곡면 top)
+      const cin=Math.abs(u)<=(+cfc.scale_x||1)&&Math.abs(v)<=(+cfc.scale_y||1);   // CF 풋프린트 scale
+      if(cin&&zabs<=zTop)return col; }  // 울타리 안 CF (곡면 top)
     if(upto>=6)return s.ml.material;    // 평탄화 fill
     return "air"; }
   if(upto<6)return "air"; const surf=planarTop+mlSag(x,y); if(zc<=surf)return s.ml.material;  // ML dome
@@ -461,7 +464,7 @@ async function buildGC(){ const gen=++GCgen;
   const p=P(),np=NP(),span=p*np,st=S.stack;
   const N=1000, d=span/N, nP=N*N;
   const siM=new Uint8Array(nP), gD=new Float32Array(nP), cfT=new Float32Array(nP),
-        cfI=new Uint8Array(nP), sg=new Float32Array(nP);
+        cfI=new Uint8Array(nP), sg=new Float32Array(nP), cfIn=new Uint8Array(nP);
   const names=[]; const nid={}; const idOf=n=>{ if(!(n in nid)){nid[n]=names.length;names.push(n);} return nid[n]; };
   const g=st.grid, per=(g.pitch||1)*p, cfPer=((S.cf_array==="tetra")?2:1)*p;
   const th={R:+st.cf.R.thickness_um,G:+st.cf.G.thickness_um,B:+st.cf.B.thickness_um};
@@ -474,11 +477,13 @@ async function buildGC(){ const gen=++GCgen;
       const pr=Math.min(np-1,Math.floor(y/p)), pc=Math.min(np-1,Math.floor(x/p)), col=S.bayer[pr][pc];
       const u=(x-(Math.floor(x/cfPer)+0.5)*cfPer)/(cfPer/2), v=(y-(Math.floor(y/cfPer)+0.5)*cfPer)/(cfPer/2);
       cfT[k]=Math.max(0.002, th[col]+cvv[col]*(2/3-(u*u+v*v)));
-      cfI[k]=cfIds[col]; }
+      cfI[k]=cfIds[col];
+      cfIn[k]=(Math.abs(u)<=(+st.cf[col].scale_x||1)&&Math.abs(v)<=(+st.cf[col].scale_y||1))?1:0; }
     if((j&63)===63){ if(gen!==GCgen)return null; await new Promise(r=>setTimeout(r,0)); if(gen!==GCgen)return null; } }
   // sag: 렌즈별 bbox 만 순회 (per-cell 16렌즈 루프 대비 ~16x 고속)
   { const hu=+(st.ml.height_um||0), hr0=mlHR();
-    for(const L of mlLenses()){ const h=hu>0?hu:hr0*Math.min(L.ax,L.ay);
+    for(const L of mlLenses()){ const lh=+(L.h||L.height_um||0);
+      const h=lh>0?lh:(hu>0?hu:hr0*Math.min(L.ax,L.ay));
       const i0=Math.max(0,Math.floor((L.cx-L.ax)/d)), i1=Math.min(N-1,Math.ceil((L.cx+L.ax)/d));
       const j0=Math.max(0,Math.floor((L.cy-L.ay)/d)), j1=Math.min(N-1,Math.ceil((L.cy+L.ay)/d));
       for(let j=j0;j<=j1;j++){ const v=((j+0.5)*d-L.cy)/L.ay, v2=v*v; if(v2>=1)continue; const row=j*N;
@@ -488,7 +493,7 @@ async function buildGC(){ const gen=++GCgen;
   const barlB=[]; { let acc=0; for(const l of st.barl){acc+=+l.thickness_um; barlB.push([acc,l.material]);} }
   const gB=[]; { let acc=0; for(const l of g.stack){acc+=+l.height_um; gB.push([acc,l.material]);} }
   const zSi=+st.si.thickness_um, barlH=st.barl.reduce((a,l)=>a+ +l.thickness_um,0);
-  GC={gen,N,d,span,names,siM,gD,cfT,cfI,sg,
+  GC={gen,N,d,span,names,siM,gD,cfT,cfI,sg,cfIn,
       zSi, siName:st.si.material, barlB, barlTop:zSi+barlH, plTop:zSi+barlH+planarSpan(),
       gW:+g.width_um, ratio:Math.min(1,Math.max(0,+(g.top_ratio!=null?g.top_ratio:1)||0)),
       cw:gridCoat(), cwx:(gridCoat()>0?Math.max(gridCoat(),+S.grid.dxy_um||0):0), cwz:(gridCoat()>0?Math.max(gridCoat(),+S.grid.dz_um||0):0), gH:gridStackH(), coatName:g.coat_material||"oxide", gB,
@@ -526,7 +531,7 @@ function matFast(x,y,zc,upto){ const g=GC; if(!g)return matAt(x,y,zc,upto);
       if(zabs<=g.gH){ if(d0<wz/2){ for(const e of g.gB){ if(zabs<=e[0])return e[1]; } return g.gB.length?g.gB[g.gB.length-1][1]:"grid_metal"; }
         if(g.cw>0&&d0<wz/2+g.cwx)return g.coatName; }
       else if(g.cw>0&&zabs<=g.gH+g.cwz&&d0<wz/2+g.cwx)return g.coatName; }
-    if(upto>=5 && zabs<=g.cfT[k]) return g.names[g.cfI[k]];
+    if(upto>=5 && g.cfIn[k] && zabs<=g.cfT[k]) return g.names[g.cfI[k]];
     if(upto>=6) return g.mlName;
     return "air"; }
   if(upto<6)return "air";
@@ -545,7 +550,7 @@ async function buildVoxPrep(){
   // 주의: 거리/높이 맵은 Float64 — float32 면 경계값(예: d=0.01 vs wz/2=0.01)이
   // 반올림돼 Python 빌더(float64)와 경계 한 겹이 어긋남 (JS/Python npy 동치 요구)
   const siMap=new Uint8Array(nP), gD=new Float64Array(nP), cfTopM=new Float64Array(nP),
-        cfIdM=new Uint8Array(nP), sagM=new Float64Array(nP);
+        cfIdM=new Uint8Array(nP), sagM=new Float64Array(nP), cfInM=new Uint8Array(nP);
   const g=st.grid, per=(g.pitch||1)*p, cfPer=((S.cf_array==="tetra")?2:1)*p;
   const W=+g.width_um, cw=gridCoat(), gH=gridStackH(),
         ratio=Math.min(1,Math.max(0,+(g.top_ratio!=null?g.top_ratio:1)||0));
@@ -560,6 +565,7 @@ async function buildVoxPrep(){
       const u=(x-(Math.floor(x/cfPer)+0.5)*cfPer)/(cfPer/2), v=(y-(Math.floor(y/cfPer)+0.5)*cfPer)/(cfPer/2);
       cfTopM[k]=Math.max(0.002, th[col]+cvv[col]*(2/3-(u*u+v*v)));
       cfIdM[k]=cfIds[col];
+      cfInM[k]=(Math.abs(u)<=(+st.cf[col].scale_x||1)&&Math.abs(v)<=(+st.cf[col].scale_y||1))?1:0;
       sagM[k]=mlSag(x,y); } }
   // ---- z 밴드 ----
   const zSi=+st.si.thickness_um, barlH=st.barl.reduce((a,l)=>a+ +l.thickness_um,0);
@@ -579,7 +585,7 @@ async function buildVoxPrep(){
       const cwx=cw>0?Math.max(cw,+S.grid.dxy_um||0):0, cwz=cw>0?Math.max(cw,+S.grid.dz_um||0):0;
       const inG=zabs<=gH, inCap=cw>0&&zabs<=gH+cwz;
       for(let k=0;k<nP;k++){ let m=mlId;
-        if(zabs<=cfTopM[k]) m=cfIdM[k];
+        if(cfInM[k]&&zabs<=cfTopM[k]) m=cfIdM[k];
         const d=gD[k];
         if(inG){ if(d<wz/2)m=gid; else if(cw>0&&d<wz/2+cwx)m=coatId; }
         else if(inCap && d<wz/2+cwx) m=coatId;
@@ -943,11 +949,15 @@ const STEPS=[
         else { const i=h("input",{type:"number",step:step||"0.01",value:f[key]!=null?f[key]:0}); i.style.width="100%";
           i.oninput=()=>{f[key]=parseFloat(i.value)||0; renderViews();}; tr.appendChild(h("td",{},[i])); } });
       return tr; };
+    cols.forEach(c=>{ const f=S.stack.cf[c]; if(f.scale_x==null)f.scale_x=1; if(f.scale_y==null)f.scale_y=1; });
     tbl.appendChild(mkRow("물질","material"));
     tbl.appendChild(mkRow("두께 µm","thickness_um","0.001"));
     tbl.appendChild(mkRow("곡률 curvature (µm)","curvature_um","0.001"));
+    tbl.appendChild(mkRow("scale 가로 (0~1.2)","scale_x","0.01"));
+    tbl.appendChild(mkRow("scale 세로 (0~1.2)","scale_y","0.01"));
     return [ h("div",{class:"row"},[h("label",{},["CF array"]),arr]), tbl,
-      h("p",{class:"hint"},["grid 울타리 셀 안 채움. 두께=셀 평균두께(볼륨 보존). 응집 κ>0: 열처리로 중앙에 모임(중앙↑·코너↓), κ<0: 벽 젖음. 표면 프로파일 t+κ(2/3−r²)."]) ]; }},
+      h("p",{class:"hint"},["grid 울타리 셀 안 채움. 두께=셀 평균두께(볼륨 보존). 응집 κ>0: 열처리로 중앙에 모임(중앙↑·코너↓), κ<0: 벽 젖음. 표면 프로파일 t+κ(2/3−r²)."]),
+      h("p",{class:"hint"},["scale: ML 처럼 CF 풋프린트 가로/세로 배율 (셀 중심 기준, 1=가득). 바깥은 ML 평탄층 물질로 채워짐."]) ]; }},
  {t:"7 · Microlens", d:"radius(footprint) · 평탄층 두께 · ML 돔 두께 → 곡률 자동", body:()=>{ const m=S.stack.ml; if(m.hr==null)m.hr=0.55; if(!(+m.height_um>0))m.height_um=0.40;
     // 저장본에 quads 없으면(구버전/외부 yaml) 여기서 예외 -> 이하 UI 전체 소실. 기본 1x1 로 복구.
     const q1=()=>({shape:"1x1",scale:1});
@@ -963,13 +973,16 @@ const STEPS=[
       rows.push(h("p",{class:"hint"},[`곡률반경 ROC ≈ ${roc.toFixed(2)}µm (radius r≈${r.toFixed(2)}, 돔 ${(+m.height_um).toFixed(2)}µm) — 작을수록 강한 집광. 겹치면 교선 '찌부' 자동.`])); }
     rows.push(h("div",{class:"seclbl"},["radius(footprint): quad shape × scale 로 조절"]));
     const SH=[["2x2","2×2"],["2x1h","2×1 가로"],["2x1v","2×1 세로"],["1x1","1×1"]];
+    rows.push(h("p",{class:"hint"},["quad 별: shape · scale · 돔두께(µm, 0=위 전역값 사용)"]));
     [[1,0,"TL"],[1,1,"TR"],[0,0,"BL"],[0,1,"BR"]].forEach(([qy,qx,pos])=>{ const sp=m.quads[qy][qx];
       const cur=sp.shape==="2x1"?(sp.orient==="v"?"2x1v":"2x1h"):sp.shape;
       const sel=h("select",{}); SH.forEach(([v,t])=>{const o=h("option",{value:v},[t]); if(cur===v)o.selected=true; sel.appendChild(o);});
-      sel.onchange=()=>{ const v=sel.value; const ns=v==="2x1h"?{shape:"2x1",orient:"h"}:v==="2x1v"?{shape:"2x1",orient:"v"}:{shape:v}; ns.scale=sp.scale||1; m.quads[qy][qx]=ns; m.lenses=null; renderStep(); };
+      sel.onchange=()=>{ const v=sel.value; const ns=v==="2x1h"?{shape:"2x1",orient:"h"}:v==="2x1v"?{shape:"2x1",orient:"v"}:{shape:v}; ns.scale=sp.scale||1; if(sp.height_um)ns.height_um=sp.height_um; m.quads[qy][qx]=ns; m.lenses=null; renderStep(); };
       const sc=h("input",{type:"number",step:"0.05",value:sp.scale||1}); sc.style.width="64px";
       sc.oninput=()=>{ sp.scale=parseFloat(sc.value)||1; m.lenses=null; renderViews(); drawMLedit(); };
-      rows.push(h("div",{class:"subrow"},[h("span",{class:"hint",style:"width:24px"},[pos]),sel,sc])); });
+      const hh=h("input",{type:"number",step:"0.01",min:"0",value:sp.height_um||0,title:"이 quad 돔두께 (0=전역 "+(+m.height_um).toFixed(2)+"µm)"}); hh.style.width="64px";
+      hh.oninput=()=>{ const v=parseFloat(hh.value)||0; if(v>0)sp.height_um=v; else delete sp.height_um; m.lenses=null; renderViews(); drawMLedit(); };
+      rows.push(h("div",{class:"subrow"},[h("span",{class:"hint",style:"width:24px"},[pos]),sel,sc,hh,h("span",{class:"hint"},["µm"])])); });
     rows.push(h("div",{class:"seclbl"},["footprint 편집 · 드래그: 안쪽=이동, 가장자리=크기 (풍선)"]));
     const cv=h("canvas",{id:"mlEdit",width:364,height:364,style:"touch-action:none;cursor:crosshair"});
     rows.push(cv);
@@ -1473,7 +1486,7 @@ el("resultBack").onclick=()=>goPage("wpage-set");
 el("resultRerun").onclick=()=>goPage("wpage-set");
 
 // ============================ init ============================
-const WIZ_VERSION="v80";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v81";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)
