@@ -16,9 +16,11 @@
 폴링 가능) -> csv 저장.
 """
 import os
+import sys
 import json
 import time
 import uuid
+import shutil
 import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -27,13 +29,30 @@ from urllib.parse import urlparse, parse_qs
 import numpy as np
 import torch
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-JOBS_DIR = os.path.join(ROOT, "out", "jobs")
+# PyInstaller(단독 exe) 대응: 읽기전용 번들자원(ASSET_ROOT)과 쓰기/사용자자원(APP_DIR) 분리.
+#  - 소스 실행: 둘 다 리포 루트
+#  - exe 실행: ASSET_ROOT=번들(_MEIPASS, 읽기전용), APP_DIR=exe 폴더(물질 편집·out 저장)
+FROZEN = getattr(sys, "frozen", False)
+if FROZEN:
+    ASSET_ROOT = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    APP_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    ASSET_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    APP_DIR = ASSET_ROOT
+ROOT = ASSET_ROOT                              # 하위호환(html 등 읽기자원 기준)
+JOBS_DIR = os.path.join(APP_DIR, "out", "jobs")   # 쓰기 — exe 옆
 
 JOBS = {}          # job id -> dict(state, progress, note, rows, error, cancel)
 _LOCK = threading.Lock()
 
-MATERIALS_DIR = os.path.join(ROOT, "data", "materials")
+
+def _materials_dir():
+    """물질 폴더: exe 옆(사용자 편집분) 우선, 없으면 번들 기본값."""
+    user = os.path.join(APP_DIR, "data", "materials")
+    return user if os.path.isdir(user) else os.path.join(ASSET_ROOT, "data", "materials")
+
+
+MATERIALS_DIR = _materials_dir()
 
 
 def _read_materials_folder():
@@ -44,8 +63,9 @@ def _read_materials_folder():
     — 위저드가 열릴 때/매 run 직전에 이걸 받아 folderLib 를 갱신한다.
     """
     out = {}
+    mdir = _materials_dir()                       # 매 호출 재평가(사용자 폴더 생기면 즉시 반영)
     try:
-        files = sorted(os.listdir(MATERIALS_DIR))
+        files = sorted(os.listdir(mdir))
     except OSError:
         return out
     for fn in files:
@@ -53,7 +73,7 @@ def _read_materials_folder():
             continue
         rows = []
         try:
-            with open(os.path.join(MATERIALS_DIR, fn), encoding="utf-8") as f:
+            with open(os.path.join(mdir, fn), encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line or line[0] == "#":
@@ -450,8 +470,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404); self.end_headers()
 
 
+def _seed_user_assets():
+    """exe 실행 시, 사용자가 편집할 자원(data/·conf/)을 exe 옆에 최초 1회 복사.
+    이미 있으면 건드리지 않음(사용자 편집 보존). 소스 실행이면 no-op."""
+    if not FROZEN or os.path.abspath(APP_DIR) == os.path.abspath(ASSET_ROOT):
+        return
+    for sub in ("data", "conf"):
+        src, dst = os.path.join(ASSET_ROOT, sub), os.path.join(APP_DIR, sub)
+        if os.path.isdir(src) and not os.path.isdir(dst):
+            try:
+                shutil.copytree(src, dst)
+                print(f"[cis-rcwa] 초기 자원 복사: {dst}")
+            except Exception as e:
+                print(f"[cis-rcwa] 자원 복사 경고({sub}): {e}")
+
+
 def serve(port=8787, open_browser=True):
-    os.chdir(ROOT)                              # materials 폴더 자동탐색 기준
+    _seed_user_assets()
+    os.makedirs(JOBS_DIR, exist_ok=True)
+    os.chdir(APP_DIR)                           # materials 폴더 자동탐색 기준(사용자 옆)
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
     dev = "cuda" if torch.cuda.is_available() else "cpu"

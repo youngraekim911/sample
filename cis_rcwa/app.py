@@ -18,7 +18,10 @@ REQUIRED = [("torch", "torch"), ("numpy", "numpy"),
 
 
 def _preflight():
-    """의존성 검사 — 없으면 traceback 대신 설치 안내(+선택 자동설치)."""
+    """의존성 검사 — 없으면 traceback 대신 설치 안내(+선택 자동설치).
+    단독 exe(frozen)면 의존성이 번들돼 있으므로 건너뜀."""
+    if getattr(sys, "frozen", False):
+        return
     missing = [pkg for mod, pkg in REQUIRED
                if importlib.util.find_spec(mod) is None]
     if not missing:
