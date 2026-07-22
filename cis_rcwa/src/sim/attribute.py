@@ -33,8 +33,8 @@ def energy_attribution(sim, wavelength_nm, pol="avg"):
     ld = float(getattr(det, "collect_ld_um", 0.0) or 0.0)
     use_coll = r0 > 0 and ld > 0
     deep_is_det = bool(getattr(det, "deep_is_detector", True))
-    pixidx = det.pixel_map
-    labels = det.pixel_labels or []
+    pixidx = det.pixel_map if det is not None else None
+    labels = (det.pixel_labels or []) if det is not None else []
     excl = det.exclude_mask if det is not None and det.exclude_mask is not None \
         else np.zeros(sim.ir.grid_shape, dtype=bool)
 
@@ -58,7 +58,7 @@ def energy_attribution(sim, wavelength_nm, pol="avg"):
                 Sz = Sz.detach().cpu().numpy()
                 ng = Sz.size
                 for p, L in enumerate(labels):
-                    if L in "RGB":
+                    if L in ("R", "G", "B"):
                         chan[L]["qe"] += w * float(Sz[pixidx == p].sum()) / ng
         else:
             acc["transmit_deep"] += w * T_deep
@@ -83,13 +83,13 @@ def energy_attribution(sim, wavelength_nm, pol="avg"):
                     acc["si_recomb"] += w * opt * (1.0 - e)
                     if pixidx is not None:
                         for p, L in enumerate(labels):
-                            if L in "RGB":
+                            if L in ("R", "G", "B"):
                                 m = (pixidx == p) & (~excl)
                                 col = float(s[m].sum())
                                 chan[L]["qe"] += w * col * e
                                 chan[L]["recomb"] += w * col * (1.0 - e)
                         for p, L in enumerate(labels):
-                            if L in "RGB":
+                            if L in ("R", "G", "B"):
                                 chan[L]["trench"] += w * float(s[(pixidx == p) & excl].sum())
             else:
                 tg = tags[li] if li < len(tags) else str(li)
