@@ -39,7 +39,10 @@ def field_qe_sweep(base_ir, cra_cfg, wavelengths, fields=None,
     s_cf = float(cra_cfg.get("shrink_cfgrid_um_per_deg", 0.0))
     az = math.radians(float(cra_cfg.get("azimuth_deg", 0.0)))
     sign = float(cra_cfg.get("shift_sign", 1.0))
-    ux, uy = math.cos(az), math.sin(az)                  # shift 방향 단위벡터
+    # 입사 규약: kx0=sin(θ)cos(φ) -> φ 방향으로 '전파'(=광원은 반대편 -φ쪽).
+    # shrink 는 광원 쪽으로 마중(빛 오는 방향). 따라서 shift 는 전파의 반대방향.
+    # sign=+1(기본)=광원쪽(물리적 정답), -1=반대(교정용).
+    ux, uy = -math.cos(az), -math.sin(az)                # 광원 방향 단위벡터
 
     out = {}
     for f in fields:

@@ -54,6 +54,16 @@ CIS(CMOS 이미지센서) 구조를 위저드로 만들고 RCWA(FMM)로 파장�
 - **ONO(oxide/nitride/oxide) 라이너**: 단일 oxide 대비 그린 +0.02·크로스톡 -0.02 (graded-index로
   약간 개선) — 2차 효과, ref 갭은 못 메움. 다층 라이너는 dti.liners=[{material,thickness_um},..] 로 지원.
 
+### CRA 렌즈-shift(shrink) — field별 QE (src/sim/cra.py, blocks.apply_cra_shift)
+- 필드(0=중심~1.0=코너)마다 CRA 타겟. 빗각 입사로 ML 초점이 Si중심서 벗어나 QE↓.
+  상부구조(ML 크게, CF+grid 작게)를 **광원 쪽으로 shift=shrink(µm/deg)×CRA** 해 초점 회복.
+- **주기 wrap(np.roll)**: shift 로 unit 밖 나간 부분이 반대편서 들어옴 = '옆 unit 침범'을 RCWA
+  무한타일링에서 물리적으로 정확히 표현. Si/DTI/BARL/검출기(pixel_map) 고정.
+- config `cra:{field_cra_deg[11], shrink_ml_um_per_deg, shrink_cfgrid_um_per_deg, azimuth_deg(0=1D/45=대각), shift_sign}`.
+  방향 기본=광원쪽(kx0=sinθcosφ -> φ전파, shift는 -φ). sign 으로 교정.
+- **주의**: CRA 초점물리는 nG 충분해야 보임(nG=41 은 초점 미해상 -> 각도 QE 평평). shrink 2값은
+  각도 실측으로 정합. optical:true(실제 DTI) 권장(빗각).
+
 ## 지금까지 개선(무엇으로 뭘)
 1. 물질 폴더화: /api/materials + 매 run 재fetch, localStorage 캐시 제거 → '옛 물질 걸림' 제거
 2. CF k 실제화 → 그린 청색누설 39~54%→6~12%, blue 피크 470
