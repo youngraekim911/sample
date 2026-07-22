@@ -390,6 +390,17 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             self._json({"error": "bad json"}, 400); return
+        if u.path == "/api/lint":
+            # 구조 사전 점검 — 위저드/사용자가 run 전에 문제를 미리 확인
+            try:
+                import yaml as _yaml
+                from ..structure.lint import lint_wizard_cfg
+                cfg = _yaml.safe_load(data.get("yaml") or "") or {}
+                names = set(_read_materials_folder().keys())
+                self._json(lint_wizard_cfg(cfg, material_names=names))
+            except Exception as e:
+                self._json({"errors": [f"{type(e).__name__}: {e}"], "warnings": []})
+            return
         if u.path == "/api/qe/diag":
             # 진단: 물질 n,k 점검 + 경계 투과 프로파일 (단일 λ, 동기 실행)
             yaml_text = data.get("yaml") or ""

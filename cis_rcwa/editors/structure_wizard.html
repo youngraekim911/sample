@@ -1256,11 +1256,15 @@ el("qeStop").onclick=async()=>{ if(!QE.job)return;
   const rn=el("qeNote"); if(rn)rn.textContent="중단 요청됨 — 진행 중인 파장 계산만 마무리하고 멈춥니다.";
   try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
 let QE_T0=0;
+async function lintStruct(){ try{ return await(await fetch(qeApiBase()+"/api/lint",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({yaml:structYAML()})})).json(); }catch(e){ return null; } }
 el("qeRun").onclick=async()=>{ if(QE.running)return;
   el("qeRun").disabled=true;
   await fetchServerMaterials();                 // run 직전 물질 폴더 새로 반영 (구조도 structYAML 로 최신 재바인드)
   const miss=missingMats();                     // 폴더에 없는 물질이 있으면 계산 거부
   if(miss.length){ alert("❌ 물질 폴더에 없는 물질: "+miss.join(", ")+"\n📁 물질 폴더를 선택해 셋업하세요."); el("qeRun").disabled=false; return; }
+  const lz=await lintStruct();                   // 구조 사전점검 — 치명 오류면 실행 차단, 경고는 확인
+  if(lz && lz.errors && lz.errors.length){ alert("❌ 구조 오류 (수정 후 실행):\n\n• "+lz.errors.join("\n• ")); el("qeRun").disabled=false; return; }
+  if(lz && lz.warnings && lz.warnings.length && !confirm("⚠ 구조 경고:\n\n• "+lz.warnings.join("\n• ")+"\n\n그래도 실행할까요?")){ el("qeRun").disabled=false; return; }
   const body={ yaml:structYAML(), lam0:+el("qeL0").value, lam1:+el("qeL1").value,
     n:+el("qeN").value,
     nG:(el("qeQual").value==="manual"? (2*Math.floor((Math.max(9,+el("qeNG").value||101))/2)+1) : "auto"),  // 홀수 보정
@@ -1494,7 +1498,7 @@ el("resultBack").onclick=()=>goPage("wpage-set");
 el("resultRerun").onclick=()=>goPage("wpage-set");
 
 // ============================ init ============================
-const WIZ_VERSION="v82";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v83";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)

@@ -552,6 +552,9 @@ def blocks_from_wizard_cfg(cfg, men_slices=8, taper_slices=8):
 
 def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=8, men_slices=8, taper_slices=8):
     """yaml v3 -> (블록 조립) -> IR."""
+    # 구조 린트 — 누가 바꿔도 치명 실수는 여기서 명확한 메시지로 차단(모든 경로 공통 관문).
+    from .lint import assert_wizard_cfg
+    assert_wizard_cfg(cfg)
     g = cfg["grid"]
     ctx = BlockContext(pitch_um=g["pixel_pitch_um"], n_pixels=g["n_pixels"],
                        lateral_n=lateral_n, bayer=cfg.get("bayer"),
