@@ -178,6 +178,9 @@ def _run_job(jid, cfg_path, p):
                 return
             t0 = time.time()
             o_te = sim.run(float(lam), theta=p["theta"], pol_te=1.0, pol_tm=0.0)
+            if job.get("cancel"):                        # 편광 사이에도 반응 (체감 지연 ↓)
+                job["state"] = "cancelled"
+                return
             o_tm = sim.run(float(lam), theta=p["theta"], pol_te=0.0, pol_tm=1.0)
             w = 1.0 if p.get("pol") == "sum" else 0.5    # 평균(비편광 표준) | 합산(참조 호환, x2)
             R = w * (o_te["R"] + o_tm["R"])

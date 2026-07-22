@@ -123,12 +123,24 @@ def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
                                      materials_dir=materials_dir)
         qe = {}
         for w in wavelengths_nm:
+            # 파장/편광 단위로도 중단 반응 (조건 하나가 수 분일 수 있음 —
+            # 미완 조건은 버리고 즉시 종료, 완료된 조건까지만 결과에 남김)
+            if cancel and cancel():
+                out["cancelled"] = True
+                break
             acc = {"R": 0.0, "G": 0.0, "B": 0.0}
             for pol in ((1.0, 0.0), (0.0, 1.0)):
+                if cancel and cancel():
+                    out["cancelled"] = True
+                    break
                 o = sim.run(w / 1000.0, pol_te=pol[0], pol_tm=pol[1])
                 for L in "RGB":
                     acc[L] += 0.5 * o["QE_rgb"][L]
+            if out.get("cancelled"):
+                break
             qe[int(w)] = {L: round(acc[L], 5) for L in "RGB"}
+        if out.get("cancelled"):
+            break
         out["points"].append({"steps": list(p), "qe": qe})
         if progress:
             done = i + 1

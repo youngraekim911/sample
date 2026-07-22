@@ -1251,7 +1251,10 @@ async function qeEnterSettings(){
 }
 el("qeQual").onchange=()=>{ const m=el("qeQual").value==="manual";
   el("qeAdv").style.display = m?"block":"none"; el("qeAdv").open = m; };
-el("qeStop").onclick=async()=>{ if(QE.job) try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
+el("qeStop").onclick=async()=>{ if(!QE.job)return;
+  el("qeStop").disabled=true; el("qeStop").textContent="⏳ 중단중… (현재 계산 마무리)";
+  const rn=el("qeNote"); if(rn)rn.textContent="중단 요청됨 — 진행 중인 파장 계산만 마무리하고 멈춥니다.";
+  try{ await fetch(qeApiBase()+"/api/qe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({job:QE.job})}); }catch(e){} };
 let QE_T0=0;
 el("qeRun").onclick=async()=>{ if(QE.running)return;
   el("qeRun").disabled=true;
@@ -1269,6 +1272,7 @@ el("qeRun").onclick=async()=>{ if(QE.running)return;
   if(!r.job){ alert("오류: "+(r.error||"?")); el("qeRun").disabled=false; return; }
   QE.job=r.job; QE.rows=[]; QE.running=true; QE_T0=performance.now();
   el("qeProg").style.width="0%"; el("qeNote").textContent="시작중…"; el("runSub").textContent="RCWA 계산이 진행 중입니다.";
+  el("qeStop").disabled=false; el("qeStop").textContent="■ 중단";   // 이전 중단 상태 리셋
   goPage("wpage-run");
   QE.timer=setInterval(qePoll,700); };
 async function qePoll(){ let s; try{ s=await(await fetch(qeApiBase()+"/api/qe/status?job="+QE.job)).json(); }catch(e){ return; }
@@ -1462,7 +1466,8 @@ el("doeRun").onclick=async()=>{ if(DOE.running)return;
   catch(e){ alert("요청 실패: "+e.message); return; }
   if(!r.job){ alert("오류: "+(r.error||"?")); return; }
   DOE.running=true; DOE.job=r.job;
-  el("doeRun").disabled=true; el("doeCancel").style.display="";
+  el("doeRun").disabled=true;
+  el("doeCancel").style.display=""; el("doeCancel").disabled=false; el("doeCancel").textContent="■ 중단";
   el("doeProg").style.display=""; el("doeDone").style.display="none";
   el("doeNote").textContent=`시작 — ${r.total}개 조건 (1번째 조건 완료 후 예상시간 표시)`;
   DOE.timer=setInterval(async()=>{
@@ -1481,12 +1486,15 @@ el("doeRun").onclick=async()=>{ if(DOE.running)return;
     el("doeSur").style.display=hasSur?"":"none";
     if(hasSur) el("doeSur").href="/api/doe/file?job="+DOE.job+"&kind=surrogate";
   },1500); };
-el("doeCancel").onclick=()=>{ if(DOE.job) fetch("/api/doe/cancel",{method:"POST",body:JSON.stringify({job:DOE.job})}); };
+el("doeCancel").onclick=()=>{ if(!DOE.job)return;
+  el("doeCancel").disabled=true; el("doeCancel").textContent="⏳ 중단중…";
+  el("doeNote").textContent="중단 요청됨 — 진행 중인 파장 계산만 마무리하고 멈춥니다 (완료된 조건까지 CSV 저장).";
+  fetch("/api/doe/cancel",{method:"POST",body:JSON.stringify({job:DOE.job})}); };
 el("resultBack").onclick=()=>goPage("wpage-set");
 el("resultRerun").onclick=()=>goPage("wpage-set");
 
 // ============================ init ============================
-const WIZ_VERSION="v81";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v82";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)
