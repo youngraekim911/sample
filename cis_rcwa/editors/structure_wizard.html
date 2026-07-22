@@ -1430,7 +1430,9 @@ el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const
     `QE전체 ${r[2].toFixed(3)} · R(반사) ${r[1].toFixed(3)}<br>A ${r[3].toFixed(3)} · 합 ${(r[1]+r[2]+r[3]).toFixed(3)}`; });
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
 el("qeChart").style.cursor="pointer";
+let attrSeq=0;   // 연속 클릭 경쟁 방지 — 최신 클릭만 DOM 반영
 el("qeChart").addEventListener("click",async e=>{ if(!QE.rows.length)return;
+  const seq=++attrSeq;
   const bi=qeNearestIdx(e), lamnm=Math.round(QE.rows[bi][0]*1000), body=el("attrBody");
   el("attrPanel").scrollIntoView({behavior:"smooth",block:"nearest"});
   body.innerHTML=`⏳ <b>${lamnm}nm</b> 에너지 귀속 계산중… (RCWA 1회, 수 초)`;
@@ -1438,7 +1440,8 @@ el("qeChart").addEventListener("click",async e=>{ if(!QE.rows.length)return;
   let a; try{ a=await(await fetch(qeApiBase()+"/api/attribute",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({yaml:QE.yaml||structYAML(), wavelength_nm:lamnm,
         nG: manual?+el("qeNG").value:101, downsample: manual?+el("qeDS").value:2})})).json(); }
-  catch(err){ body.innerHTML="요청 실패: "+err.message+" (서버 실행 확인: python app.py)"; return; }
+  catch(err){ if(seq===attrSeq) body.innerHTML="요청 실패: "+err.message+" (서버 실행 확인: python app.py)"; return; }
+  if(seq!==attrSeq) return;          // 그 사이 다른 점을 클릭 → 이 결과는 버림
   if(a.error){ body.innerHTML="❌ "+a.error+(a.trace?"<pre style='white-space:pre-wrap;font-size:10px'>"+a.trace+"</pre>":""); return; }
   body.innerHTML=renderAttr(a, lamnm);
   // B. 민감도(surrogate 있으면 즉시) — 이 파장 주도 채널 랭킹
@@ -1446,11 +1449,12 @@ el("qeChart").addEventListener("click",async e=>{ if(!QE.rows.length)return;
     const sw=nearestSurWl(lamnm);
     try{ const b=await(await fetch(qeApiBase()+"/api/sensitivity",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({surrogate:DOE.surrogate, wavelength_nm:sw, channel:ch})})).json();
-      if(!b.error) el("attrBody").insertAdjacentHTML("beforeend", renderSens(b, sw, ch)); }catch(_){}
+      if(seq===attrSeq && !b.error) el("attrBody").insertAdjacentHTML("beforeend", renderSens(b, sw, ch)); }catch(_){}
   } });
 function attrDominantCh(row){ if(row.length<7) return "G";
   const m={R:row[4],G:row[5],B:row[6]}; return Object.keys(m).sort((x,y)=>m[y]-m[x])[0]; }
-function nearestSurWl(nm){ const ws=(DOE.surrogate&&DOE.surrogate.wavelengths_nm)||[nm];
+function nearestSurWl(nm){ let ws=(DOE.surrogate&&DOE.surrogate.wavelengths_nm)||[];
+  if(!ws.length) ws=[nm];
   return ws.reduce((b,w)=>Math.abs(w-nm)<Math.abs(b-nm)?w:b, ws[0]); }
 function attrBar(label,val,col,tot){ const pct=tot>0?val/tot*100:0;
   return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0">
