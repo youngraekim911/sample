@@ -1188,6 +1188,9 @@ function parseYAML(text){ const lines=text.replace(/\t/g,"  ").split("\n").map(l
     if(s[j]==='"'){let k=j+1,str="";while(k<s.length&&s[k]!=='"'){str+=s[k++];}j=k+1;return str;} let t="";while(j<s.length&&!/[,\]}]/.test(s[j])){t+=s[j++];} return sc(t.trim()); } return val(); }
   function sc(s){ if(s===""||s==null)return null; if(s[0]==='"'&&s[s.length-1]==='"')return JSON.parse(s); if(s==="true")return true; if(s==="false")return false; if(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s))return parseFloat(s); return s; } }
 function loadStruct(obj){ S=Object.assign(structuredClone(DEFAULT),obj); if(obj.stack)S.stack=Object.assign(structuredClone(DEFAULT.stack),obj.stack); if(obj.materials)S.materials=Object.assign(structuredClone(DEFAULT.materials),obj.materials);
+  // 저장 yaml 은 enabled 를 벗겨 내보냄 -> 재-import 시 복원 (라운드트립 보존)
+  if(obj.collection&&obj.collection.enabled==null) S.collection=Object.assign(structuredClone(DEFAULT.collection),obj.collection,{enabled:true});
+  if(obj.cra&&obj.cra.enabled==null) S.cra=Object.assign(structuredClone(DEFAULT.cra),obj.cra,{enabled:true});
   // yaml 에 동봉된 dispersion(λ-테이블) 복원 -> 새 브라우저에서도 물질 테이블 유지
   if(obj.dispersion){ for(const nm in obj.dispersion){ const t=obj.dispersion[nm]; if(Array.isArray(t)&&t.length>1){ folderLib[nm]=t; if(!(nm in S.materials)){ const L=t.map(r=>r[0]); S.materials[nm]={n:+interp1(refLambda,L,t.map(r=>r[1])).toFixed(4),k:+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4)}; assignMatColor(nm); } } } }
   clampRes(); save(); prod.value=S.product||""; curStep=0; renderStep(); }

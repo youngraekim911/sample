@@ -90,17 +90,25 @@ class RCWAPlaneWaveSimulator:
     def _ir_from_yaml(self, cfg, base_dir, mesh, lateral_um):
         stack = cfg.get("stack") or {}
         if "si" in stack and "cf" in stack:              # wizard v3
-            from ..structure.wizard_builder import WizardBuilder
-            print("[builder] wizard v3 schema")
-            b = WizardBuilder(cfg, base_dir=base_dir)
+            g = cfg["grid"]
+            span = float(g["pixel_pitch_um"]) * int(g["n_pixels"])
             if mesh == "auto":
-                Nlat = int(round(b.span / (float(lateral_um) * self.ds)))
+                # 블록 조립 경로 — dti.optical / collection 등 신규 기능 전부 반영
+                # (레거시 WizardBuilder 와 기하 동등, 회귀[6] 보장). yaml 경로도 이 경로.
+                from ..structure.blocks import ir_from_wizard_cfg
+                Nlat = int(round(span / (float(lateral_um) * self.ds)))
                 Nlat = min(max(Nlat, 128), 2400)
-                ir = b.to_ir(lateral_n=Nlat)
-                print(f"[mesh] auto: lateral {Nlat}×{Nlat} ({b.span/Nlat*1000:.1f}nm)"
-                      f" · layers {len(ir.layers)} (z 해석적 경계, 복셀화 없음)")
+                ir = ir_from_wizard_cfg(cfg, Nlat)
+                opt = ((cfg.get("stack") or {}).get("dti") or {}).get("optical", True)
+                coll = cfg.get("collection") or {}
+                print(f"[builder] wizard v3 (blocks) · lateral {Nlat}×{Nlat} · "
+                      f"layers {len(ir.layers)} · dti.optical={opt} · "
+                      f"collection={'on' if (coll.get('r0',0) and coll.get('ld_um',0)) else 'off'}")
                 return ir
-            # voxel 경로: 3D 복셀 -> IR (다운샘플 포함)
+            # voxel 경로: 3D 복셀 -> IR (레거시 WizardBuilder, dti.optical/collection 미반영)
+            from ..structure.wizard_builder import WizardBuilder
+            print("[builder] wizard v3 voxel (legacy — optical/collection 미반영)")
+            b = WizardBuilder(cfg, base_dir=base_dir)
             ir = b.to_ir()                                # 마스크만 재사용
             matid = b.build()[:, ::self.ds, ::self.ds]
             det = ir.detector
