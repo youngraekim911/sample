@@ -72,7 +72,18 @@ def apply_point(cfg, steps, axes=AXES_DEFAULT):
         elif key == "planar_um":
             st["ml"]["planar_um"] = max(0.0, round(st["ml"]["planar_um"] + d, 5))
         elif key == "ml_h_um":
-            st["ml"]["height_um"] = max(0.05, round(st["ml"]["height_um"] + d, 5))
+            # 전역 + quad별/렌즈별 개별 돔두께 모두 증감 (개별값은 전역보다 우선이라
+            # 전역만 바꾸면 개별 설정 quad 는 스윕에서 빠짐 -> 함께 이동)
+            ml = st["ml"]
+            ml["height_um"] = max(0.05, round(float(ml.get("height_um", 0)) + d, 5))
+            for row in (ml.get("quads") or []):
+                for q in row:
+                    if float(q.get("height_um", 0) or 0) > 0:
+                        q["height_um"] = max(0.05, round(q["height_um"] + d, 5))
+            for L in (ml.get("lenses") or []):
+                hk = "h" if "h" in L else ("height_um" if "height_um" in L else None)
+                if hk and float(L[hk] or 0) > 0:
+                    L[hk] = max(0.05, round(float(L[hk]) + d, 5))
         elif key == "ml_scale":
             ml = st["ml"]
             if ml.get("quads"):
