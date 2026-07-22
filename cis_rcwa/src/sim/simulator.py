@@ -209,19 +209,25 @@ class RCWAPlaneWaveSimulator:
                     solver.add_layer(th, eps_scalar=eps_lut[int(u[0])])
                 else:
                     solver.add_layer(th, eps_grid=self._eps_grid(m2d, eps_lut))
-        # Wood anomaly (kz=0 차수 -> V0 특이) 가드: λ 미세 이동 재계산
+        # 수치 이상 가드: λ 미세 이동 재계산
+        #  (a) Wood anomaly: kz=0 차수 -> V0 특이 -> R/T 비유한
+        #  (b) 공진점 고유분해 불안정(금속 grid 등): R+T>1 (유니터리티 파괴)
+        #      -> 에너지 정합상수 C<0 -> QE 음수로 전파되므로 여기서 차단
         try:
             o = solver.solve(pol_te=pol_te, pol_tm=pol_tm)
-            bad = not (np.isfinite(o["R"]) and np.isfinite(o["T"]))
+            bad = not (np.isfinite(o["R"]) and np.isfinite(o["T"])) \
+                or not (-1e-6 <= o["R"] <= 1 + 1e-6) \
+                or not (-1e-6 <= o["T"] <= 1 + 1e-6) \
+                or (o["R"] + o["T"]) > 1 + 1e-6
         except Exception:
             bad = True
         if bad:
             if _wood_depth >= 3:                        # 재귀 무한루프 가드
                 raise RuntimeError(
-                    f"λ={lam}µm: R/T 비유한값이 λ 미세이동 {_wood_depth}회 후에도 지속 "
-                    f"— Wood anomaly 가 아니라 물질 n,k/구조 문제일 수 있음")
+                    f"λ={lam}µm: R/T 이상(비유한 또는 R+T>1)이 λ 미세이동 "
+                    f"{_wood_depth}회 후에도 지속 — 물질 n,k/구조 문제일 수 있음")
             lam_shift = lam * (1 + 5e-4)
-            print(f"[warn] λ={lam}µm Wood anomaly -> λ={lam_shift:.5f}µm 로 재계산")
+            print(f"[warn] λ={lam}µm 수치 이상(Wood/유니터리티) -> λ={lam_shift:.5f}µm 로 재계산")
             return self.run(lam_shift, theta=theta, phi=phi, pol_te=pol_te,
                             pol_tm=pol_tm, pixel_qe=pixel_qe, _wood_depth=_wood_depth + 1)
         out = {"wavelength": lam, "R": o["R"], "QE": o["T"],

@@ -481,7 +481,7 @@ class RCWASolver:
             dens = sum(slices)
             maps[i] = dens
             total += float(dens.sum())
-        C = (1.0 - self._R - self._T) / total if total > 1e-300 else 0.0
+        C = max(0.0, 1.0 - self._R - self._T) / total if total > 1e-300 else 0.0   # 음수 방지(유니터리티 잔차)
         return maps, C
 
     def _layer_abs_slices(self, i, aE, Ny, Nx, nz_per_um=48, min_nz=4):
@@ -545,7 +545,7 @@ class RCWASolver:
             total += float(sum(s.sum() for s in slices))
             if i in band:
                 zres[i] = (zc, slices)
-        C = (1.0 - self._R - self._T) / total if total > 1e-300 else 0.0
+        C = max(0.0, 1.0 - self._R - self._T) / total if total > 1e-300 else 0.0   # 음수 방지(유니터리티 잔차)
         return zres, C
 
     def layer_internal_fields(self, i, zfracs, Ny, Nx):
