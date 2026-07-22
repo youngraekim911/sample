@@ -267,6 +267,35 @@
       <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">결과 표 (표로 보기)</summary>
         <div id="qeTable" style="max-height:220px;overflow:auto;font:11px/1.7 var(--mono);margin-top:6px"></div></details>
       <div style="margin-top:14px"><button class="btn ghost" id="qeCsv" disabled>⤓ CSV</button></div>
+
+      <div id="attrPanel" style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
+        <h3 style="margin:0 0 4px">🔬 원인분석 — QE 에너지 귀속</h3>
+        <p class="hint" style="margin:0 0 10px">그래프의 <b>점(파장)을 클릭</b>하면 입사광 1.0 이 어디로 갔는지<br>
+          반사·층 흡수·DTI 트렌치·재결합손실·<b>Si 수집(=QE)</b> 으로 완전 분해합니다 (합=1, 에너지 보존).</p>
+        <div id="attrBody" class="hint" style="min-height:20px">↑ 위 그래프의 파장 점을 클릭하세요.</div>
+      </div>
+    </div>
+
+    <div class="wcard" id="invCard" style="max-width:920px;margin-top:14px">
+      <h2>🎯 역설계 — 목표 QE → 구조</h2>
+      <p class="sub">원하는 QE 곡선을 그리면(점 드래그) surrogate 반응모델을 거꾸로 풀어 가장 근접한 구조(4축 스텝)를 제안합니다.
+        <b>먼저 시뮬 페이지에서 DOE·Surrogate 스윕을 실행</b>해야 활성화됩니다.</p>
+      <div id="invNeedSur" class="hint" style="color:#c98a1a">⚠ surrogate 없음 — 시뮬 → 🧪 DOE·Surrogate 스윕을 먼저 실행하세요.</div>
+      <div id="invMain" style="display:none">
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <span class="hint">그릴 채널:</span>
+          <label class="hint" style="display:inline-flex;gap:4px;align-items:center"><input type="radio" name="invCh" value="R"> R</label>
+          <label class="hint" style="display:inline-flex;gap:4px;align-items:center"><input type="radio" name="invCh" value="G" checked> G</label>
+          <label class="hint" style="display:inline-flex;gap:4px;align-items:center"><input type="radio" name="invCh" value="B"> B</label>
+          <button class="btn ghost" id="invReset">↺ 현재 QE 로 초기화</button>
+          <div class="spacer"></div>
+          <button class="btn primary" id="invRun">🎯 역설계 실행</button>
+        </div>
+        <div style="position:relative">
+          <canvas id="invChart" width="820" height="300" style="width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel);cursor:crosshair;touch-action:none"></canvas>
+        </div>
+        <div id="invOut" class="hint" style="margin-top:12px"></div>
+      </div>
     </div>
   </div>
   <div class="wfoot"><button class="btn ghost" id="resultBack">← 설정</button><div class="spacer"></div><button class="btn primary" id="resultRerun">↻ 다시 실행</button></div>
@@ -1387,16 +1416,75 @@ function qeLegendFill(C,hasRGB){ const items=hasRGB
   : [["QE (Si 로 결합)",C.QE],["Reflection",C.R],["Stack absorption",C.A]];
   el("qeLegend").innerHTML=items
   .map(([t,c])=>`<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:${c};display:inline-block"></span>${t}</span>`).join(""); }
-el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const cv=el("qeChart"),rc=cv.getBoundingClientRect();
+function qeNearestIdx(e){ const cv=el("qeChart"),rc=cv.getBoundingClientRect();
   const px=(e.clientX-rc.left)*cv.width/rc.width, mL=52,mR=86,pw=cv.width-mL-mR;
   const l0=QE.rows[0][0], l1=QE.rows[QE.rows.length-1][0];
   let bi=0,bd=1e9; QE.rows.forEach((r,i)=>{ const x=mL+(l1>l0?(r[0]-l0)/(l1-l0):0.5)*pw, d=Math.abs(x-px); if(d<bd){bd=d;bi=i;} });
+  return bi; }
+el("qeChart").addEventListener("mousemove",e=>{ if(!QE.rows.length)return; const cv=el("qeChart"),rc=cv.getBoundingClientRect();
+  const bi=qeNearestIdx(e);
   drawQEChart(bi); const r=QE.rows[bi],tip=el("qeTip");
   tip.style.display="block"; tip.style.left=Math.min(rc.width-180,(e.clientX-rc.left)+12)+"px"; tip.style.top="12px";
-  tip.innerHTML=`λ ${(r[0]*1000).toFixed(0)} nm<br>`+
+  tip.innerHTML=`λ ${(r[0]*1000).toFixed(0)} nm  ·  <b>클릭=원인분석</b><br>`+
     (r.length>=7?`QE R ${r[4].toFixed(3)} · G ${r[5].toFixed(3)} · B ${r[6].toFixed(3)}<br>`:"")+
     `QE전체 ${r[2].toFixed(3)} · R(반사) ${r[1].toFixed(3)}<br>A ${r[3].toFixed(3)} · 합 ${(r[1]+r[2]+r[3]).toFixed(3)}`; });
 el("qeChart").addEventListener("mouseleave",()=>{ el("qeTip").style.display="none"; drawQEChart(); });
+el("qeChart").style.cursor="pointer";
+el("qeChart").addEventListener("click",async e=>{ if(!QE.rows.length)return;
+  const bi=qeNearestIdx(e), lamnm=Math.round(QE.rows[bi][0]*1000), body=el("attrBody");
+  el("attrPanel").scrollIntoView({behavior:"smooth",block:"nearest"});
+  body.innerHTML=`⏳ <b>${lamnm}nm</b> 에너지 귀속 계산중… (RCWA 1회, 수 초)`;
+  const manual=el("qeQual").value==="manual";
+  let a; try{ a=await(await fetch(qeApiBase()+"/api/attribute",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({yaml:structYAML(), wavelength_nm:lamnm,
+        nG: manual?+el("qeNG").value:101, downsample: manual?+el("qeDS").value:2})})).json(); }
+  catch(err){ body.innerHTML="요청 실패: "+err.message+" (서버 실행 확인: python app.py)"; return; }
+  if(a.error){ body.innerHTML="❌ "+a.error+(a.trace?"<pre style='white-space:pre-wrap;font-size:10px'>"+a.trace+"</pre>":""); return; }
+  body.innerHTML=renderAttr(a, lamnm);
+  // B. 민감도(surrogate 있으면 즉시) — 이 파장 주도 채널 랭킹
+  if(DOE.surrogate){ const ch=attrDominantCh(QE.rows[bi]);
+    const sw=nearestSurWl(lamnm);
+    try{ const b=await(await fetch(qeApiBase()+"/api/sensitivity",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({surrogate:DOE.surrogate, wavelength_nm:sw, channel:ch})})).json();
+      if(!b.error) el("attrBody").insertAdjacentHTML("beforeend", renderSens(b, sw, ch)); }catch(_){}
+  } });
+function attrDominantCh(row){ if(row.length<7) return "G";
+  const m={R:row[4],G:row[5],B:row[6]}; return Object.keys(m).sort((x,y)=>m[y]-m[x])[0]; }
+function nearestSurWl(nm){ const ws=(DOE.surrogate&&DOE.surrogate.wavelengths_nm)||[nm];
+  return ws.reduce((b,w)=>Math.abs(w-nm)<Math.abs(b-nm)?w:b, ws[0]); }
+function attrBar(label,val,col,tot){ const pct=tot>0?val/tot*100:0;
+  return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0">
+    <span style="width:118px;text-align:right;font-size:11px">${label}</span>
+    <div style="flex:1;background:var(--panel-2);border-radius:3px;height:15px;overflow:hidden">
+      <div style="width:${Math.max(0,Math.min(100,pct)).toFixed(1)}%;height:100%;background:${col}"></div></div>
+    <span style="width:80px;font-size:11px;font-family:var(--mono)">${(pct).toFixed(1)}% <span style="color:var(--ink-faint)">(${val.toFixed(3)})</span></span></div>`; }
+function renderAttr(a, lamnm){ const C=qeColors();
+  let rows="";
+  rows+=attrBar("Si 수집 = QE", a.qe_collected, C.QE, 1);
+  rows+=attrBar("재결합 손실", a.si_recomb, "#c98a1a", 1);
+  rows+=attrBar("DTI 트렌치 흡수", a.dti_trench, "#8a5a2a", 1);
+  const above=a.above_si||{}; for(const k of Object.keys(above)) rows+=attrBar("흡수 · "+k, above[k], "#7a6fbf", 1);
+  rows+=attrBar("반사 (R)", a.reflect, C.R, 1);
+  if(a.transmit_deep>1e-6) rows+=attrBar("심부 투과(손실)", a.transmit_deep, "var(--ink-faint)", 1);
+  const bc=a.by_channel||{}; let byc="";
+  for(const ch of ["R","G","B"]){ const d=bc[ch]; if(!d)continue;
+    byc+=`<span style="margin-right:14px">${ch}: 수집 ${(d.qe||0).toFixed(3)} · 재결합 ${(d.recomb||0).toFixed(3)} · 트렌치 ${(d.trench||0).toFixed(3)}</span>`; }
+  const cs=a.checksum;
+  return `<div style="font-weight:600;margin-bottom:6px">λ ${lamnm} nm — 에너지 분해 (입사=1.0)</div>${rows}
+    <div class="hint" style="margin-top:6px">색 픽셀별(밴드 흡수): ${byc}</div>
+    <div class="hint" style="margin-top:4px;color:${Math.abs(cs-1)<0.02?'var(--ink-faint)':'#c9531a'}">Σ(합)=${cs} ${Math.abs(cs-1)<0.02?'✓ 에너지 보존':'⚠ 분해 불완전'}</div>`; }
+function renderSens(b, sw, ch){ let rows="";
+  for(const r of (b.ranking||[])){ const sign=r.dqe_per_step>=0?"+":"";
+    const w=Math.min(100,Math.abs(r.dqe_per_step)/((b.ranking[0]&&Math.abs(b.ranking[0].dqe_per_step))||1)*100);
+    rows+=`<div style="display:flex;align-items:center;gap:8px;margin:3px 0">
+      <span style="width:118px;text-align:right;font-size:11px">${r.label}</span>
+      <div style="flex:1;background:var(--panel-2);border-radius:3px;height:14px;overflow:hidden">
+        <div style="width:${w.toFixed(0)}%;height:100%;background:${r.dqe_per_step>=0?'#3a8':'#c65'}"></div></div>
+      <span style="width:150px;font-size:11px;font-family:var(--mono)">${sign}${r.dqe_per_step.toFixed(4)} /스텝(${r.step}${r.unit})</span></div>`; }
+  const r2=b.r2!=null?`  ·  R²=${b.r2}`:"";
+  return `<div style="margin-top:14px;border-top:1px dashed var(--line);padding-top:10px">
+    <div style="font-weight:600;margin-bottom:4px">📈 민감도 — 이 QE 를 가장 크게 움직이는 노브 (surrogate ${sw}nm · ${ch}채널${r2})</div>
+    <div class="hint" style="margin-bottom:6px">1 스텝당 ΔQE (+면 그 방향으로 늘리면 QE↑). 구조를 어디로 바꿔야 QE 가 오르는지의 지침.</div>${rows}</div>`; }
 
 // ============================ 페이지 라우터 ============================
 const PAGES=[
@@ -1414,7 +1502,8 @@ function goPage(id){
   for(const p of PAGES){ const e=el(p.id); if(e)e.classList.toggle("on", p.id===id); }
   if(id==="wpage-set") qeEnterSettings();
   if(id==="wpage-build"){ renderStep(); renderViews(); }
-  if(id==="wpage-result"){ drawQEChart(); qeTableFill(); }
+  if(id==="wpage-result"){ drawQEChart(); qeTableFill();
+    invBind(); invUpdateAvail(); if(DOE.surrogate&&INV.nodes.length) drawInvChart(); }
   renderNav(); window.scrollTo(0,0);
 }
 function renderNav(){
@@ -1456,7 +1545,7 @@ el("simDOE").onclick=()=>{ goPage("wpage-set"); setTimeout(()=>el("doeCard").scr
 el("setBack").onclick=()=>goPage("wpage-sim");
 
 // ===== DOE · Surrogate 스윕 =====
-const DOE={running:false,timer:null,job:null};
+const DOE={running:false,timer:null,job:null,surrogate:null};
 function doeFmtSec(s){ s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600),m=Math.floor(s%3600/60); return (h?h+"시간 ":"")+(m?m+"분 ":"")+(s%60)+"초"; }
 el("doeRun").onclick=async()=>{ if(DOE.running)return;
   await fetchServerMaterials();                                  // 물질 최신화 (run 과 동일 규약)
@@ -1488,7 +1577,10 @@ el("doeRun").onclick=async()=>{ if(DOE.running)return;
     el("doeCsv").href="/api/doe/file?job="+DOE.job+"&kind=csv";
     const hasSur=s.r2_G_mid!=null;
     el("doeSur").style.display=hasSur?"":"none";
-    if(hasSur) el("doeSur").href="/api/doe/file?job="+DOE.job+"&kind=surrogate";
+    if(hasSur){ el("doeSur").href="/api/doe/file?job="+DOE.job+"&kind=surrogate";
+      try{ DOE.surrogate=await(await fetch(qeApiBase()+"/api/doe/file?job="+DOE.job+"&kind=surrogate")).json();
+        invUpdateAvail(); el("doeNote").textContent="✓ surrogate 저장 — 결과 페이지에서 🎯 역설계 사용 가능"; }catch(_){}
+    }
   },1500); };
 el("doeCancel").onclick=()=>{ if(!DOE.job)return;
   el("doeCancel").disabled=true; el("doeCancel").textContent="⏳ 중단중…";
@@ -1497,8 +1589,84 @@ el("doeCancel").onclick=()=>{ if(!DOE.job)return;
 el("resultBack").onclick=()=>goPage("wpage-set");
 el("resultRerun").onclick=()=>goPage("wpage-set");
 
+// ===== 🎯 역설계 (목표 QE → 구조) =====
+// 노드 = surrogate 파장. 각 노드에 R/G/B 목표값. 캔버스에서 선택 채널을 드래그해 곡선을 그림.
+const INV={nodes:[],pred:null};
+const INV_CH_COL={R:"#e0564a",G:"#37a06a",B:"#4c8dff"};
+function invSelCh(){ const r=document.querySelector('input[name="invCh"]:checked'); return r?r.value:"G"; }
+function invUpdateAvail(){ const ok=!!DOE.surrogate;
+  const need=el("invNeedSur"), main=el("invMain"); if(!need||!main)return;
+  need.style.display=ok?"none":""; main.style.display=ok?"":"none";
+  if(ok && !INV.nodes.length) invResetNodes(); }
+function qeAtWl(nm){ // 현재 QE.rows 를 nm(정수)에서 선형보간 → {R,G,B} (없으면 null)
+  if(!QE.rows.length||QE.rows[0].length<7) return null;
+  const um=nm/1000, rs=QE.rows;
+  if(um<=rs[0][0]) return {R:rs[0][4],G:rs[0][5],B:rs[0][6]};
+  if(um>=rs[rs.length-1][0]){ const r=rs[rs.length-1]; return {R:r[4],G:r[5],B:r[6]}; }
+  for(let i=1;i<rs.length;i++){ if(um<=rs[i][0]){ const a=rs[i-1],b=rs[i],t=(um-a[0])/(b[0]-a[0]);
+    return {R:a[4]+(b[4]-a[4])*t, G:a[5]+(b[5]-a[5])*t, B:a[6]+(b[6]-a[6])*t}; } }
+  return null; }
+function invResetNodes(){ if(!DOE.surrogate)return; INV.pred=null;
+  INV.nodes=DOE.surrogate.wavelengths_nm.map(w=>{ const q=qeAtWl(w)||{R:0.3,G:0.3,B:0.3};
+    return {wl:+w, R:q.R, G:q.G, B:q.B}; });
+  drawInvChart(); el("invOut").innerHTML=""; }
+function invGeom(){ const cv=el("invChart"); return {cv, W:cv.width,H:cv.height, mL:48,mR:16,mT:14,mB:30}; }
+function invXY(){ const g=invGeom(), ws=INV.nodes.map(n=>n.wl);
+  const l0=Math.min(...ws), l1=Math.max(...ws), pw=g.W-g.mL-g.mR, ph=g.H-g.mT-g.mB;
+  return {X:w=>g.mL+(l1>l0?(w-l0)/(l1-l0):0.5)*pw, Y:v=>g.mT+(1-Math.min(1,Math.max(0,v)))*ph,
+          Yinv:py=>1-(py-g.mT)/ph, l0,l1,pw,ph,g}; }
+function drawInvChart(){ const g=invGeom(); if(!g.cv)return; const ctx=g.cv.getContext("2d");
+  if(!INV.nodes.length){ ctx.clearRect(0,0,g.W,g.H); return; }
+  const {X,Y}=invXY(), ink=css("--ink"),dim=css("--ink-dim"),faint=css("--ink-faint"),line=css("--line");
+  ctx.clearRect(0,0,g.W,g.H);
+  ctx.strokeStyle=line; ctx.fillStyle=faint; ctx.font="10px "+css("--mono"); ctx.lineWidth=1;
+  for(let v=0;v<=1.001;v+=0.25){ const y=Y(v)+0.5; ctx.beginPath(); ctx.moveTo(g.mL,y); ctx.lineTo(g.W-g.mR,y); ctx.stroke();
+    ctx.textAlign="right"; ctx.fillText(v.toFixed(2),g.mL-6,y+3); }
+  INV.nodes.forEach(n=>{ ctx.textAlign="center"; ctx.fillText(n.wl, X(n.wl), g.H-g.mB+15); });
+  const sel=invSelCh();
+  for(const ch of ["R","G","B"]){ const col=INV_CH_COL[ch], on=ch===sel;
+    ctx.strokeStyle=col; ctx.globalAlpha=on?1:0.35; ctx.lineWidth=on?2.4:1.4; ctx.beginPath();
+    INV.nodes.forEach((n,i)=>{ const x=X(n.wl),y=Y(n[ch]); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }); ctx.stroke();
+    ctx.fillStyle=col; INV.nodes.forEach(n=>{ ctx.beginPath(); ctx.arc(X(n.wl),Y(n[ch]),on?4:2.6,0,7); ctx.fill(); });
+    ctx.globalAlpha=1; }
+  // 예측(역설계 결과) 오버레이 — 점선
+  if(INV.pred){ for(const ch of ["R","G","B"]){ ctx.strokeStyle=INV_CH_COL[ch]; ctx.globalAlpha=0.9;
+      ctx.setLineDash([5,4]); ctx.lineWidth=1.4; ctx.beginPath(); let first=true;
+      INV.nodes.forEach(n=>{ const p=INV.pred[n.wl]; if(!p||p[ch]==null)return; const x=X(n.wl),y=Y(p[ch]);
+        first?(ctx.moveTo(x,y),first=false):ctx.lineTo(x,y); }); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1; } }
+  ctx.fillStyle=dim; ctx.textAlign="center"; ctx.font="10px "+css("--mono");
+  ctx.fillText("실선=목표(드래그해 그리기) · 점선=역설계 구조의 예측 QE",g.mL+(g.W-g.mL-g.mR)/2,g.mT-2); }
+function invDrag(e){ const g=invGeom(),rc=g.cv.getBoundingClientRect();
+  const px=(e.clientX-rc.left)*g.cv.width/rc.width, py=(e.clientY-rc.top)*g.cv.height/rc.height;
+  const {X,Yinv}=invXY(); let bi=0,bd=1e9;
+  INV.nodes.forEach((n,i)=>{ const d=Math.abs(X(n.wl)-px); if(d<bd){bd=d;bi=i;} });
+  INV.nodes[bi][invSelCh()]=Math.min(1,Math.max(0,Yinv(py))); drawInvChart(); }
+let invDragging=false;
+function invBind(){ const cv=el("invChart"); if(!cv||cv._bound)return; cv._bound=true;
+  cv.addEventListener("pointerdown",e=>{ invDragging=true; cv.setPointerCapture(e.pointerId); invDrag(e); });
+  cv.addEventListener("pointermove",e=>{ if(invDragging) invDrag(e); });
+  cv.addEventListener("pointerup",()=>invDragging=false);
+  cv.addEventListener("pointercancel",()=>invDragging=false);
+  document.querySelectorAll('input[name="invCh"]').forEach(r=>r.addEventListener("change",drawInvChart));
+  el("invReset").onclick=invResetNodes;
+  el("invRun").onclick=invRun; }
+async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 — DOE 스윕 먼저"); return; }
+  const target={}; INV.nodes.forEach(n=>{ target[n.wl]={R:n.R,G:n.G,B:n.B}; });
+  const out=el("invOut"); out.innerHTML="⏳ 역설계 풀이중…";
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/inverse",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({surrogate:DOE.surrogate, target})})).json(); }
+  catch(e){ out.innerHTML="요청 실패: "+e.message; return; }
+  if(r.error){ out.innerHTML="❌ "+r.error; return; }
+  INV.pred=r.predicted; drawInvChart();
+  let ps=(r.params||[]).map(p=>{ const s=p.delta>=0?"+":"";
+    return `<tr><td style="padding:2px 10px 2px 0">${p.label}</td>
+      <td style="padding:2px 10px 2px 0;font-family:var(--mono);text-align:right">${s}${p.delta} ${p.unit}</td></tr>`; }).join("");
+  const edge=r.edge_warning?`<div class="hint" style="color:#c9531a;margin-top:6px">⚠ 일부 축이 탐색범위(±2스텝) 경계에 붙음 — 목표가 이 구조 근방에서 도달 어려움(외삽 주의). 더 큰 변화가 필요하면 DOE 범위를 넓혀 재스윕하세요.</div>`:"";
+  out.innerHTML=`<div style="font-weight:600;margin-bottom:6px">제안 구조 (현재 구조 기준 변화량 · 잔차 RMS=${r.residual_rms})</div>
+    <table style="font-size:12px">${ps}</table>
+    <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v83";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v84";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)

@@ -21,9 +21,10 @@ def _feat_index():
 def sensitivity_from_surrogate(surrogate, wavelength_nm, channel):
     """B-1: surrogate 계수에서 축별 국소 민감도. x=step/2 정규화이므로
     '1 스텝당 ΔQE' = 0.5·(1차계수). 2차(곡률)도 함께 보고."""
+    from .doe import coef_at, r2_at
     axes = surrogate["axes"]
     w = int(wavelength_nm)
-    coef = surrogate["coef"][channel][w]
+    coef = coef_at(surrogate, channel, w)
     lin, sq, _ = _feat_index()
     rows = []
     for i, ax in enumerate(axes):
@@ -33,7 +34,7 @@ def sensitivity_from_surrogate(surrogate, wavelength_nm, channel):
                      "step": ax[2], "dqe_per_step": round(d1, 5),
                      "curvature": round(d2, 5), "abs": abs(d1)})
     rows.sort(key=lambda r: -r["abs"])
-    r2 = surrogate.get("r2", {}).get(channel, {}).get(w)
+    r2 = r2_at(surrogate, channel, w)
     return {"wavelength_nm": w, "channel": channel, "method": "surrogate",
             "r2": r2, "ranking": [{k: v for k, v in r.items() if k != "abs"}
                                   for r in rows]}

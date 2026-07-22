@@ -50,7 +50,8 @@ def invert(surrogate, target, weights=None, channels=("R", "G", "B"),
         raise ValueError("target 에 유효한 (파장,채널) 이 없습니다.")
     tgt = np.array(tgt)
     wt = np.array(wt)
-    C = np.array([coef[ch][int(wl)] for (wl, ch) in key])   # (P,15)
+    from .doe import coef_at
+    C = np.array([coef_at(surrogate, ch, wl) for (wl, ch) in key])   # (P,15)
 
     def sse(X):
         F = _feat_matrix(X)                                 # (M,15)

@@ -184,11 +184,29 @@ def fit_surrogate(doe_result):
             "wavelengths_nm": list(ws), "coef": coefs, "r2": r2s}
 
 
+def coef_at(surrogate, channel, wavelength_nm):
+    """surrogate coef 접근 — JSON 왕복 후 파장 키가 str 이어도 안전하게 조회."""
+    cmap = surrogate["coef"][channel]
+    w = int(wavelength_nm)
+    if w in cmap:
+        return cmap[w]
+    if str(w) in cmap:
+        return cmap[str(w)]
+    raise KeyError(f"surrogate 에 파장 {w}nm 계수가 없습니다 (있는 값: "
+                   f"{list(cmap.keys())})")
+
+
+def r2_at(surrogate, channel, wavelength_nm):
+    """surrogate r2 접근 — 키 str/int 모두 허용, 없으면 None."""
+    rmap = surrogate.get("r2", {}).get(channel, {})
+    w = int(wavelength_nm)
+    return rmap.get(w, rmap.get(str(w)))
+
+
 def predict(surrogate, steps, wavelength_nm, channel):
     """surrogate JSON + 스텝지수(-2..2) -> QE 예측."""
     x = [s / 2.0 for s in steps]
-    c = surrogate["coef"][channel][int(wavelength_nm)]
-    return float(np.dot(_feat(x), c))
+    return float(np.dot(_feat(x), coef_at(surrogate, channel, wavelength_nm)))
 
 
 def doe_csv(doe_result):
