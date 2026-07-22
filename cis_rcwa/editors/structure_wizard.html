@@ -261,7 +261,7 @@ const DEFAULT = {
     cf_red:{}, cf_green:{}, cf_blue:{}, ml:{}, ml_arl:{} },
   stack:{
     si:{ material:"si", thickness_um:3.85 },
-    dti:{ width_um:0.09, oxide_liner_um:0.02, liner:"oxide", fill:"poly", mode:"2x2_open", center_open:true, center_gap_x_um:0.28, center_gap_y_um:0.28, optical:true },
+    dti:{ width_um:0.09, oxide_liner_um:0.02, liner:"oxide", fill:"poly", mode:"2x2_open", center_open:true, center_gap_x_um:0.28, center_gap_y_um:0.28 },
     barl:[ {material:"al2o3",thickness_um:0.009}, {material:"hfox",thickness_um:0.055}, {material:"peox",thickness_um:0.063}, {material:"hfox",thickness_um:0.0095}, {material:"al2o3",thickness_um:0.009} ],
     grid:{ pitch:2, width_um:0.15, top_ratio:1, coat_on:false, coat_material:"al2o3", coat_um:0.005, stack:[ {material:"tin",height_um:0.008}, {material:"teos",height_um:0.32} ] },
     cf:{ R:{material:"cf_red",thickness_um:0.48,curvature_um:0}, G:{material:"cf_green",thickness_um:0.50,curvature_um:0}, B:{material:"cf_blue",thickness_um:0.43,curvature_um:0} },
@@ -269,11 +269,8 @@ const DEFAULT = {
          quads:[[{shape:"2x2",scale:1.2},{shape:"2x2",scale:1.2}],[{shape:"2x2",scale:1.2},{shape:"2x2",scale:1.2}]], lenses:null },
     arl_top:{ material:"ml_arl", thickness_um:0.08 },
   },
-  // 캐리어 수집효율 η(z)=1-r0·exp(-z/ld_um) (enabled=false 면 yaml 에서 제거 -> 순수 광학 QE)
-  collection:{ enabled:false, r0:0.35, ld_um:0.175 },
-  // CRA 렌즈-shift (enabled=false 면 yaml 에서 제거). field 0~1.0(11점)별 CRA·shrink.
-  cra:{ enabled:false, azimuth_deg:0, shift_sign:1, shrink_ml_um_per_deg:0.0, shrink_cfgrid_um_per_deg:0.0,
-        field_cra_deg:[0,0,0,0,0,0,0,0,0,0,0] },
+  // 모델링 옵션(dti.optical/collection/cra)은 UI 로 받지 않음 — 엔진이 자동 판단.
+  // (yaml 에 명시하면 그 값이 우선. import 된 값은 그대로 보존/재저장됨.)
 };
 let refLambda=0.55, folderLib={}, curStep=0, viewMode="iso";
 let S=(function(){ try{const j=localStorage.getItem("cis_wizard_v3"); if(j){const d=JSON.parse(j);
@@ -878,11 +875,7 @@ const STEPS=[
       rows.push(numRow("center open 가로 (µm) 0.15~0.30",d,"center_gap_x_um","0.001",0.15,0.30));
       rows.push(numRow("center open 세로 (µm) 0.15~0.30",d,"center_gap_y_um","0.001",0.15,0.30));
       rows.push(h("p",{class:"hint"},["intra-quad 트렌치 팔이 중앙 못 미쳐 끊김(가로/세로 open 길이) → 4픽셀 Si 가 직각 클로버로 연결. 식각면(사이드월+팔 끝벽)에 라이너 → 나머지 채움."]));
-    } else rows.push(h("p",{class:"hint"},["식각 → 표면 라이너 → 채움. depth 는 Si 두께 전체."]));
-    if(d.optical==null)d.optical=true;
-    const oc=h("input",{type:"checkbox"}); oc.checked=d.optical!==false; oc.onchange=()=>{d.optical=oc.checked; renderStep();};
-    rows.push(h("div",{class:"row"},[h("label",{},["광학 반영 (optical)"]),oc,
-      h("span",{class:"hint"},[d.optical!==false?"실제 DTI(흡수·산란) — 물리 모델":"전기격리만(매끈 Si) — 수직입사 레퍼 정합"])]));
+    } else rows.push(h("p",{class:"hint"},["식각 → 표면 라이너 → 채움. depth 는 Si 두께 전체. (광학 반영 여부는 엔진이 폭 기준 자동 판단)"]));
     return rows; }},
  {t:"4 · BARL stack", d:"전면 다층 AR (개수·물질·두께)", body:()=>[ h("p",{class:"hint"},["아래→위 순서. 두께는 Å(옹스트롱) 단위, ≤1000Å (=100nm)."]), subEditor(S.stack.barl,[["material","material","mat"],["thickness","thickness_um","numA"]]) ]},
  {t:"5 · Grid", d:"n×n 배열·width·물질 stack(각 height)·표면 코팅", body:()=>{ const g=S.stack.grid; const pt=h("select",{}); [["1","1×1 (pixel)"],["2","2×2 (quad)"]].forEach(([v,tx])=>{const o=h("option",{value:v},[tx]); if(String(g.pitch||1)===v)o.selected=true; pt.appendChild(o);}); pt.onchange=()=>{g.pitch=parseInt(pt.value); renderViews();};
@@ -954,28 +947,6 @@ const STEPS=[
     return rows; }},
  {t:"8 · ARL top", d:"air→ML 사이 AR (물질·두께)", body:()=>[ matRow("ARL 물질",S.stack.arl_top,"material"), numRowA("thickness (Å) ≤2000",S.stack.arl_top,"thickness_um",2000),
     h("p",{class:"hint"},["여기까지가 구조 셋업. 우측에서 3D 확인 후 상단 '⤓ Generate .npy'."]) ]},
- {t:"9 · QE / CRA 옵션", d:"수집효율 η(z) · CRA 렌즈-shift. 끄면 예전(순수광학·수직입사)로 복귀", body:()=>{
-    const c=S.collection||(S.collection={enabled:false,r0:0.35,ld_um:0.175});
-    const cr=S.cra||(S.cra={enabled:false,azimuth_deg:0,shift_sign:1,shrink_ml_um_per_deg:0,shrink_cfgrid_um_per_deg:0,field_cra_deg:[0,0,0,0,0,0,0,0,0,0,0]});
-    const rows=[h("div",{class:"seclbl"},["수집효율 η(z)=1−r0·exp(−z/ld) (소자 QE)"])];
-    const ce=h("input",{type:"checkbox"}); ce.checked=!!c.enabled; ce.onchange=()=>{c.enabled=ce.checked; renderStep();};
-    rows.push(h("div",{class:"row"},[h("label",{},["수집효율 사용"]),ce,h("span",{class:"hint"},[c.enabled?"소자 QE(단파장 억제)":"순수 광학 QE(예전)"])]));
-    if(c.enabled){ rows.push(numRow("r0 (표면손실 0~1)",c,"r0","0.01",0,1)); rows.push(numRow("ld_um (회복깊이 µm)",c,"ld_um","0.005",0.005,2)); }
-    rows.push(h("div",{class:"seclbl"},["CRA 렌즈-shift (field별 초점 보정)"]));
-    const re=h("input",{type:"checkbox"}); re.checked=!!cr.enabled; re.onchange=()=>{cr.enabled=re.checked; renderStep();};
-    rows.push(h("div",{class:"row"},[h("label",{},["CRA shift 사용"]),re,h("span",{class:"hint"},[cr.enabled?"field별 shift(빗각)":"수직입사(예전)"])]));
-    if(cr.enabled){
-      rows.push(numRow("shrink ML (µm/deg)",cr,"shrink_ml_um_per_deg","0.001",0,0.3));
-      rows.push(numRow("shrink CF+grid (µm/deg)",cr,"shrink_cfgrid_um_per_deg","0.001",0,0.3));
-      rows.push(numRow("azimuth (deg · 0=1D, 45=대각)",cr,"azimuth_deg","1",0,90));
-      rows.push(numRow("shift_sign (+1 광원쪽 / −1)",cr,"shift_sign","2",-1,1));
-      const ci=h("input",{type:"text",value:(cr.field_cra_deg||[]).join(",")}); ci.style.flex="1";
-      ci.oninput=()=>{ cr.field_cra_deg=ci.value.split(",").map(x=>parseFloat(x.trim())||0); };
-      rows.push(h("div",{class:"row"},[h("label",{},["CRA(deg) field 0~1.0"]),ci]));
-      rows.push(h("p",{class:"hint"},["11개 콤마구분: field 0(중심)→1.0(코너). 예: 0,3,6,9,12,15,18,21,24,27,30"]));
-    }
-    rows.push(h("p",{class:"hint"},["둘 다 끄면 저장 yaml 에서 제거 → 예전 동작. 켜면 collection/cra 블록이 yaml 에 포함됨."]));
-    return rows; }},
 ];
 function buildSteps(){ const st=el("steps"); st.innerHTML=""; STEPS.forEach((s,i)=>{ const c=h("div",{class:"schip"+(i===curStep?" on":(i<curStep?" done":"")),onclick:()=>{curStep=i; renderStep();}},[String(i+1)]); st.appendChild(c); }); }
 function renderStep(){ buildSteps(); const b=el("stepBody"); b.innerHTML=""; const s=STEPS[curStep];
@@ -1087,13 +1058,12 @@ function structYAML(){ const exp=structuredClone(S); const disp={};
     // 브라우저에 λ-테이블이 있으면 yaml 에 dispersion 으로 동봉 -> RCWA 가 '이 값 그대로' 사용
     const t=matTable(m); if(t&&t.length>1) disp[m]=t.map(r=>[+(r[0]).toFixed(4),+(r[1]).toFixed(4),+(r[2]).toFixed(5)]); }
   if(Object.keys(disp).length) exp.dispersion=disp;
-  // 수집효율: enabled=false 면 yaml 에서 제거(순수 광학 QE), true 면 {r0, ld_um} 만 남김
-  if(exp.collection){ if(!exp.collection.enabled) delete exp.collection;
-    else exp.collection={ r0:+exp.collection.r0, ld_um:+exp.collection.ld_um }; }
-  // CRA 렌즈-shift: enabled=false 면 제거, true 면 드라이버 키만 남김
-  if(exp.cra){ if(!exp.cra.enabled) delete exp.cra;
-    else { const q=exp.cra; exp.cra={ field_cra_deg:q.field_cra_deg, shrink_ml_um_per_deg:+q.shrink_ml_um_per_deg,
-      shrink_cfgrid_um_per_deg:+q.shrink_cfgrid_um_per_deg, azimuth_deg:+q.azimuth_deg, shift_sign:+q.shift_sign }; } }
+  // 모델링 옵션은 UI 미노출 — 엔진 자동 판단. 구버전(UI 시절) 잔재만 정리:
+  //   enabled 플래그가 있으면 벗기고(false 면 블록 제거), stack.dti.optical 은 제거.
+  //   yaml import 로 들어온 명시값(collection/cra 본문)은 그대로 보존(passthrough).
+  if(exp.stack&&exp.stack.dti) delete exp.stack.dti.optical;
+  for(const k of ["collection","cra"]){ const b=exp[k];
+    if(b&&typeof b==="object"&&"enabled" in b){ if(!b.enabled) delete exp[k]; else delete b.enabled; } }
   return "# CIS structure · product: "+(S.product||"")+"\n# n,k 우선순위: dispersion(브라우저 import 테이블) > materials 폴더 > 아래 상수(λ="+refLambda+"µm)\n"+toYAML(exp); }
 function download(name,text,type){ const blob=new Blob([text],{type:type||"text/yaml"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
 async function saveStructYAML(){ const text=structYAML();
@@ -1188,9 +1158,7 @@ function parseYAML(text){ const lines=text.replace(/\t/g,"  ").split("\n").map(l
     if(s[j]==='"'){let k=j+1,str="";while(k<s.length&&s[k]!=='"'){str+=s[k++];}j=k+1;return str;} let t="";while(j<s.length&&!/[,\]}]/.test(s[j])){t+=s[j++];} return sc(t.trim()); } return val(); }
   function sc(s){ if(s===""||s==null)return null; if(s[0]==='"'&&s[s.length-1]==='"')return JSON.parse(s); if(s==="true")return true; if(s==="false")return false; if(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s))return parseFloat(s); return s; } }
 function loadStruct(obj){ S=Object.assign(structuredClone(DEFAULT),obj); if(obj.stack)S.stack=Object.assign(structuredClone(DEFAULT.stack),obj.stack); if(obj.materials)S.materials=Object.assign(structuredClone(DEFAULT.materials),obj.materials);
-  // 저장 yaml 은 enabled 를 벗겨 내보냄 -> 재-import 시 복원 (라운드트립 보존)
-  if(obj.collection&&obj.collection.enabled==null) S.collection=Object.assign(structuredClone(DEFAULT.collection),obj.collection,{enabled:true});
-  if(obj.cra&&obj.cra.enabled==null) S.cra=Object.assign(structuredClone(DEFAULT.cra),obj.cra,{enabled:true});
+  // collection/cra 등 최상위 여분 키는 passthrough (import 값 보존, UI 미노출)
   // yaml 에 동봉된 dispersion(λ-테이블) 복원 -> 새 브라우저에서도 물질 테이블 유지
   if(obj.dispersion){ for(const nm in obj.dispersion){ const t=obj.dispersion[nm]; if(Array.isArray(t)&&t.length>1){ folderLib[nm]=t; if(!(nm in S.materials)){ const L=t.map(r=>r[0]); S.materials[nm]={n:+interp1(refLambda,L,t.map(r=>r[1])).toFixed(4),k:+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4)}; assignMatColor(nm); } } } }
   clampRes(); save(); prod.value=S.product||""; curStep=0; renderStep(); }
@@ -1436,7 +1404,7 @@ el("resultBack").onclick=()=>goPage("wpage-set");
 el("resultRerun").onclick=()=>goPage("wpage-set");
 
 // ============================ init ============================
-const WIZ_VERSION="v78";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v79";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)

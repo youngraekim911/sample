@@ -22,8 +22,9 @@ from src.structure.ir import StructureIR, Detector
 
 TMP = os.environ.get("TMPDIR", "/tmp")
 CONF = "tests/data/regress_v50.yaml"   # v50 기준 구조 고정 (conf 는 소자 사양따라 변함)
-EXPECT_G = 0.6491            # 예시 플레이스홀더 물질(data/materials/*.txt) + 밴드만 +
-                            # ml_slices=8(기본). 폴더 물질/슬라이스 바꾸면 이 값도 갱신.
+EXPECT_G = 0.6050            # 예시 플레이스홀더 물질(data/materials/*.txt) + ml_slices=8 +
+                            # yaml 경로 auto 모델(dti.optical 자동=off@W0.10 + collection 기본).
+                            # 폴더 물질/슬라이스/auto 규칙 바꾸면 이 값도 갱신.
 
 
 def qe_g(sim):
@@ -38,7 +39,9 @@ def main():
     g, o1 = qe_g(sim)
     print(f"[1] yaml QE_G@550 = {g*100:.2f}%  (기대 {EXPECT_G*100:.2f}±0.15)")
     assert abs(g - EXPECT_G) < 0.003, "yaml 회귀 실패"
-    assert 0 <= o1["R"] <= 1 and abs(o1["R"] + o1["QE"] + o1["A_stack"] - 1) < 1e-6, \
+    # yaml 경로는 auto 모델(수집효율 on) — 에너지 항등식은 광학 QE 기준
+    qe_opt = o1.get("QE_optical", o1["QE"])
+    assert 0 <= o1["R"] <= 1 and abs(o1["R"] + qe_opt + o1["A_stack"] - 1) < 1e-6, \
         "에너지 보존 실패"
 
     # ---- 2) IR npz 라운드트립 ----

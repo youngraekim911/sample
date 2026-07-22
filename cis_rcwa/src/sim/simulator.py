@@ -87,12 +87,32 @@ class RCWAPlaneWaveSimulator:
         self.si_band_um = det.band_um if det else 0.0
 
     # ------------------------------------------------------------- yaml -> IR
+    @staticmethod
+    def _auto_model_defaults(cfg):
+        """yaml 에 없는 모델링 선택을 프로그램이 자동 판단 (명시값은 항상 우선).
+
+        - dti.optical 미지정: DTI 폭이 서브파장(W<0.15µm)이면 광학 생략(전기격리만).
+          가시광 λ 대비 훨씬 얇은 트렌치는 기하 TIR 이 성립하지 않아 광학적으로
+          유효 산란체가 아니며, 소자 QE 툴 관행도 광학 무시. 넓은 DTI 는 광학 반영.
+        - collection 미지정: 소자 QE 기본 표면 dead-layer η(z)=1-r0·exp(-z/ld) 적용.
+          순수 광학 QE 를 원하면 yaml 에 collection: {r0: 0} 명시.
+        """
+        st = cfg.get("stack") or {}
+        d = st.get("dti")
+        if d and (d.get("mode") or "").lower() not in ("", "none") \
+                and "optical" not in d:
+            W = float(d.get("width_um", 0) or 0)
+            d["optical"] = not (0 < W < 0.15)
+        if "collection" not in cfg:
+            cfg["collection"] = {"r0": 0.35, "ld_um": 0.175}
+
     def _ir_from_yaml(self, cfg, base_dir, mesh, lateral_um):
         stack = cfg.get("stack") or {}
         if "si" in stack and "cf" in stack:              # wizard v3
             g = cfg["grid"]
             span = float(g["pixel_pitch_um"]) * int(g["n_pixels"])
             if mesh == "auto":
+                self._auto_model_defaults(cfg)
                 # 블록 조립 경로 — dti.optical / collection 등 신규 기능 전부 반영
                 # (레거시 WizardBuilder 와 기하 동등, 회귀[6] 보장). yaml 경로도 이 경로.
                 from ..structure.blocks import ir_from_wizard_cfg
