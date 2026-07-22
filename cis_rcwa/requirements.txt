@@ -1,0 +1,7 @@
+# CIS RCWA 시뮬레이터 의존성
+# 설치:  python -m pip install -r requirements.txt
+# (GPU CUDA torch 는 https://pytorch.org 안내에 따라 별도 설치 가능 — CPU 버전으로도 동작)
+torch
+numpy
+pyyaml
+matplotlib

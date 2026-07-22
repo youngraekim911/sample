@@ -4,6 +4,20 @@ CIS(CMOS Image Sensor)의 **qcell**(= (2×2 pixel) quad ×4 = 4×4 픽셀 단위
 YAML 로 정의하고 3D voxel 구조(`.npy`)로 뽑아 확인하는 도구.
 이후 RCWA 광학 해석의 입력으로 사용.
 
+## 빠른 시작 (처음 받은 분)
+
+**윈도우**: `run_windows.bat` 더블클릭 (Python 3.9+ 필요 — python.org 설치 시 "Add to PATH" 체크).
+**mac/linux**: `./run.sh`
+→ 최초 1회 가상환경+패키지 자동 설치 후 http://127.0.0.1:8787 이 열립니다.
+
+수동 설치 시:
+```
+python -m pip install -r requirements.txt
+python app.py
+```
+`ModuleNotFoundError: No module named 'yaml'` 등이 나오면 위 설치가 안 된 것 —
+app.py 가 시작 시 누락 패키지를 알려주고 자동 설치도 제안합니다.
+
 ## 층 구조 (아래 → 위)
 
 | # | layer | 설명 |
