@@ -1,4 +1,4 @@
-# arl_hi — 예시 n,k 플레이스홀더 (사용자 측정 데이터로 교체)
+# arl_hi — example n,k placeholder
 wavelength n k
    400.0    1.9000    0.0000
    700.0    1.9000    0.0000

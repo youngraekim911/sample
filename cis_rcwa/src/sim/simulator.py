@@ -273,7 +273,7 @@ class RCWAPlaneWaveSimulator:
         qe_lab = {L: float(np.mean([q for q, l in zip(qe_pix, labels) if l == L]))
                   for L in dict.fromkeys(labels)}
         qe_opt = float(A_band + T_deep)                  # 광학 QE (에너지보존)
-        qe_total = float(A_coll + T_deep)                # 수집(소자) QE = 레퍼런스 정의
+        qe_total = float(A_coll + T_deep)                # 수집(소자) QE = device-QE 관례
         return {"QE": qe_total,
                 "QE_optical": qe_opt,                    # 순수 광학 흡수 (수집전)
                 "A_stack": float(1.0 - o["R"] - qe_opt),  # R+QE_optical+A_stack=1 항등

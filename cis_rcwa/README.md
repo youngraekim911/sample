@@ -330,7 +330,7 @@ python3 run_qe.py -c conf/qcell_config.yaml --lam0 0.45 --lam1 0.65 --n 5 --nG 1
 
 ### 물질 n,k 우선순위 (물질 변경 -> QE 반영 경로, 검증됨)
 1. **yaml `dispersion:`** — 위저드가 브라우저에서 import 한 λ-테이블을 yaml 에
-   자동 동봉 (사용자가 화면에서 본 값 '그대로' RCWA 에 들어감. 서버 폴더보다 우선)
+   자동 동봉 (화면에서 편집한 값 그대로 RCWA 에 들어감. 서버 폴더보다 우선)
 2. **materials/ 폴더** (`src` 지정 파일 -> 동명 파일)
 3. **yaml `materials:` 상수** (테이블 없는 커스텀 물질)
 위저드에서 물질 import 시 새 물질이 전 step 선택 목록에 자동 등록되고,

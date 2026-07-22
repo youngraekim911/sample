@@ -1,4 +1,4 @@
-# si — 예시 n,k 플레이스홀더 (사용자 측정 데이터로 교체)
+# si — example n,k placeholder
 wavelength n k
    400.0    5.5000    0.4000
    500.0    4.3000    0.1000

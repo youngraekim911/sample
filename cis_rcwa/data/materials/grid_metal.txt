@@ -1,4 +1,4 @@
-# grid_metal — 예시 n,k 플레이스홀더 (사용자 측정 데이터로 교체)
+# grid_metal — example n,k placeholder
 wavelength n k
    400.0    1.5000    1.8000
    550.0    1.7000    2.5000

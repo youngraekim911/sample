@@ -7,7 +7,7 @@
 
 Si/DTI/BARL/검출기는 고정. shift 는 주기 wrap(np.roll)로 옆 unit 침범을 정확히 표현.
 azimuth=0 -> 1D 반경(+x), 45 -> 2D 대각(코너). 방향은 빛 오는 쪽(마중); 부호는
-shift_sign 으로 뒤집을 수 있다(실측으로 교정).
+shift_sign 으로 뒤집을 수 있다(필요시 교정).
 """
 import math
 import numpy as np

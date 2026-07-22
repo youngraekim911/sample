@@ -26,7 +26,7 @@ materials:
   ml:        { id: 7, n: 1.60, k: 0.00 }    # Microlens + spacer(평탄화) 동일물질
 
 # (옵션) 파장 의존 n,k  [lambda_um, n, k].  없으면 위 상수 사용.
-#   RCWA QE sweep 용. Si 값은 근사(결정질 Si) — 실측 테이블로 교체 권장.
+#   RCWA QE sweep 용. Si 값은 근사(결정질 Si) — 정확한 분산 테이블로 교체 권장.
 #   CF 는 파장 선택성을 주기 위한 예시 흡수 스펙트럼(대역 밖 흡수↑).
 dispersion:
   si:

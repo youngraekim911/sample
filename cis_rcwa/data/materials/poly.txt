@@ -1,4 +1,4 @@
-# poly — 예시 n,k 플레이스홀더 (사용자 측정 데이터로 교체)
+# poly — example n,k placeholder
 wavelength n k
    400.0    5.0000    0.3000
    550.0    4.0000    0.0500

@@ -1,4 +1,4 @@
-# cf_red — 예시 n,k 플레이스홀더 (사용자 측정 데이터로 교체)
+# cf_red — example n,k placeholder
 wavelength n k
    400.0    1.7000    1.0000
    500.0    1.7000    0.6000

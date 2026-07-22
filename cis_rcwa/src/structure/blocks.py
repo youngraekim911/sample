@@ -418,7 +418,7 @@ class BlockStack:
         self.materials = materials or {}
         self.dispersion = dispersion or {}
         # collect_deep: 광다이오드 밴드 아래 반무한 기판 흡수를 QE 로 셀지.
-        #   False(기본)=밴드만(유한 광다이오드 — 적색이 기판 뚫으면 손실, 실측형 rolloff)
+        #   False(기본)=밴드만(유한 광다이오드 — 적색이 기판 뚫으면 손실, 물리적 rolloff)
         #   True=밴드+심부 전체 Si 흡수 (반무한 수집 가정)
         self.collect_deep = collect_deep
         # 캐리어 수집효율 η(z)=1-r0·exp(-z/Ld) (광학 QE -> 소자 QE). r0=0 이면 순수광학.
