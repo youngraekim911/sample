@@ -1240,7 +1240,7 @@ function loadStruct(obj){ S=Object.assign(structuredClone(DEFAULT),obj); if(obj.
 // ============================ QE 해석 (structure -> RCWA -> QE) ============================
 // 백엔드 블록: python3 app.py 가 띄우는 로컬 서버의 /api/qe (+status/cancel).
 // 프론트는 현재 위저드 구조(structYAML)를 그대로 보내고 스펙트럼을 그린다.
-const QE={job:null,rows:[],timer:null,running:false};
+const QE={job:null,rows:[],timer:null,running:false,yaml:null};
 const qeDlg=el("qeDlg");
 function qeDark(){ const t=document.documentElement.getAttribute("data-theme");
   return t? t==="dark" : matchMedia("(prefers-color-scheme: dark)").matches; }
@@ -1303,7 +1303,7 @@ el("qeRun").onclick=async()=>{ if(QE.running)return;
   let r; try{ r=await(await fetch(qeApiBase()+"/api/qe",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
   catch(e){ alert("요청 실패: "+e.message); el("qeRun").disabled=false; return; }
   if(!r.job){ alert("오류: "+(r.error||"?")); el("qeRun").disabled=false; return; }
-  QE.job=r.job; QE.rows=[]; QE.running=true; QE_T0=performance.now();
+  QE.job=r.job; QE.rows=[]; QE.yaml=body.yaml; QE.running=true; QE_T0=performance.now();  // 원인분석이 '실행 당시' 구조를 그대로 재사용
   el("qeProg").style.width="0%"; el("qeNote").textContent="시작중…"; el("runSub").textContent="RCWA 계산이 진행 중입니다.";
   el("qeStop").disabled=false; el("qeStop").textContent="■ 중단";   // 이전 중단 상태 리셋
   goPage("wpage-run");
@@ -1436,7 +1436,7 @@ el("qeChart").addEventListener("click",async e=>{ if(!QE.rows.length)return;
   body.innerHTML=`⏳ <b>${lamnm}nm</b> 에너지 귀속 계산중… (RCWA 1회, 수 초)`;
   const manual=el("qeQual").value==="manual";
   let a; try{ a=await(await fetch(qeApiBase()+"/api/attribute",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({yaml:structYAML(), wavelength_nm:lamnm,
+      body:JSON.stringify({yaml:QE.yaml||structYAML(), wavelength_nm:lamnm,
         nG: manual?+el("qeNG").value:101, downsample: manual?+el("qeDS").value:2})})).json(); }
   catch(err){ body.innerHTML="요청 실패: "+err.message+" (서버 실행 확인: python app.py)"; return; }
   if(a.error){ body.innerHTML="❌ "+a.error+(a.trace?"<pre style='white-space:pre-wrap;font-size:10px'>"+a.trace+"</pre>":""); return; }
