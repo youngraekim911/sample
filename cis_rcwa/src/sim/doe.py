@@ -1,23 +1,28 @@
 # -*- coding: utf-8 -*-
 """DOE(실험계획) 스윕 + 2차 다항 surrogate 추출.
 
-구조 설계 노브 4축을 현 셋업 중심 5레벨(-2..+2)로 흔들어 QE 스펙트럼을 수집하고,
+구조 설계 노브 k축을 현 셋업 중심 5레벨(-2..+2)로 흔들어 QE 스펙트럼을 수집하고,
 2차 반응표면(quadratic response surface) surrogate 를 최소자승 피팅한다.
+(축 개수 k 는 axes 정의에서 자동 — 4축이든 6축이든 일반화되어 동작)
 
-축 (스텝 크기는 axes 설정으로 조절):
-    cf_dA     : CF R/G/B 두께 동시 증감 (Å 단위 스텝, 기본 300Å -> ±600Å)
+기본 축 (스텝 크기는 axes 설정으로 조절):
+    cf_R_dA   : CF Red   두께 증감 (Å 단위 스텝, 기본 300Å -> ±600Å)
+    cf_G_dA   : CF Green 두께 증감 (Å 단위 스텝, 기본 300Å -> ±600Å)
+    cf_B_dA   : CF Blue  두께 증감 (Å 단위 스텝, 기본 300Å -> ±600Å)
     planar_um : ML 평탄층 두께 증감 (µm 스텝, 기본 0.025 -> ±0.05µm)
     ml_h_um   : ML 돔 두께(height) 증감 (µm 스텝, 기본 0.025 -> ±0.05µm)
     ml_scale  : ML radius 배율 증감 (스텝, 기본 0.025 -> ±0.05)
 
-모드 (실행 횟수):
-    axis      : 중심 1 + 축별 ±1,±2 (4×4)            = 17  (주효과 스크리닝)
-    surrogate : axis 17 + 2인자 (±1,±1) 조합 C(4,2)×4 = 41  (2차 모델 15계수 피팅, 권장)
-    full      : 5^4 전조합                             = 625 (GPU 권장)
+모드 (실행 횟수, k=축 개수):
+    axis      : 중심 1 + 축별 ±1,±2 (4k)                = 1+4k   (주효과 스크리닝)
+    surrogate : axis + 2인자 (±1,±1) 조합 C(k,2)×4       = 권장 (2차 모델 피팅)
+    full      : 5^k 전조합                               = (GPU 권장, k 크면 폭증 주의)
+      · k=4: axis 17 / surrogate 41 / full 625
+      · k=6: axis 25 / surrogate 85 / full 15625
 
 surrogate: 응답 y(파장, 채널) 별로
     y ≈ c0 + Σ ci·xi + Σ cii·xi² + Σ cij·xi·xj   (x = 스텝지수 -2..+2 정규화 /2)
-계수 15개 최소자승 -> JSON. 예측은 predict() 또는 JSON 계수로 즉석 계산.
+계수 (1+2k+C(k,2))개 최소자승 -> JSON. 예측은 predict() 또는 JSON 계수로 즉석 계산.
 """
 import itertools
 import json
@@ -27,29 +32,38 @@ import numpy as np
 
 AXES_DEFAULT = [
     # (키, 라벨, 스텝 크기, 단위)  — 스텝지수 s∈{-2,-1,0,1,2}, 변화량 = s*step
-    ("cf_dA",     "CF RGB 두께",   300.0,  "A"),
-    ("planar_um", "ML 평탄층",     0.025,  "um"),
-    ("ml_h_um",   "ML 두께",       0.025,  "um"),
-    ("ml_scale",  "ML radius 배율", 0.025, "x"),
+    ("cf_R_dA",   "CF Red 두께",    300.0,  "A"),
+    ("cf_G_dA",   "CF Green 두께",  300.0,  "A"),
+    ("cf_B_dA",   "CF Blue 두께",   300.0,  "A"),
+    ("planar_um", "ML 평탄층",      0.025,  "um"),
+    ("ml_h_um",   "ML 두께",        0.025,  "um"),
+    ("ml_scale",  "ML radius 배율",  0.025, "x"),
 ]
 
+# CF 색상축 키 -> 해당 CF 채널 (per-color CF 두께 스윕)
+_CF_AXIS_COL = {"cf_R_dA": "R", "cf_G_dA": "G", "cf_B_dA": "B"}
 
-def doe_points(mode):
-    """모드 -> 스텝지수 튜플 리스트 [(s0,s1,s2,s3), ...]  (si ∈ -2..2)."""
+
+def doe_points(mode, naxes=None):
+    """모드 -> 스텝지수 튜플 리스트 [(s0,..,s_{k-1}), ...]  (si ∈ -2..2).
+
+    naxes(k) 미지정 시 기본 축 개수 사용. 축 개수와 반드시 일치해야 함.
+    """
+    k = int(naxes) if naxes else len(AXES_DEFAULT)
     if mode == "full":
-        return [p for p in itertools.product(range(-2, 3), repeat=4)]
-    pts = [(0, 0, 0, 0)]
-    for ax in range(4):                                  # 축별 ±1, ±2
+        return [p for p in itertools.product(range(-2, 3), repeat=k)]
+    pts = [tuple([0] * k)]
+    for ax in range(k):                                  # 축별 ±1, ±2
         for s in (-2, -1, 1, 2):
-            p = [0] * 4
+            p = [0] * k
             p[ax] = s
             pts.append(tuple(p))
     if mode == "axis":
         return pts
     if mode == "surrogate":                              # + 2인자 상호작용 (±1,±1)
-        for a, b in itertools.combinations(range(4), 2):
+        for a, b in itertools.combinations(range(k), 2):
             for sa, sb in itertools.product((-1, 1), (-1, 1)):
-                p = [0] * 4
+                p = [0] * k
                 p[a], p[b] = sa, sb
                 pts.append(tuple(p))
         return pts
@@ -65,10 +79,14 @@ def apply_point(cfg, steps, axes=AXES_DEFAULT):
         if s == 0:
             continue
         d = s * step
-        if key == "cf_dA":
+        if key == "cf_dA":                               # (구버전) CF 3색 동시
             for col in ("R", "G", "B"):
                 t = st["cf"][col]
                 t["thickness_um"] = max(0.05, round(t["thickness_um"] + d * 1e-4, 5))
+        elif key in _CF_AXIS_COL:                         # CF 색상별 독립 (R/G/B 각각)
+            col = _CF_AXIS_COL[key]
+            t = st["cf"][col]
+            t["thickness_um"] = max(0.05, round(t["thickness_um"] + d * 1e-4, 5))
         elif key == "planar_um":
             st["ml"]["planar_um"] = max(0.0, round(st["ml"]["planar_um"] + d, 5))
         elif key == "ml_h_um":
@@ -108,7 +126,7 @@ def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
     from ..structure.blocks import ir_from_wizard_cfg
     from .simulator import RCWAPlaneWaveSimulator
 
-    pts = doe_points(mode)
+    pts = doe_points(mode, len(axes))
     total = len(pts)
     out = {"axes": [list(a) for a in axes], "mode": mode, "nG": nG,
            "wavelengths_nm": list(wavelengths_nm), "points": []}
@@ -153,9 +171,13 @@ def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
 
 # ------------------------------------------------------------------ surrogate
 def _feat(x):
-    """x(4,) 정규화 스텝(-1..1) -> 2차 특징 15개."""
-    f = [1.0] + list(x) + [v * v for v in x]
-    for a, b in itertools.combinations(range(4), 2):
+    """x(k,) 정규화 스텝(-1..1) -> 2차 특징 (1 + 2k + C(k,2))개.
+
+    순서: [1, x1..xk, x1²..xk², x_i·x_j (i<j 사전순)].
+    """
+    x = list(x)
+    f = [1.0] + x + [v * v for v in x]
+    for a, b in itertools.combinations(range(len(x)), 2):
         f.append(x[a] * x[b])
     return f
 
@@ -163,7 +185,7 @@ def _feat(x):
 def fit_surrogate(doe_result):
     """DOE 결과 -> 파장×채널별 2차 계수 (최소자승). 반환 dict (JSON 직렬화 가능).
 
-    특징 순서: [1, x1..x4, x1²..x4², x12,x13,x14,x23,x24,x34]  (x = 스텝지수/2)
+    특징 순서(k=축 개수): [1, x1..xk, x1²..xk², x_i·x_j (i<j)]  (x = 스텝지수/2)
     """
     pts = [p for p in doe_result["points"]]
     X = np.array([_feat([s / 2.0 for s in p["steps"]]) for p in pts])
@@ -179,8 +201,9 @@ def fit_surrogate(doe_result):
             r2 = 1.0 - float(((y - yh) ** 2).sum()) / ss if ss > 1e-12 else 1.0
             coefs[L][int(w)] = [round(float(v), 6) for v in c]
             r2s[L][int(w)] = round(r2, 4)
-    return {"type": "quadratic_rsm", "axes": doe_result["axes"],
-            "feature_order": "1,x1..x4,x1^2..x4^2,x12,x13,x14,x23,x24,x34 (x=step/2)",
+    k = len(doe_result["axes"])
+    return {"type": "quadratic_rsm", "axes": doe_result["axes"], "naxes": k,
+            "feature_order": f"1, x1..x{k}, x1^2..x{k}^2, x_i*x_j (i<j) (x=step/2)",
             "wavelengths_nm": list(ws), "coef": coefs, "r2": r2s}
 
 

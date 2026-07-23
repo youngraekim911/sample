@@ -10,11 +10,12 @@ B-2: surrogate 없이 현 구조에서 각 축 ±1 스텝 유한차분 (그 파�
 import itertools
 
 
-def _feat_index():
-    """surrogate feature 순서: [1, x1..x4, x1²..x4², x12,x13,x14,x23,x24,x34]."""
-    lin = list(range(1, 5))
-    sq = list(range(5, 9))
-    cross = list(itertools.combinations(range(4), 2))  # (i,j) -> 9+..
+def _feat_index(k):
+    """surrogate feature 순서(k축): [1, x1..xk, x1²..xk², x_i·x_j (i<j)].
+    -> (선형계수 인덱스[k], 제곱계수 인덱스[k], 교차쌍 리스트)."""
+    lin = list(range(1, 1 + k))
+    sq = list(range(1 + k, 1 + 2 * k))
+    cross = list(itertools.combinations(range(k), 2))
     return lin, sq, cross
 
 
@@ -25,7 +26,7 @@ def sensitivity_from_surrogate(surrogate, wavelength_nm, channel):
     axes = surrogate["axes"]
     w = int(wavelength_nm)
     coef = coef_at(surrogate, channel, w)
-    lin, sq, _ = _feat_index()
+    lin, sq, _ = _feat_index(len(axes))
     rows = []
     for i, ax in enumerate(axes):
         d1 = 0.5 * float(coef[lin[i]])          # ∂QE/∂step (중심)
@@ -48,6 +49,8 @@ def local_sensitivity(cfg, wavelength_nm, channel, nG=101, downsample=2,
     from .doe import AXES_DEFAULT, apply_point
     axes = axes or AXES_DEFAULT
 
+    k = len(axes)
+
     def qe_at(steps):
         c = apply_point(cfg, steps, axes)
         sim = RCWAPlaneWaveSimulator(ir_from_wizard_cfg(c, lateral_n), nG=nG,
@@ -60,7 +63,7 @@ def local_sensitivity(cfg, wavelength_nm, channel, nG=101, downsample=2,
 
     rows = []
     for i, ax in enumerate(axes):
-        sp, sm = [0] * 4, [0] * 4
+        sp, sm = [0] * k, [0] * k
         sp[i], sm[i] = 1, -1
         d1 = 0.5 * (qe_at(tuple(sp)) - qe_at(tuple(sm)))    # 중심차분 ∂QE/∂step
         rows.append({"axis": ax[0], "label": ax[1], "unit": ax[3], "step": ax[2],
