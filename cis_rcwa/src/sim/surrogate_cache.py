@@ -82,8 +82,11 @@ def materials_fingerprint(cfg, materials_dir):
 def compute_key(cfg, conds, axes, materials_dir):
     """상태키 = sha256(정규화 구조 + 조건 + 축정의 + 물질지문 + 엔진버전).
 
-    conds: {waves:[nm...], mode, nG, downsample, lateral_n}
+    conds: {waves:[nm...], mode, nG, downsample, lateral_n, [+lhs: nsamples,bound,seed,model,cv_folds]}
     axes:  DOE 축 정의 (이름·스텝·단위) — 축이 바뀌면 surrogate 의미가 달라짐.
+
+    lhs(넓은 에뮬레이터) 등에서 넘어오는 추가 조건(nsamples/bound/seed/model/cv_folds)도
+    키에 반영 — 샘플 수·상자·시드·모델이 다르면 다른 결과이므로 다른 캐시가 되어야 한다.
     """
     payload = {
         "engine": ENGINE,
@@ -96,6 +99,10 @@ def compute_key(cfg, conds, axes, materials_dir):
         "lateral_n": int(conds.get("lateral_n", 256)),
         "materials": materials_fingerprint(cfg, materials_dir),
     }
+    # 넓은 에뮬레이터(lhs) 등 추가 결정요인 — 있으면 키에 포함(없으면 기존 키와 동일).
+    for extra in ("nsamples", "bound", "seed", "model", "cv_folds"):
+        if conds.get(extra) is not None:
+            payload[extra] = conds[extra]
     return _sha(_canon(payload))
 
 

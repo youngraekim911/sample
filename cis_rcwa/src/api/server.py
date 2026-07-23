@@ -270,18 +270,23 @@ def _run_doe_job(jid, cfg_path, p):
         lam0, lam1 = float(p.get("lam0", 0.40)), float(p.get("lam1", 0.70))
         waves = [round(lam0 * 1000 + i * (lam1 - lam0) * 1000 / (n - 1))
                  for i in range(n)]
-        total = len(doe_mod.doe_points(p["mode"]))
+        total = len(doe_mod.doe_points(p["mode"], nsamples=p.get("nsamples")))
         lateral_n = p.get("lateral_n", 256)
         mdir = _materials_dir()
+        is_lhs = p["mode"] == "lhs"
 
         # ── surrogate 캐시(DB) 조회: 구조·조건·물질이 동일하면 재계산 생략 ──
         key = None
         if p["mode"] != "axis":
             try:
-                key = sc.compute_key(cfg, {"waves": waves, "mode": p["mode"],
-                                           "nG": p["nG"], "downsample": p["downsample"],
-                                           "lateral_n": lateral_n},
-                                     doe_mod.AXES_DEFAULT, mdir)
+                conds = {"waves": waves, "mode": p["mode"],
+                         "nG": p["nG"], "downsample": p["downsample"],
+                         "lateral_n": lateral_n}
+                if is_lhs:                                    # 샘플링·모델까지 키에 반영
+                    conds.update({"nsamples": p["nsamples"], "bound": p["bound"],
+                                  "seed": p["seed"], "model": p["model"],
+                                  "cv_folds": p["cv_folds"]})
+                key = sc.compute_key(cfg, conds, doe_mod.AXES_DEFAULT, mdir)
                 job["cache_key"] = key
             except Exception:
                 key = None
@@ -300,6 +305,12 @@ def _run_doe_job(jid, cfg_path, p):
                     job["csv"] = csv_path
                 ws = sur["wavelengths_nm"]
                 job["r2_G_mid"] = doe_mod.r2_at(sur, "G", ws[len(ws) // 2])
+                if sur.get("type") == "emulator":      # 넓은 에뮬레이터: 검증지표 복원
+                    m = sur.get("metrics", {})
+                    job["model"] = sur.get("model")
+                    job["r2_cv_mean"] = m.get("r2_cv_mean")
+                    job["r2_insample_mean"] = m.get("r2_insample_mean")
+                    job["per_model_cv"] = m.get("per_model_cv")
                 job["doe_total"] = total
                 job["doe_done"] = total
                 job["progress"] = 1.0
@@ -326,20 +337,30 @@ def _run_doe_job(jid, cfg_path, p):
 
         res = doe_mod.run_doe(cfg, waves, mode=p["mode"], nG=p["nG"],
                               downsample=p["downsample"], lateral_n=p.get("lateral_n", 256),
+                              nsamples=p.get("nsamples"), bound=p.get("bound", 2.0),
+                              seed=p.get("seed", 0),
                               progress=prog, cancel=lambda: job["cancel"])
         csv_path = os.path.join(JOBS_DIR, jid + "_doe.csv")
         with open(csv_path, "w", encoding="utf-8") as f:
             f.write(doe_mod.doe_csv(res))
         job["csv"] = csv_path
         if not res.get("cancelled") and p["mode"] != "axis":
-            sur = doe_mod.fit_surrogate(res)
+            if is_lhs:            # 넓은 공간 에뮬레이터(다중모델 + 교차검증 자동선택)
+                from ..sim.emulator import fit_emulator
+                sur = fit_emulator(res, model=p["model"], cv_folds=p["cv_folds"])
+                job["model"] = sur["model"]
+                job["r2_cv_mean"] = sur["metrics"]["r2_cv_mean"]
+                job["r2_insample_mean"] = sur["metrics"]["r2_insample_mean"]
+                job["per_model_cv"] = sur["metrics"]["per_model_cv"]
+            else:                 # 국소 2차 RSM (기존 호환)
+                sur = doe_mod.fit_surrogate(res)
             sur_path = os.path.join(JOBS_DIR, jid + "_surrogate.json")
             with open(sur_path, "w", encoding="utf-8") as f:
                 json.dump(sur, f)
             job["surrogate"] = sur_path
             # 대표 R² (그린 채널 중앙 파장) 리포트
             ws = sur["wavelengths_nm"]
-            job["r2_G_mid"] = sur["r2"]["G"][int(ws[len(ws) // 2])]
+            job["r2_G_mid"] = doe_mod.r2_at(sur, "G", ws[len(ws) // 2])
             # ── 캐시(DB) 저장: 다음에 같은 구조·조건이면 재계산 생략 ──
             if key:
                 try:
@@ -348,14 +369,24 @@ def _run_doe_job(jid, cfg_path, p):
                             "product": str(cfg.get("product", "")),
                             "r2_G_mid": job["r2_G_mid"],
                             "elapsed_s": res.get("elapsed_s")}
+                    if is_lhs:
+                        meta.update({"model": job.get("model"),
+                                     "r2_cv_mean": job.get("r2_cv_mean"),
+                                     "n_samples": p.get("nsamples")})
                     sc.save(_cache_dir(), key, sur, meta,
                             csv_text=doe_mod.doe_csv(res))
                 except Exception:
                     pass
         job["elapsed_s"] = res.get("elapsed_s")
         job["state"] = "cancelled" if res.get("cancelled") else "done"
-        job["note"] = (f"{'중단' if res.get('cancelled') else '완료'} · "
-                       f"{job['doe_done']}/{total} 조건 · {res.get('elapsed_s', 0)}s")
+        if is_lhs and not res.get("cancelled"):
+            job["note"] = (
+                f"완료 · 넓은 에뮬레이터[{job.get('model')}] {job['doe_done']}/{total}샘플 · "
+                f"검증 CV R²={job.get('r2_cv_mean')} (in-sample "
+                f"{job.get('r2_insample_mean')}) · {res.get('elapsed_s', 0)}s")
+        else:
+            job["note"] = (f"{'중단' if res.get('cancelled') else '완료'} · "
+                           f"{job['doe_done']}/{total} 조건 · {res.get('elapsed_s', 0)}s")
     except Exception as e:
         job["error"] = f"{type(e).__name__}: {e}"
         job["trace"] = traceback.format_exc()[-2000:]
@@ -513,7 +544,10 @@ class Handler(BaseHTTPRequestHandler):
                 wl = float(data.get("wavelength_nm", 525))
                 ch = str(data.get("channel", "G"))
                 sur = data.get("surrogate")
-                if sur:
+                if sur and sur.get("type") == "emulator":
+                    from ..sim.emulator import sensitivity as em_sens
+                    self._json(em_sens(sur, wl, ch))
+                elif sur:
                     self._json(sens.sensitivity_from_surrogate(sur, wl, ch))
                 else:
                     import yaml as _yaml
@@ -530,14 +564,19 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/inverse":
             # ②. 역설계 — 목표 QE 곡선 -> 근접 구조 (surrogate 필요). 즉시.
             try:
-                from ..sim.inverse import invert
                 sur = data.get("surrogate")
                 if not sur:
                     self._json({"error": "surrogate 가 필요합니다 (먼저 DOE 실행)."}, 400)
                     return
-                self._json(invert(sur, data.get("target") or {},
-                                  weights=data.get("weights"),
-                                  channels=tuple(data.get("channels") or ("R", "G", "B"))))
+                chs = tuple(data.get("channels") or ("R", "G", "B"))
+                if sur.get("type") == "emulator":
+                    from ..sim.emulator import invert as em_invert
+                    self._json(em_invert(sur, data.get("target") or {},
+                                         weights=data.get("weights"), channels=chs))
+                else:
+                    from ..sim.inverse import invert
+                    self._json(invert(sur, data.get("target") or {},
+                                      weights=data.get("weights"), channels=chs))
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}",
                             "trace": traceback.format_exc()[-1500:]}, 500)
@@ -639,7 +678,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "yaml 이 비었습니다"}, 400); return
             try:
                 mode = str(data.get("mode", "surrogate"))
-                assert mode in ("axis", "surrogate", "full"), "mode"
+                assert mode in ("axis", "surrogate", "full", "lhs"), "mode"
                 ng = max(9, int(data.get("nG", 151)))
                 p = {"mode": mode, "nG": ng if ng % 2 else ng + 1,
                      "downsample": max(1, int(data.get("downsample", 2))),
@@ -647,11 +686,20 @@ class Handler(BaseHTTPRequestHandler):
                      "lam0": float(data.get("lam0", 0.40)),
                      "lam1": float(data.get("lam1", 0.70)),
                      "force": bool(data.get("force", False))}
+                if mode == "lhs":
+                    # 공간채움 넓은 에뮬레이터: 샘플수·상자·시드·모델선택
+                    p["nsamples"] = max(8, int(data.get("nsamples", 80)))
+                    p["bound"] = float(data.get("bound", 2.0))
+                    p["seed"] = int(data.get("seed", 0))
+                    p["model"] = str(data.get("model", "auto"))
+                    assert p["model"] in ("auto", "quadratic", "cubic", "rbf"), "model"
+                    p["cv_folds"] = max(2, int(data.get("cv_folds", 5)))
             except (TypeError, ValueError, AssertionError) as e:
                 self._json({"error": f"파라미터 오류: {e}"}, 400); return
             jid = start_doe_job(yaml_text, p)
             from ..sim.doe import doe_points
-            self._json({"job": jid, "total": len(doe_points(p["mode"]))})
+            total = len(doe_points(p["mode"], nsamples=p.get("nsamples")))
+            self._json({"job": jid, "total": total})
         elif u.path == "/api/doe/cancel":
             job = JOBS.get(data.get("job") or "")
             if job:

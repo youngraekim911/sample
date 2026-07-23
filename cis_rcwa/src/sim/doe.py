@@ -17,8 +17,11 @@
     axis      : 중심 1 + 축별 ±1,±2 (4k)                = 1+4k   (주효과 스크리닝)
     surrogate : axis + 2인자 (±1,±1) 조합 C(k,2)×4       = 권장 (2차 모델 피팅)
     full      : 5^k 전조합                               = (GPU 권장, k 크면 폭증 주의)
+    lhs       : 공간채움(Latin Hypercube) n샘플, 상자 [-bound..bound] 연속       ★넓은 에뮬레이터
       · k=4: axis 17 / surrogate 41 / full 625
       · k=6: axis 25 / surrogate 85 / full 15625
+      · lhs: nsamples 지정(권장 8·k~15·k) — 중심 별모양과 달리 상자 전체를 고르게 덮음.
+        국소 2차가 아닌 '넓은 공간 에뮬레이터'(RBF/고차)를 학습하려면 lhs 로 수집.
 
 surrogate: 응답 y(파장, 채널) 별로
     y ≈ c0 + Σ ci·xi + Σ cii·xi² + Σ cij·xi·xj   (x = 스텝지수 -2..+2 정규화 /2)
@@ -44,12 +47,37 @@ AXES_DEFAULT = [
 _CF_AXIS_COL = {"cf_R_dA": "R", "cf_G_dA": "G", "cf_B_dA": "B"}
 
 
-def doe_points(mode, naxes=None):
-    """모드 -> 스텝지수 튜플 리스트 [(s0,..,s_{k-1}), ...]  (si ∈ -2..2).
+def lhs_design(k, n, bound=2.0, seed=0):
+    """Latin Hypercube 공간채움 설계 — 상자 [-bound,bound]^k 를 n점으로 고르게 덮음.
 
+    각 축을 n개 균등층으로 나눠 층마다 정확히 1점(중복 없는 사영) + 층 내 무작위 지터,
+    축별 독립 셔플. 같은 seed 면 결정적(재현 가능). 반환: [(x0,..,x_{k-1}), ...] (실수 스텝).
+    별모양(axis) 설계와 달리 상자 내부·모서리까지 데이터가 퍼져 넓은 공간 학습에 적합.
+    """
+    n = int(n)
+    rng = np.random.default_rng(int(seed))
+    cuts = np.arange(n) / n                                   # 층 하단
+    pts = np.empty((n, k))
+    for d in range(k):
+        jit = rng.uniform(0.0, 1.0 / n, size=n)              # 층 내 지터
+        col = cuts + jit
+        rng.shuffle(col)                                     # 축별 독립 셔플
+        pts[:, d] = col
+    pts = (pts * 2.0 - 1.0) * float(bound)                   # [0,1]->[-bound,bound]
+    return [tuple(round(float(v), 6) for v in row) for row in pts]
+
+
+def doe_points(mode, naxes=None, nsamples=None, bound=2.0, seed=0):
+    """모드 -> 스텝지수 튜플 리스트 [(s0,..,s_{k-1}), ...].
+
+    axis/surrogate/full: si ∈ -2..2 정수. lhs: 실수 스텝(공간채움, nsamples 필요).
     naxes(k) 미지정 시 기본 축 개수 사용. 축 개수와 반드시 일치해야 함.
     """
     k = int(naxes) if naxes else len(AXES_DEFAULT)
+    if mode == "lhs":
+        if not nsamples:
+            raise ValueError("lhs 모드는 nsamples(샘플 수)가 필요합니다.")
+        return lhs_design(k, nsamples, bound=bound, seed=seed)
     if mode == "full":
         return [p for p in itertools.product(range(-2, 3), repeat=k)]
     pts = [tuple([0] * k)]
@@ -117,18 +145,20 @@ def apply_point(cfg, steps, axes=AXES_DEFAULT):
 
 def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
             lateral_n=256, materials_dir=None, axes=AXES_DEFAULT,
-            progress=None, cancel=None):
+            nsamples=None, bound=2.0, seed=0, progress=None, cancel=None):
     """DOE 실행. progress(done,total,eta_s,point) 콜백, cancel() -> bool 중단.
 
+    lhs 모드는 nsamples/bound/seed 로 공간채움 샘플 수·상자·시드 지정.
     반환: {"axes":[...], "mode", "points": [{"steps":[...], "qe": {nm: {R,G,B}}}, ...],
            "wavelengths_nm": [...], "elapsed_s": float}
     """
     from ..structure.blocks import ir_from_wizard_cfg
     from .simulator import RCWAPlaneWaveSimulator
 
-    pts = doe_points(mode, len(axes))
+    pts = doe_points(mode, len(axes), nsamples=nsamples, bound=bound, seed=seed)
     total = len(pts)
     out = {"axes": [list(a) for a in axes], "mode": mode, "nG": nG,
+           "bound": float(bound), "seed": int(seed),
            "wavelengths_nm": list(wavelengths_nm), "points": []}
     t0 = time.time()
     for i, p in enumerate(pts):
