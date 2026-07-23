@@ -221,8 +221,13 @@ class GridCfBlock:
         ctx.band_top = bandTop
 
         per = (g.get("pitch", 1) or 1) * p
-        dg = np.minimum(np.abs(ctx.X - np.round(ctx.X / per) * per),
-                        np.abs(ctx.Y - np.round(ctx.Y / per) * per))
+        dgx = np.abs(ctx.X - np.round(ctx.X / per) * per)   # 세로벽까지 거리
+        dgy = np.abs(ctx.Y - np.round(ctx.Y / per) * per)   # 가로벽까지 거리
+        dg = np.minimum(dgx, dgy)
+        # 교차점 deadzone(DZ): 울타리 교차점(코너)에서 금속이 대각선으로 자라 CF 를
+        # 8각형으로 컷. dz_um = 코너에서 벽 안쪽으로 파고드는 대각 reach (≤0.25µm).
+        dz = float(g.get("deadzone_um", g.get("dz_um", 0)) or 0)
+        dz = max(0.0, min(dz, 0.25))
         W = float(g["width_um"])
         ratio = min(1.0, max(0.0, float(g.get("top_ratio", 1) or 0)))
         coat_id = ctx.mat_id(g.get("coat_material", "oxide")) if cw > 0 else 0
@@ -312,6 +317,11 @@ class GridCfBlock:
                 m[dg < wz / 2] = gid
                 if cw > 0:
                     m[(dg >= wz / 2) & (dg < wz / 2 + cws)] = coat_id
+                if dz > 0:                                 # 교차점 deadzone: 코너 45° 컷 → 8각 CF
+                    exx = dgx - wz / 2
+                    eyy = dgy - wz / 2
+                    corner = (exx > 0) & (eyy > 0) & (exx + eyy < dz)
+                    m[corner] = gid                        # 코너 삼각형을 grid 금속으로
             elif cw > 0 and zc <= gridH + cw:
                 m[dg < wz / 2 + cws] = coat_id
             layers.append((m, z1 - z0))

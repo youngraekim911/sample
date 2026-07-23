@@ -90,6 +90,12 @@ def lint_wizard_cfg(cfg, material_names=None):
         err("stack.grid.width_um 이 0 이하입니다 (격벽 폭).")
     elif pitch and gw >= pitch * (gr.get("pitch", 1) or 1):
         warn(f"stack.grid.width_um({gw}) 가 셀 폭에 가깝습니다 — CF 공간이 매우 좁아집니다.")
+    dz = _num(gr.get("deadzone_um", gr.get("dz_um")))
+    if dz is not None:
+        if dz < 0:
+            err("stack.grid.deadzone_um 이 음수입니다 (교차점 코너 컷 reach).")
+        elif dz > 0.25:
+            warn(f"stack.grid.deadzone_um({dz}) > 0.25µm — 250nm 로 clamp 됩니다.")
     gstack = gr.get("stack") or []
     if not gstack:
         err("stack.grid.stack 이 비었습니다 (격벽 물질 층 최소 1개 필요).")

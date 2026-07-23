@@ -454,7 +454,12 @@ function gridAt(x,y,zabs){ const g=S.stack.grid,p=P(),per=(g.pitch||1)*p,W=+g.wi
   const cwx=cw>0?Math.max(cw,+S.grid.dxy_um||0):0, cwz=cw>0?Math.max(cw,+S.grid.dz_um||0):0;
   const ratio=Math.min(1,Math.max(0,+(g.top_ratio!=null?g.top_ratio:1)||0));
   const wz=W*(1-(1-ratio)*Math.min(zabs/Math.max(H,1e-9),1));   // 아래 W -> 위 W*ratio 선형
-  const d=Math.min(Math.abs(x-Math.round(x/per)*per), Math.abs(y-Math.round(y/per)*per));
+  const dgx=Math.abs(x-Math.round(x/per)*per), dgy=Math.abs(y-Math.round(y/per)*per);
+  const d=Math.min(dgx,dgy);
+  // 교차점 deadzone: 코너 45° 컷(8각 CF). fence 높이 내에서만 금속이 코너로 자람
+  const dz=Math.max(0,Math.min(+(g.deadzone_um||g.dz_um||0),0.25));
+  if(dz>0 && zabs<=H){ const ex=dgx-wz/2, ey=dgy-wz/2;
+    if(ex>0&&ey>0&&(ex+ey)<dz){ let acc=0; for(const s of g.stack){acc+=+s.height_um; if(zabs<=acc+1e-9)return s.material;} return g.stack[g.stack.length-1].material; } }
   if(d>wz/2+cwx || zabs>H+cwz) return null;
   if(cw>0 && (d>wz/2 || zabs>H)) return g.coat_material||"oxide";   // 표면 코팅 (옆+위)
   if(d>wz/2) return null;
@@ -529,7 +534,8 @@ async function buildGC(){ const gen=++GCgen;
   const p=P(),np=NP(),span=p*np,st=S.stack;
   const N=1000, d=span/N, nP=N*N;
   const siM=new Uint8Array(nP), gD=new Float32Array(nP), cfT=new Float32Array(nP),
-        cfI=new Uint8Array(nP), sg=new Float32Array(nP), cfIn=new Uint8Array(nP);
+        cfI=new Uint8Array(nP), sg=new Float32Array(nP), cfIn=new Uint8Array(nP),
+        gDx=new Float32Array(nP), gDy=new Float32Array(nP);
   const names=[]; const nid={}; const idOf=n=>{ if(!(n in nid)){nid[n]=names.length;names.push(n);} return nid[n]; };
   const g=st.grid, per=(g.pitch||1)*p, cfPer=((S.cf_array==="tetra")?2:1)*p;
   const th={R:+st.cf.R.thickness_um,G:+st.cf.G.thickness_um,B:+st.cf.B.thickness_um};
@@ -538,7 +544,7 @@ async function buildGC(){ const gen=++GCgen;
   for(let j=0;j<N;j++){ const y=(j+0.5)*d;
     for(let i=0;i<N;i++){ const x=(i+0.5)*d, k=j*N+i;
       const dm=dtiAt(x,y); siM[k]=idOf(dm||st.si.material);
-      gD[k]=Math.min(Math.abs(x-Math.round(x/per)*per), Math.abs(y-Math.round(y/per)*per));
+      gDx[k]=Math.abs(x-Math.round(x/per)*per); gDy[k]=Math.abs(y-Math.round(y/per)*per); gD[k]=Math.min(gDx[k],gDy[k]);
       const pr=Math.min(np-1,Math.floor(y/p)), pc=Math.min(np-1,Math.floor(x/p)), col=S.bayer[pr][pc];
       const u=(x-(Math.floor(x/cfPer)+0.5)*cfPer)/(cfPer/2), v=(y-(Math.floor(y/cfPer)+0.5)*cfPer)/(cfPer/2);
       cfT[k]=Math.max(0.002, th[col]+cvv[col]*(2/3-(u*u+v*v)) - cfChamferCut(col,gD[k]));
@@ -558,7 +564,7 @@ async function buildGC(){ const gen=++GCgen;
   const barlB=[]; { let acc=0; for(const l of st.barl){acc+=+l.thickness_um; barlB.push([acc,l.material]);} }
   const gB=[]; { let acc=0; for(const l of g.stack){acc+=+l.height_um; gB.push([acc,l.material]);} }
   const zSi=+st.si.thickness_um, barlH=st.barl.reduce((a,l)=>a+ +l.thickness_um,0);
-  GC={gen,N,d,span,names,siM,gD,cfT,cfI,sg,cfIn,
+  GC={gen,N,d,span,names,siM,gD,gDx,gDy,dz:Math.max(0,Math.min(+(g.deadzone_um||g.dz_um||0),0.25)),cfT,cfI,sg,cfIn,
       zSi, siName:st.si.material, barlB, barlTop:zSi+barlH, plTop:zSi+barlH+planarSpan(),
       gW:+g.width_um, ratio:Math.min(1,Math.max(0,+(g.top_ratio!=null?g.top_ratio:1)||0)),
       cw:gridCoat(), cwx:(gridCoat()>0?Math.max(gridCoat(),+S.grid.dxy_um||0):0), cwz:(gridCoat()>0?Math.max(gridCoat(),+S.grid.dz_um||0):0), gH:gridStackH(), coatName:g.coat_material||"oxide", gB,
@@ -593,7 +599,9 @@ function matFast(x,y,zc,upto){ const g=GC; if(!g)return matAt(x,y,zc,upto);
     for(const e of g.barlB){ if(zz<=e[0])return e[1]; } return g.barlB.length?g.barlB[g.barlB.length-1][1]:"air"; }
   if(zc<g.plTop){ const zabs=zc-g.barlTop;
     if(upto>=4){ const wz=g.gH>0? g.gW*(1-(1-g.ratio)*Math.min(zabs/g.gH,1)) : g.gW; const d0=g.gD[k];
-      if(zabs<=g.gH){ if(d0<wz/2){ for(const e of g.gB){ if(zabs<=e[0])return e[1]; } return g.gB.length?g.gB[g.gB.length-1][1]:"grid_metal"; }
+      if(zabs<=g.gH){ const gm=()=>{ for(const e of g.gB){ if(zabs<=e[0])return e[1]; } return g.gB.length?g.gB[g.gB.length-1][1]:"grid_metal"; };
+        if(d0<wz/2) return gm();
+        if(g.dz>0){ const ex=g.gDx[k]-wz/2, ey=g.gDy[k]-wz/2; if(ex>0&&ey>0&&(ex+ey)<g.dz) return gm(); }   // 교차점 deadzone 8각 컷
         if(g.cw>0&&d0<wz/2+g.cwx)return g.coatName; }
       else if(g.cw>0&&zabs<=g.gH+g.cwz&&d0<wz/2+g.cwx)return g.coatName; }
     if(upto>=5 && g.cfIn[k] && zabs<=g.cfT[k]) return g.names[g.cfI[k]];
@@ -615,8 +623,10 @@ async function buildVoxPrep(){
   // 주의: 거리/높이 맵은 Float64 — float32 면 경계값(예: d=0.01 vs wz/2=0.01)이
   // 반올림돼 Python 빌더(float64)와 경계 한 겹이 어긋남 (JS/Python npy 동치 요구)
   const siMap=new Uint8Array(nP), gD=new Float64Array(nP), cfTopM=new Float64Array(nP),
-        cfIdM=new Uint8Array(nP), sagM=new Float64Array(nP), cfInM=new Uint8Array(nP);
+        cfIdM=new Uint8Array(nP), sagM=new Float64Array(nP), cfInM=new Uint8Array(nP),
+        gDxM=new Float64Array(nP), gDyM=new Float64Array(nP);
   const g=st.grid, per=(g.pitch||1)*p, cfPer=((S.cf_array==="tetra")?2:1)*p;
+  const gdz=Math.max(0,Math.min(+(g.deadzone_um||g.dz_um||0),0.25));
   const W=+g.width_um, cw=gridCoat(), gH=gridStackH(),
         ratio=Math.min(1,Math.max(0,+(g.top_ratio!=null?g.top_ratio:1)||0));
   const th={R:+st.cf.R.thickness_um,G:+st.cf.G.thickness_um,B:+st.cf.B.thickness_um};
@@ -625,7 +635,7 @@ async function buildVoxPrep(){
   for(let yi=0;yi<ny;yi++){ const y=(yi+0.5)*dxy;
     for(let xi=0;xi<nx;xi++){ const x=(xi+0.5)*dxy, k=yi*nx+xi;
       const dm=dtiAt(x,y); siMap[k]=idOf(dm||st.si.material);
-      gD[k]=Math.min(Math.abs(x-Math.round(x/per)*per), Math.abs(y-Math.round(y/per)*per));
+      gDxM[k]=Math.abs(x-Math.round(x/per)*per); gDyM[k]=Math.abs(y-Math.round(y/per)*per); gD[k]=Math.min(gDxM[k],gDyM[k]);
       const pr=Math.min(np-1,Math.floor(y/p)), pc=Math.min(np-1,Math.floor(x/p)), col=S.bayer[pr][pc];
       const u=(x-(Math.floor(x/cfPer)+0.5)*cfPer)/(cfPer/2), v=(y-(Math.floor(y/cfPer)+0.5)*cfPer)/(cfPer/2);
       cfTopM[k]=Math.max(0.002, th[col]+cvv[col]*(2/3-(u*u+v*v)) - cfChamferCut(col,gD[k]));
@@ -652,7 +662,9 @@ async function buildVoxPrep(){
       for(let k=0;k<nP;k++){ let m=mlId;
         if(cfInM[k]&&zabs<=cfTopM[k]) m=cfIdM[k];
         const d=gD[k];
-        if(inG){ if(d<wz/2)m=gid; else if(cw>0&&d<wz/2+cwx)m=coatId; }
+        if(inG){ if(d<wz/2)m=gid;
+          else if(gdz>0){ const ex=gDxM[k]-wz/2, ey=gDyM[k]-wz/2; if(ex>0&&ey>0&&(ex+ey)<gdz) m=gid; else if(cw>0&&d<wz/2+cwx)m=coatId; }
+          else if(cw>0&&d<wz/2+cwx)m=coatId; }
         else if(inCap && d<wz/2+cwx) m=coatId;
         out[off+k]=m; } }
     else { for(let k=0;k<nP;k++){ const surf=plTop+sagM[k]; let m=0;
@@ -993,6 +1005,8 @@ const STEPS=[
       h("div",{class:"seclbl"},["물질 stack (아래→위, 각 height) · 동일물질 연결"]), subEditor(g.stack,[["material","material","mat"],["height","height_um","num"]],"0.001"),
       numRow("width 하부 (µm) ≤0.2",g,"width_um","0.001",0.002,0.2),
       slid,
+      numRow("교차점 deadzone (µm, 코너컷→8각 CF) ≤0.25",g,"deadzone_um","0.005",0,0.25),
+      h("p",{class:"hint"},["deadzone: 울타리 교차점에서 금속이 대각선으로 자라 CF 네 모서리를 45° 컷(8각). 값=코너에서 안쪽 대각 reach. 0=정사각(끔). fence 높이 내에서만 적용."]),
       (()=>{ const cv=h("canvas",{width:300,height:120}); cv.style.cssText="background:var(--panel-2);border:1px solid var(--line);border-radius:6px";
         setTimeout(()=>drawFenceZoom(cv),0); const cap=h("p",{class:"hint"},["fence 단면 확대 (taper·코팅 스케일 표시)"]);
         const box=h("div",{},[cap,cv]); box._zoom=cv; window._fenceZoom=cv; return box; })(),
@@ -1790,7 +1804,7 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v87";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v88";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)
