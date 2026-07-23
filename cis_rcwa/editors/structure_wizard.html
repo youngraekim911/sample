@@ -181,8 +181,8 @@
 <div class="wpage" id="wpage-set">
   <div class="wpad">
     <div class="wcard" style="max-width:780px">
-      <h2>QE 시뮬레이션 설정</h2>
-      <p class="sub">파장 범위·품질을 정하고 실행합니다. 실행 시 물질~구조를 다시 물려 현재 편집 상태가 반영됩니다.</p>
+      <h2>시뮬레이션 공통 설정</h2>
+      <p class="sub">파장 범위·품질(nG·downsample)을 정합니다. <b>이 값들은 아래 [단일 QE 실행] 과 [🧪 DOE 스윕] 이 함께 사용</b>합니다. 실행 시 물질~구조를 다시 물려 현재 편집 상태가 반영됩니다.</p>
       <div id="qeGuide" class="hint" style="display:none;white-space:pre-wrap;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px"></div>
       <div id="qeCtl" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
         <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 시작 (µm)<input id="qeL0" type="number" step="0.01" value="0.40" style="width:76px"></label>
@@ -201,9 +201,12 @@
           <select id="qePol" style="font-size:12px"><option value="avg" selected>평균(비편광)</option><option value="sum">합산(참조호환)</option></select></label>
       </div>
       <div id="qeDiagOut" style="display:none;font:11px/1.6 var(--mono);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:300px;overflow:auto;white-space:pre-wrap;margin-top:12px"></div>
-      <div style="display:flex;gap:9px;margin-top:18px">
-        <button class="btn primary" id="qeRun">▶ Run</button>
-        <button class="btn" id="qeDiag" title="QE가 0 등 이상할 때: 물질 n,k 점검 + 경계 투과 프로파일">🔍 진단</button>
+      <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:12px">
+        <div class="hint" style="margin-bottom:8px">▶ <b>단일 QE 실행</b> — 위 설정으로 <u>현재 구조 그대로</u> 1회 계산 (아래 DOE 스윕과는 별개).</div>
+        <div style="display:flex;gap:9px">
+          <button class="btn primary" id="qeRun">▶ Run</button>
+          <button class="btn" id="qeDiag" title="QE가 0 등 이상할 때: 물질 n,k 점검 + 경계 투과 프로파일">🔍 진단</button>
+        </div>
       </div>
     </div>
 
@@ -219,8 +222,8 @@
             <option value="full">full — 625회 (전조합, GPU)</option>
           </select></label>
         <label class="hint" style="display:flex;flex-direction:column;gap:3px">파장 스텝<input id="doeN" type="number" step="1" min="4" value="16" style="width:60px"></label>
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="λ범위·nG·downsample은 위 QE 설정(고급 포함)을 그대로 사용">설정
-          <span style="font:11px var(--mono);padding:6px 0">λ·nG·ds = 위 QE 설정 공유</span></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="λ범위·nG·downsample은 위 [시뮬레이션 공통 설정](고급 포함)을 그대로 사용">설정
+          <span style="font:11px var(--mono);padding:6px 0">λ·nG·ds = 위 공통 설정 공유</span></label>
         <button class="btn primary" id="doeRun">🧪 DOE Run</button>
         <button class="btn" id="doeCancel" style="display:none">■ 중단</button>
       </div>
@@ -1727,7 +1730,7 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v85";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v86";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)
