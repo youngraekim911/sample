@@ -235,6 +235,23 @@
         <button class="btn ghost" id="doeCacheLoad" title="선택한 저장 결과를 바로 불러와 역설계/민감도에 사용 (계산 0회)">⤒ 불러오기</button>
         <button class="btn ghost" id="doeCacheRefresh" title="목록 새로고침">↻</button>
       </div>
+      <details id="doeDbBox" style="margin-top:10px">
+        <summary class="hint" style="cursor:pointer">🗂️ surrogate DB 위치 · 동기화</summary>
+        <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px;display:flex;flex-direction:column;gap:9px">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <span class="hint" style="min-width:64px">DB 폴더</span>
+            <input id="doeDbDir" class="hint" style="flex:1;min-width:280px;font-family:var(--mono)" placeholder="예) D:\\team\\surrogate_db  또는  /Volumes/share/sur_db">
+            <button class="btn ghost" id="doeDbSet" title="이 폴더를 surrogate DB 로 지정(영속). 공유 드라이브를 넣으면 팀이 같은 DB 사용">지정</button>
+            <button class="btn ghost" id="doeDbReset" title="기본 폴더(out/surrogate_cache)로 되돌림">기본값</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <span class="hint" style="min-width:64px">동기화</span>
+            <input id="doeDbShared" class="hint" style="flex:1;min-width:280px;font-family:var(--mono)" placeholder="공유 폴더 경로 (로컬 DB 와 양방향 병합)">
+            <button class="btn ghost" id="doeDbSync" title="공유 폴더와 서로 없는 surrogate 만 복사(양방향). 같은 key 는 내용 동일이라 충돌 없음">⇄ Sync</button>
+          </div>
+          <div id="doeDbNote" class="hint" style="font-family:var(--mono);color:var(--ink-faint)">DB 위치 확인중…</div>
+        </div>
+      </details>
       <div id="doeProg" style="display:none;margin-top:12px">
         <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:8px;height:14px;overflow:hidden">
           <div id="doeBar" style="height:100%;width:0%;background:var(--accent,#4c8dff);transition:width .4s"></div></div>
@@ -1284,7 +1301,7 @@ function linkFolderMaterials(){
 // 설정 페이지 진입 시 서버 연결 확인 + 안내
 async function qeEnterSettings(){
   const g=el("qeGuide"), p=await qePing();
-  if(p){ g.style.display="none"; el("qeRun").disabled=false; doeCacheRefresh(); doeReattach(); }
+  if(p){ g.style.display="none"; el("qeRun").disabled=false; doeCacheRefresh(); doeReattach(); doeDbConfig(); }
   else{ g.style.display="block"; el("qeRun").disabled=true;
     g.textContent="RCWA 서버가 꺼져 있습니다. 터미널에서 아래 한 줄을 실행하면 서버 모드로 동작합니다:\n\n"+
       "  cd cis_rcwa && python app.py\n\n(pip install torch numpy pyyaml · GPU 있으면 자동 사용)"; }
@@ -1650,6 +1667,33 @@ async function doeCacheLoadSel(){ const k=el("doeCacheSel").value; if(!k){ alert
   alert("불러왔습니다. 결과 페이지의 🎯 역설계 / 원인분석 민감도에서 바로 사용됩니다."); }
 if(el("doeCacheRefresh")) el("doeCacheRefresh").onclick=doeCacheRefresh;
 if(el("doeCacheLoad")) el("doeCacheLoad").onclick=doeCacheLoadSel;
+// ===== surrogate DB 위치 지정 / 동기화 =====
+async function doeDbConfig(){ const n=el("doeDbNote"); if(!n)return;
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/doe/cache/config")).json(); }catch(e){ n.textContent="서버 미연결"; return; }
+  if(r.error){ n.textContent="⚠ "+r.error; return; }
+  el("doeDbDir").value=r.dir||"";
+  n.textContent=`현재 DB: ${r.dir}  ·  ${r.count}개 저장  ·  ${r.is_default?"(기본 폴더)":"(사용자 지정)"}`
+    +(r.env_override?"  ·  환경변수 CIS_SURROGATE_DB 로 고정됨":"");
+  if(el("doeDbSet")) el("doeDbSet").disabled=!!r.env_override;
+}
+async function doeDbSet(dir){ const n=el("doeDbNote");
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/doe/cache/config",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({dir:dir})})).json(); }catch(e){ alert("요청 실패: "+e.message); return; }
+  if(r.error){ alert("실패: "+r.error); return; }
+  await doeDbConfig(); doeCacheRefresh();      // 새 위치 기준으로 목록 갱신
+  n.textContent="✓ DB 위치 변경됨 · "+n.textContent;
+}
+if(el("doeDbSet")) el("doeDbSet").onclick=()=>doeDbSet(el("doeDbDir").value.trim());
+if(el("doeDbReset")) el("doeDbReset").onclick=()=>{ if(confirm("기본 폴더(out/surrogate_cache)로 되돌릴까요?")) doeDbSet(""); };
+if(el("doeDbSync")) el("doeDbSync").onclick=async()=>{
+  const shared=el("doeDbShared").value.trim(); if(!shared){ alert("공유 폴더 경로를 입력하세요."); return; }
+  const n=el("doeDbNote"); n.textContent="⇄ 동기화중…";
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/doe/cache/sync",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({shared_dir:shared})})).json(); }catch(e){ n.textContent="요청 실패: "+e.message; return; }
+  if(r.error){ n.textContent="⚠ "+r.error; return; }
+  n.textContent=`✓ Sync 완료 — 받음 ${r.pulled} · 보냄 ${r.pushed} · 로컬 총 ${r.total}개`;
+  doeCacheRefresh();
+};
 el("resultBack").onclick=()=>goPage("wpage-set");
 el("resultRerun").onclick=()=>goPage("wpage-set");
 

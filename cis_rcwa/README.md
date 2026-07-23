@@ -291,6 +291,18 @@ config(YAML) → build_qcell(구조) → RCWAPlaneWaveSimulator → RCWASolver
              → R / QE(Si) / A_stack → runner(파장 sweep) → QE 스펙트럼
 ```
 
+### surrogate DB (위치 지정 · 동기화)
+
+DOE surrogate 는 상태해시 기반 영속 캐시(DB)에 저장되어 같은 구조·조건이면 재계산을
+생략한다. DB 폴더는 위저드 `🧪 DOE` 카드의 **🗂️ surrogate DB 위치·동기화** 에서 지정.
+
+- **위치 지정**: 공유 드라이브/팀 폴더를 지정하면 여러 사람이 같은 DB 를 공유. 우선순위는
+  환경변수 `CIS_SURROGATE_DB` > 포인터파일(`surrogate_db_path.txt`) > 기본(`out/surrogate_cache`).
+- **동기화(Sync)**: 로컬 DB ↔ 공유 폴더를 양방향 병합(서로 없는 `<key>.json` 만 복사).
+  같은 key 는 상태해시가 동일 = 내용 동일이라 충돌이 없다.
+- 목록은 파일 스캔으로 **자가치유** — 공유 폴더에 누가 `<key>.json` 을 복사만 해도 목록에 뜬다.
+- API: `GET/POST /api/doe/cache/config`, `POST /api/doe/cache/sync`, `GET /api/doe/cache[/file]`.
+
 ### 모듈 (`rcwa/`)
 | 파일 | 역할 |
 |------|------|

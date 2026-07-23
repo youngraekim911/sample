@@ -13,9 +13,11 @@
 import hashlib
 import json
 import os
+import shutil
 import time
 
 ENGINE = "sur-cache/v1"          # 계산 로직 버전 — 엔진 규약 바뀌면 올려서 캐시 무효화
+POINTER_NAME = "surrogate_db_path.txt"   # APP_DIR 에 저장되는 'DB 위치' 포인터 파일
 
 
 def _canon(obj):
@@ -163,10 +165,94 @@ def _read_index(cache_dir):
         return []
 
 
+def list_keys(cache_dir):
+    """폴더에 실제 존재하는 surrogate 키 목록 (<key>.json, index.json 제외)."""
+    try:
+        files = os.listdir(cache_dir)
+    except OSError:
+        return []
+    return sorted(fn[:-5] for fn in files
+                  if fn.endswith(".json") and fn != "index.json")
+
+
 def index(cache_dir):
-    """저장된 surrogate 목록 (최신순). 파일이 실제 존재하는 항목만."""
+    """저장된 surrogate 목록 (최신순) — 파일 스캔 기반(자가치유).
+
+    index.json 이 있으면 그 메타를 빠른 경로로 쓰되, index 에 없는 파일(예: 공유
+    폴더에 누가 복사해 넣은 <key>.json)도 직접 읽어 목록에 포함한다. 그래서 DB
+    위치를 공유 폴더로만 바꿔도 별도 sync 없이 목록이 보인다.
+    """
+    idx = {e.get("key"): e for e in _read_index(cache_dir)}
     out = []
-    for e in _read_index(cache_dir):
-        if os.path.isfile(_path(cache_dir, e.get("key", ""))):
-            out.append(e)
+    for key in list_keys(cache_dir):
+        e = idx.get(key)
+        if e is None:                       # index 에 없는 파일 → 파일에서 메타 추출
+            try:
+                with open(_path(cache_dir, key), encoding="utf-8") as f:
+                    rec = json.load(f)
+                e = {"key": key, "created": rec.get("created", 0)}
+                e.update(rec.get("meta", {}) or {})
+            except (OSError, ValueError):
+                continue
+        out.append(e)
+    out.sort(key=lambda e: -e.get("created", 0))
     return out
+
+
+# --------------------------------------------------------------- DB 위치/동기화
+def resolve_dir(app_dir, default_dir):
+    """활성 DB 폴더 결정.  우선순위: 환경변수 CIS_SURROGATE_DB > 포인터파일 > 기본."""
+    env = os.environ.get("CIS_SURROGATE_DB")
+    if env and env.strip():
+        return os.path.expanduser(env.strip())
+    try:
+        with open(os.path.join(app_dir, POINTER_NAME), encoding="utf-8") as f:
+            p = f.read().strip()
+        if p:
+            return os.path.expanduser(p)
+    except OSError:
+        pass
+    return default_dir
+
+
+def set_dir(app_dir, path):
+    """DB 폴더를 포인터파일에 저장(영속). 빈 문자열이면 기본으로 되돌림."""
+    ptr = os.path.join(app_dir, POINTER_NAME)
+    path = (path or "").strip()
+    if not path:
+        try:
+            os.remove(ptr)
+        except OSError:
+            pass
+        return
+    path = os.path.expanduser(path)
+    os.makedirs(path, exist_ok=True)
+    with open(ptr, "w", encoding="utf-8") as f:
+        f.write(path)
+    return path
+
+
+def sync(local_dir, shared_dir):
+    """로컬 DB ↔ 공유 폴더 양방향 병합 — 서로 없는 <key>.json 만 복사.
+
+    같은 key 는 내용이 동일(해시로 결정)하므로 덮어쓰기 충돌이 없다. index 는
+    읽을 때 자가치유되므로 복사만 하면 됨. 반환: {pulled, pushed, total}.
+    """
+    shared_dir = os.path.expanduser(shared_dir)
+    os.makedirs(local_dir, exist_ok=True)
+    os.makedirs(shared_dir, exist_ok=True)
+    lk, sk = set(list_keys(local_dir)), set(list_keys(shared_dir))
+    pulled = pushed = 0
+    for key in sk - lk:                     # 공유 -> 로컬
+        try:
+            shutil.copy2(_path(shared_dir, key), _path(local_dir, key)); pulled += 1
+        except OSError:
+            pass
+    for key in lk - sk:                     # 로컬 -> 공유
+        try:
+            shutil.copy2(_path(local_dir, key), _path(shared_dir, key)); pushed += 1
+        except OSError:
+            pass
+    total = len(set(list_keys(local_dir)))
+    return {"pulled": pulled, "pushed": pushed, "total": total,
+            "shared_dir": shared_dir, "local_dir": local_dir}

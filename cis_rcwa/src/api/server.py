@@ -41,7 +41,13 @@ else:
     APP_DIR = ASSET_ROOT
 ROOT = ASSET_ROOT                              # 하위호환(html 등 읽기자원 기준)
 JOBS_DIR = os.path.join(APP_DIR, "out", "jobs")   # 쓰기 — exe 옆
-CACHE_DIR = os.path.join(APP_DIR, "out", "surrogate_cache")   # surrogate 영속 캐시(DB)
+DEFAULT_CACHE_DIR = os.path.join(APP_DIR, "out", "surrogate_cache")   # 기본 DB 폴더
+
+
+def _cache_dir():
+    """활성 surrogate DB 폴더 — 환경변수/포인터파일(사용자 지정)로 바꿀 수 있음."""
+    from ..sim import surrogate_cache as sc
+    return sc.resolve_dir(APP_DIR, DEFAULT_CACHE_DIR)
 
 JOBS = {}          # job id -> dict(state, progress, note, rows, error, cancel)
 _LOCK = threading.Lock()
@@ -280,7 +286,7 @@ def _run_doe_job(jid, cfg_path, p):
             except Exception:
                 key = None
         if key and not p.get("force"):
-            rec = sc.load(CACHE_DIR, key)
+            rec = sc.load(_cache_dir(), key)
             if rec:
                 sur = rec["surrogate"]
                 sur_path = os.path.join(JOBS_DIR, jid + "_surrogate.json")
@@ -342,7 +348,7 @@ def _run_doe_job(jid, cfg_path, p):
                             "product": str(cfg.get("product", "")),
                             "r2_G_mid": job["r2_G_mid"],
                             "elapsed_s": res.get("elapsed_s")}
-                    sc.save(CACHE_DIR, key, sur, meta,
+                    sc.save(_cache_dir(), key, sur, meta,
                             csv_text=doe_mod.doe_csv(res))
                 except Exception:
                     pass
@@ -456,12 +462,20 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/doe/cache":
             # 저장된 surrogate 목록 (DB) — 최신순 메타
             from ..sim import surrogate_cache as sc
-            self._json({"items": sc.index(CACHE_DIR)})
+            self._json({"items": sc.index(_cache_dir())})
+        elif u.path == "/api/doe/cache/config":
+            # 현재 DB 위치 + 기본값 + 항목 수 (프론트가 표시/편집)
+            from ..sim import surrogate_cache as sc
+            d = _cache_dir()
+            self._json({"dir": d, "default_dir": DEFAULT_CACHE_DIR,
+                        "is_default": os.path.abspath(d) == os.path.abspath(DEFAULT_CACHE_DIR),
+                        "env_override": bool(os.environ.get("CIS_SURROGATE_DB")),
+                        "count": len(sc.list_keys(d))})
         elif u.path == "/api/doe/cache/file":
             # 캐시 키로 surrogate JSON 직접 로드 (재계산 0회 — 바로 역설계/민감도)
             from ..sim import surrogate_cache as sc
             k = (parse_qs(u.query).get("key") or [""])[0]
-            rec = sc.load(CACHE_DIR, k) if k else None
+            rec = sc.load(_cache_dir(), k) if k else None
             if not rec:
                 self.send_response(404); self.end_headers(); return
             self._json(rec["surrogate"])
@@ -527,6 +541,33 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}",
                             "trace": traceback.format_exc()[-1500:]}, 500)
+            return
+        if u.path == "/api/doe/cache/config":
+            # surrogate DB 위치 지정 (공유 폴더/드라이브). 빈 값이면 기본으로 복귀.
+            try:
+                from ..sim import surrogate_cache as sc
+                if os.environ.get("CIS_SURROGATE_DB"):
+                    self._json({"error": "환경변수 CIS_SURROGATE_DB 가 설정되어 있어 "
+                                         "여기서 바꿀 수 없습니다."}, 400); return
+                newd = sc.set_dir(APP_DIR, data.get("dir") or "")
+                d = _cache_dir()
+                self._json({"ok": True, "dir": d,
+                            "is_default": os.path.abspath(d) == os.path.abspath(DEFAULT_CACHE_DIR),
+                            "count": len(sc.list_keys(d))})
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+            return
+        if u.path == "/api/doe/cache/sync":
+            # 로컬 DB ↔ 공유 폴더 양방향 병합 (서로 없는 항목만 복사)
+            try:
+                from ..sim import surrogate_cache as sc
+                shared = (data.get("shared_dir") or "").strip()
+                if not shared:
+                    self._json({"error": "공유 폴더 경로(shared_dir)가 필요합니다."}, 400); return
+                self._json(sc.sync(_cache_dir(), shared))
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}",
+                            "trace": traceback.format_exc()[-800:]}, 500)
             return
         if u.path == "/api/lint":
             # 구조 사전 점검 — 위저드/사용자가 run 전에 문제를 미리 확인
