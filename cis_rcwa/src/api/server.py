@@ -308,11 +308,14 @@ def _run_doe_job(jid, cfg_path, p):
         job["doe_total"] = total
         job["doe_done"] = 0
 
+        dev = "cuda(GPU)" if torch.cuda.is_available() else "cpu"
+        job["device"] = dev
+
         def prog(done, tot, eta, point):
             job["doe_done"] = done
             job["progress"] = done / tot
             job["eta_s"] = round(eta)
-            job["note"] = (f"{done}/{tot} 조건 · 남은시간 ~{int(eta//60)}분"
+            job["note"] = (f"[{dev}] {done}/{tot} 조건 · 남은시간 ~{int(eta//60)}분"
                            f"{int(eta % 60)}초 · 현재 {list(point)}")
 
         res = doe_mod.run_doe(cfg, waves, mode=p["mode"], nG=p["nG"],
@@ -426,7 +429,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "unknown job"}, 404); return
             self._json({k: job[k] for k in
                         ("state", "progress", "note", "error", "eta_s", "elapsed_s",
-                         "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key")
+                         "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device")
                         if k in job})
         elif u.path == "/api/doe/last":
             # 브라우저 재시작 후 재접속: 이 서버가 마지막으로 시작한 DOE 작업 상태.
@@ -436,7 +439,7 @@ class Handler(BaseHTTPRequestHandler):
             job = JOBS[LAST_DOE_JID]
             out = {k: job[k] for k in
                    ("state", "progress", "note", "error", "eta_s", "elapsed_s",
-                    "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key")
+                    "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device")
                    if k in job}
             out["job"] = LAST_DOE_JID
             self._json(out)

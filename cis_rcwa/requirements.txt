@@ -1,6 +1,11 @@
 # CIS RCWA 시뮬레이터 의존성
 # 설치:  python -m pip install -r requirements.txt
-# (GPU CUDA torch 는 https://pytorch.org 안내에 따라 별도 설치 가능 — CPU 버전으로도 동작)
+# 주의: 아래 'torch' 는 윈도우에서 기본 CPU 전용 빌드입니다.
+# NVIDIA GPU 로 돌리려면 CUDA 빌드를 설치하세요:
+#   윈도우 원클릭:  install_gpu_windows.bat  (run_windows.bat 로 .venv 만든 뒤 실행)
+#   수동:  pip install torch --index-url https://download.pytorch.org/whl/cu121
+#          (CUDA 버전은 https://pytorch.org 선택기 참고)
+# 설치 후 torch.cuda.is_available()==True 이면 솔버가 자동으로 GPU 를 씁니다.
 torch
 numpy
 pyyaml
