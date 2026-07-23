@@ -1281,7 +1281,7 @@ function linkFolderMaterials(){
 // 설정 페이지 진입 시 서버 연결 확인 + 안내
 async function qeEnterSettings(){
   const g=el("qeGuide"), p=await qePing();
-  if(p){ g.style.display="none"; el("qeRun").disabled=false; doeCacheRefresh(); }
+  if(p){ g.style.display="none"; el("qeRun").disabled=false; doeCacheRefresh(); doeReattach(); }
   else{ g.style.display="block"; el("qeRun").disabled=true;
     g.textContent="RCWA 서버가 꺼져 있습니다. 터미널에서 아래 한 줄을 실행하면 서버 모드로 동작합니다:\n\n"+
       "  cd cis_rcwa && python app.py\n\n(pip install torch numpy pyyaml · GPU 있으면 자동 사용)"; }
@@ -1571,32 +1571,58 @@ el("doeRun").onclick=async()=>{ if(DOE.running)return;
   let r; try{ r=await (await fetch("/api/doe",{method:"POST",body:JSON.stringify(body)})).json(); }
   catch(e){ alert("요청 실패: "+e.message); return; }
   if(!r.job){ alert("오류: "+(r.error||"?")); return; }
-  DOE.running=true; DOE.job=r.job;
+  doeAttach(r.job, r.total, `시작 — ${r.total}개 조건 (1번째 조건 완료 후 예상시간 표시)`); };
+// DOE 진행을 UI 에 물리는 공통 루틴 — 새 실행 + 브라우저 재시작 후 재접속 모두 사용
+function doeAttach(job, total, note){
+  DOE.running=true; DOE.job=job;
   el("doeRun").disabled=true;
   el("doeCancel").style.display=""; el("doeCancel").disabled=false; el("doeCancel").textContent="■ 중단";
   el("doeProg").style.display=""; el("doeDone").style.display="none";
-  el("doeNote").textContent=`시작 — ${r.total}개 조건 (1번째 조건 완료 후 예상시간 표시)`;
-  DOE.timer=setInterval(async()=>{
-    let s; try{ s=await (await fetch("/api/doe/status?job="+DOE.job)).json(); }catch(e){ return; }
-    el("doeBar").style.width=Math.round((s.progress||0)*100)+"%";
-    if(s.state==="running"){ el("doeNote").textContent=(s.note||"")+(s.eta_s!=null?"  ·  남은 ~"+doeFmtSec(s.eta_s):""); return; }
-    clearInterval(DOE.timer); DOE.running=false;
-    el("doeRun").disabled=false; el("doeCancel").style.display="none";
-    if(s.state==="error"){ el("doeNote").textContent="❌ "+(s.error||"오류"); return; }
+  el("doeNote").textContent=note || "상태 확인중…";
+  if(DOE.timer) clearInterval(DOE.timer);
+  DOE.timer=setInterval(doePoll, 1500); doePoll();
+}
+async function doePoll(){
+  let s; try{ s=await (await fetch(qeApiBase()+"/api/doe/status?job="+DOE.job)).json(); }catch(e){ return; }
+  if(s && s.error){ clearInterval(DOE.timer); DOE.running=false; el("doeRun").disabled=false;
+    el("doeCancel").style.display="none"; el("doeNote").textContent="작업을 찾을 수 없음(서버 재시작?) — 💾 DB 목록에서 불러오세요."; return; }
+  el("doeBar").style.width=Math.round((s.progress||0)*100)+"%";
+  if(s.state==="running"){ el("doeNote").textContent=(s.note||"")+(s.eta_s!=null?"  ·  남은 ~"+doeFmtSec(s.eta_s):""); return; }
+  clearInterval(DOE.timer); DOE.running=false;
+  el("doeRun").disabled=false; el("doeCancel").style.display="none";
+  if(s.state==="error"){ el("doeNote").textContent="❌ "+(s.error||"오류"); return; }
+  el("doeProg").style.display="none"; el("doeDone").style.display="";
+  el("doeSummary").textContent=(s.state==="cancelled"?"중단됨 · ":"완료 · ")
+    +`${s.doe_done}/${s.doe_total}조건 · ${doeFmtSec(s.elapsed_s||0)}`
+    +(s.r2_G_mid!=null?` · surrogate R²(G,중앙λ)=${s.r2_G_mid}`:"");
+  el("doeCsv").href=qeApiBase()+"/api/doe/file?job="+DOE.job+"&kind=csv";
+  const hasSur=s.r2_G_mid!=null;
+  el("doeSur").style.display=hasSur?"":"none";
+  if(hasSur){ el("doeSur").href=qeApiBase()+"/api/doe/file?job="+DOE.job+"&kind=surrogate";
+    try{ DOE.surrogate=await(await fetch(qeApiBase()+"/api/doe/file?job="+DOE.job+"&kind=surrogate")).json();
+      invUpdateAvail(); doeCacheRefresh();    // 새 캐시 항목이 목록에 뜨도록
+      el("doeNote").textContent=(s.cached?"✓ 캐시 적중 — 재계산 생략 · ":"✓ surrogate 저장(캐시됨) · ")
+        +"결과 페이지에서 🎯 역설계 사용 가능"; }catch(_){}
+  }
+}
+// 브라우저가 꺼졌다 다시 열려도, 서버에서 계속 돌던(혹은 끝난) DOE 에 자동 재접속
+async function doeReattach(){
+  if(DOE.running) return;                       // 이미 이 세션에서 물고 있음
+  let s; try{ s=await (await fetch(qeApiBase()+"/api/doe/last")).json(); }catch(e){ return; }
+  if(!s || !s.job) return;
+  if(s.state==="running"){
+    doeAttach(s.job, s.doe_total, "🔄 실행 중이던 작업에 재접속 — "+(s.note||""));
+  } else if((s.state==="done"||s.state==="cancelled") && s.r2_G_mid!=null){
+    DOE.job=s.job;
     el("doeProg").style.display="none"; el("doeDone").style.display="";
-    el("doeSummary").textContent=(s.state==="cancelled"?"중단됨 · ":"완료 · ")
-      +`${s.doe_done}/${s.doe_total}조건 · ${doeFmtSec(s.elapsed_s||0)}`
-      +(s.r2_G_mid!=null?` · surrogate R²(G,중앙λ)=${s.r2_G_mid}`:"");
-    el("doeCsv").href="/api/doe/file?job="+DOE.job+"&kind=csv";
-    const hasSur=s.r2_G_mid!=null;
-    el("doeSur").style.display=hasSur?"":"none";
-    if(hasSur){ el("doeSur").href="/api/doe/file?job="+DOE.job+"&kind=surrogate";
-      try{ DOE.surrogate=await(await fetch(qeApiBase()+"/api/doe/file?job="+DOE.job+"&kind=surrogate")).json();
-        invUpdateAvail(); doeCacheRefresh();    // 새 캐시 항목이 목록에 뜨도록
-        el("doeNote").textContent=(s.cached?"✓ 캐시 적중 — 재계산 생략 · ":"✓ surrogate 저장(캐시됨) · ")
-          +"결과 페이지에서 🎯 역설계 사용 가능"; }catch(_){}
-    }
-  },1500); };
+    el("doeSummary").textContent="🔄 이전 실행 결과 · "+(s.state==="cancelled"?"중단됨 · ":"완료 · ")
+      +`${s.doe_done||"?"}/${s.doe_total||"?"}조건 · R²(G)=${s.r2_G_mid}`;
+    el("doeCsv").href=qeApiBase()+"/api/doe/file?job="+s.job+"&kind=csv";
+    el("doeSur").style.display=""; el("doeSur").href=qeApiBase()+"/api/doe/file?job="+s.job+"&kind=surrogate";
+    try{ DOE.surrogate=await(await fetch(qeApiBase()+"/api/doe/file?job="+s.job+"&kind=surrogate")).json();
+      invUpdateAvail(); }catch(_){}
+  }
+}
 el("doeCancel").onclick=()=>{ if(!DOE.job)return;
   el("doeCancel").disabled=true; el("doeCancel").textContent="⏳ 중단중…";
   el("doeNote").textContent="중단 요청됨 — 진행 중인 파장 계산만 마무리하고 멈춥니다 (완료된 조건까지 CSV 저장).";

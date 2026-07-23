@@ -353,7 +353,11 @@ def _run_doe_job(jid, cfg_path, p):
         job["state"] = "error"
 
 
+LAST_DOE_JID = None       # 브라우저가 꺼졌다 다시 열려도 재접속(reattach)할 최근 DOE 작업
+
+
 def start_doe_job(yaml_text, p):
+    global LAST_DOE_JID
     os.makedirs(JOBS_DIR, exist_ok=True)
     jid = "doe" + uuid.uuid4().hex[:9]
     cfg_path = os.path.join(JOBS_DIR, jid + ".yaml")
@@ -361,6 +365,7 @@ def start_doe_job(yaml_text, p):
         f.write(yaml_text)
     JOBS[jid] = {"state": "running", "progress": 0.0, "note": "시작중...",
                  "error": None, "cancel": False, "params": p}
+    LAST_DOE_JID = jid
     th = threading.Thread(target=_run_doe_job, args=(jid, cfg_path, p), daemon=True)
     th.start()
     return jid
@@ -423,6 +428,18 @@ class Handler(BaseHTTPRequestHandler):
                         ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                          "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key")
                         if k in job})
+        elif u.path == "/api/doe/last":
+            # 브라우저 재시작 후 재접속: 이 서버가 마지막으로 시작한 DOE 작업 상태.
+            # (서버 프로세스가 살아있으면 브라우저가 꺼져도 계산은 계속 → 다시 물림)
+            if not LAST_DOE_JID or LAST_DOE_JID not in JOBS:
+                self._json({"job": None}); return
+            job = JOBS[LAST_DOE_JID]
+            out = {k: job[k] for k in
+                   ("state", "progress", "note", "error", "eta_s", "elapsed_s",
+                    "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key")
+                   if k in job}
+            out["job"] = LAST_DOE_JID
+            self._json(out)
         elif u.path == "/api/doe/file":
             q = parse_qs(u.query)
             jid = (q.get("job") or [""])[0]
