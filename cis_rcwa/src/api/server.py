@@ -53,6 +53,88 @@ JOBS = {}          # job id -> dict(state, progress, note, rows, error, cancel)
 _LOCK = threading.Lock()
 
 
+def _dir_size_bytes(d):
+    """폴더 내 파일 총 바이트 (얕게)."""
+    tot = 0
+    try:
+        for name in os.listdir(d):
+            fp = os.path.join(d, name)
+            if os.path.isfile(fp):
+                tot += os.path.getsize(fp)
+    except OSError:
+        pass
+    return tot
+
+
+def _doe_points_count(mode, k, nsamples=None):
+    """실제 실행 조건 수(열거 없이 공식으로 — full 5^k 폭증 방지)."""
+    from math import comb
+    if mode == "lhs":
+        return int(nsamples or 0)
+    if mode == "axis":
+        return 1 + 4 * k
+    if mode == "surrogate":
+        return 1 + 4 * k + 4 * comb(k, 2)
+    if mode == "full":
+        return 5 ** k
+    return 0
+
+
+def _doe_estimate(data):
+    """용량/시간 계량기 — 실행 전 예상 파일크기·소요시간 + 현재 DB 총용량.
+
+    파일크기: doe.csv(지배적) + surrogate.json 을 실측 보정계수로 추정.
+    시간: solve 1회 기준 per_solve_s(측정치 있으면 사용) × 조건수 × 파장 × 2편광.
+    """
+    mode = str(data.get("mode", "lhs"))
+    axes = data.get("axes") or []
+    k = len(axes) if axes else int(data.get("naxes", 6))
+    nwl = max(1, int(data.get("n", 16)))
+    nsamples = data.get("nsamples")
+    model = str(data.get("model", "auto"))
+    pts = _doe_points_count(mode, k, nsamples)
+
+    # ── 파일 크기 (실측 보정: csv ≈ 행×(k+4)×8.7B, 행=pts×nwl) ──
+    rows = pts * nwl
+    csv_b = rows * (k + 4) * 8.7
+    feat = 1 + 2 * k + (k * (k - 1)) // 2
+    poly_json_b = nwl * 3 * feat * 8 + 400
+    rbf_json_b = nwl * 3 * pts * 11 + pts * k * 9 + 800   # rbf 는 표본 저장으로 큼
+    json_b = (max(poly_json_b, rbf_json_b) if model in ("auto", "rbf")
+              else poly_json_b + (nwl * 3 * k * 8 if model == "cubic" else 0))
+    total_b = csv_b + json_b
+
+    # ── 시간 ──
+    # 정확도 우선순위: (1) 사용자 구조/기기에서 측정된 per_wl_s(파장당, 2편광 포함) →
+    # (2) per_solve_s → (3) nG 로 러프(harmonic 지배 O(nG^~2.2), 실측 nG41=0.76s/solve 기준).
+    nG = int(data.get("nG", 151))
+    per_wl = data.get("per_wl_s")
+    if per_wl is not None:                                # 가장 정확(기기·구조 반영)
+        est_s = float(per_wl) * pts * nwl
+        per_solve = float(per_wl) / 2.0
+        basis = "measured"
+    else:
+        per_solve = data.get("per_solve_s")
+        if per_solve is None:
+            per_solve = 0.76 * (nG / 41.0) ** 2.2        # raster 아닌 harmonic 지배
+            basis = "rough(nG)"
+        else:
+            basis = "per_solve"
+        per_solve = float(per_solve)
+        est_s = per_solve * pts * nwl * 2                 # 2편광
+
+    db = _cache_dir()
+    return {"points": pts, "rows": rows, "naxes": k,
+            "csv_bytes": int(csv_b), "json_bytes": int(json_b),
+            "total_bytes": int(total_b),
+            "est_seconds_lo": int(est_s / 4.0),          # GPU 여지
+            "est_seconds": int(est_s),
+            "est_seconds_hi": int(est_s * 2.5),          # 고품질/CPU 여지
+            "time_basis": basis,
+            "db_dir": db, "db_total_bytes": _dir_size_bytes(db),
+            "per_solve_s": round(float(per_solve), 3)}
+
+
 def _materials_dir():
     """물질 폴더: exe 옆(사용자 편집분) 우선, 없으면 번들 기본값."""
     user = os.path.join(APP_DIR, "data", "materials")
@@ -270,7 +352,12 @@ def _run_doe_job(jid, cfg_path, p):
         lam0, lam1 = float(p.get("lam0", 0.40)), float(p.get("lam1", 0.70))
         waves = [round(lam0 * 1000 + i * (lam1 - lam0) * 1000 / (n - 1))
                  for i in range(n)]
-        total = len(doe_mod.doe_points(p["mode"], nsamples=p.get("nsamples")))
+        # 사용자가 축을 골랐으면 그 축(리스트), 아니면 기본 6축. run_doe/apply_point 는
+        # (key,label,step,unit) 순서만 쓰므로 JSON 리스트 그대로 사용 가능.
+        axes = p.get("axes") or doe_mod.AXES_DEFAULT
+        job["naxes"] = len(axes)
+        total = len(doe_mod.doe_points(p["mode"], naxes=len(axes),
+                                       nsamples=p.get("nsamples")))
         lateral_n = p.get("lateral_n", 256)
         mdir = _materials_dir()
         is_lhs = p["mode"] == "lhs"
@@ -286,7 +373,7 @@ def _run_doe_job(jid, cfg_path, p):
                     conds.update({"nsamples": p["nsamples"], "bound": p["bound"],
                                   "seed": p["seed"], "model": p["model"],
                                   "cv_folds": p["cv_folds"]})
-                key = sc.compute_key(cfg, conds, doe_mod.AXES_DEFAULT, mdir)
+                key = sc.compute_key(cfg, conds, axes, mdir)
                 job["cache_key"] = key
             except Exception:
                 key = None
@@ -337,8 +424,8 @@ def _run_doe_job(jid, cfg_path, p):
 
         res = doe_mod.run_doe(cfg, waves, mode=p["mode"], nG=p["nG"],
                               downsample=p["downsample"], lateral_n=p.get("lateral_n", 256),
-                              nsamples=p.get("nsamples"), bound=p.get("bound", 2.0),
-                              seed=p.get("seed", 0),
+                              axes=axes, nsamples=p.get("nsamples"),
+                              bound=p.get("bound", 2.0), seed=p.get("seed", 0),
                               progress=prog, cancel=lambda: job["cancel"])
         csv_path = os.path.join(JOBS_DIR, jid + "_doe.csv")
         with open(csv_path, "w", encoding="utf-8") as f:
@@ -694,12 +781,39 @@ class Handler(BaseHTTPRequestHandler):
                     p["model"] = str(data.get("model", "auto"))
                     assert p["model"] in ("auto", "quadratic", "cubic", "rbf"), "model"
                     p["cv_folds"] = max(2, int(data.get("cv_folds", 5)))
+                # 사용자 선택 축: [[key,label,step,unit], ...] (연속축만). 없으면 기본 6축.
+                ax = data.get("axes")
+                if ax:
+                    axn = []
+                    for a in ax:
+                        if isinstance(a, (list, tuple)) and len(a) >= 4:
+                            axn.append([str(a[0]), str(a[1]), float(a[2]), str(a[3])])
+                    assert axn, "axes"
+                    p["axes"] = axn
             except (TypeError, ValueError, AssertionError) as e:
                 self._json({"error": f"파라미터 오류: {e}"}, 400); return
             jid = start_doe_job(yaml_text, p)
             from ..sim.doe import doe_points
-            total = len(doe_points(p["mode"], nsamples=p.get("nsamples")))
+            total = len(doe_points(p["mode"], naxes=len(p.get("axes") or [0] * 6),
+                                   nsamples=p.get("nsamples")))
             self._json({"job": jid, "total": total})
+        elif u.path == "/api/doe/axes":
+            # 이 구조에서 흔들 수 있는 축 카탈로그 + 중심값·추천 step
+            try:
+                import yaml as _yaml
+                from ..sim.doe import axis_catalog
+                cfg = _yaml.safe_load(data.get("yaml") or "") or {}
+                from ..sim.simulator import RCWAPlaneWaveSimulator
+                RCWAPlaneWaveSimulator._auto_model_defaults(cfg)
+                self._json({"axes": axis_catalog(cfg)})
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+        elif u.path == "/api/doe/estimate":
+            # 용량 계량기: 이 설정으로 돌리면 예상 파일크기·시간 + 현재 DB 총용량
+            try:
+                self._json(_doe_estimate(data))
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}"}, 500)
         elif u.path == "/api/doe/cancel":
             job = JOBS.get(data.get("job") or "")
             if job:

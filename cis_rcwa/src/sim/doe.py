@@ -98,49 +98,152 @@ def doe_points(mode, naxes=None, nsamples=None, bound=2.0, seed=0):
     raise ValueError(f"unknown mode {mode}")
 
 
+def _apply_axis(st, key, d):
+    """스택(st)에 축 key 의 물리 변화량 d 를 in-place 적용. 알 수 없는 키는 무시(방어)."""
+    if key == "cf_dA":                                   # (구버전) CF 3색 두께 동시(Å)
+        for col in ("R", "G", "B"):
+            t = st["cf"][col]
+            t["thickness_um"] = max(0.05, round(t["thickness_um"] + d * 1e-4, 5))
+    elif key in _CF_AXIS_COL:                            # CF 색별 두께(Å)
+        t = st["cf"][_CF_AXIS_COL[key]]
+        t["thickness_um"] = max(0.05, round(t["thickness_um"] + d * 1e-4, 5))
+    elif key == "si_um":                                 # Si 광다이오드 두께(µm)
+        si = st.setdefault("si", {})
+        si["thickness_um"] = max(0.2, round(float(si.get("thickness_um", 3.0)) + d, 5))
+    elif key[:3] == "cf_" and key.endswith("_curv_um"):  # CF 색별 곡률(µm)
+        t = st["cf"][key[3]]
+        t["curvature_um"] = round(float(t.get("curvature_um", 0) or 0) + d, 5)
+    elif key[:3] == "cf_" and key.endswith("_cham_um"):  # CF 색별 상부모서리 챔퍼(µm)
+        t = st["cf"][key[3]]
+        t["chamfer_um"] = max(0.0, round(float(t.get("chamfer_um", 0) or 0) + d, 5))
+    elif key[:3] == "cf_" and key.endswith("_scale"):    # CF 색별 가로세로 사이즈(배율)
+        t = st["cf"][key[3]]
+        for kk in ("scale_x", "scale_y"):
+            t[kk] = max(0.1, round(float(t.get(kk, 1.0) or 1.0) + d, 5))
+    elif key == "grid_w_um":                             # Grid 격벽 폭(µm)
+        g = st["grid"]
+        g["width_um"] = max(0.02, round(float(g["width_um"]) + d, 5))
+    elif key == "grid_coat_um":                          # Grid 측벽 코팅(µm)
+        g = st["grid"]
+        g["coat_um"] = max(0.0, round(float(g.get("coat_um", 0) or 0) + d, 5))
+    elif key == "grid_dz_um":                            # Grid 교차점 deadzone(µm)
+        g = st["grid"]
+        g["deadzone_um"] = max(0.0, min(0.25, round(float(g.get("deadzone_um", 0) or 0) + d, 5)))
+    elif key[:7] == "gridstk" and key.endswith("_um"):   # Grid 스택 층별 두께(µm)
+        L = st["grid"]["stack"][int(key[7:-3])]
+        L["height_um"] = max(0.02, round(float(L["height_um"]) + d, 5))
+    elif key[:4] == "barl" and key.endswith("_um"):      # BARL/ARL 하부 층별 두께(µm)
+        L = st["barl"][int(key[4:-3])]
+        L["thickness_um"] = max(0.005, round(float(L["thickness_um"]) + d, 5))
+    elif key == "arltop_um":                             # ARL top 두께(µm)
+        a = st.setdefault("arl_top", {})
+        a["thickness_um"] = max(0.0, round(float(a.get("thickness_um", 0) or 0) + d, 5))
+    elif key == "dti_w_um":                              # DTI 폭(µm)
+        dd = st.setdefault("dti", {})
+        dd["width_um"] = max(0.01, round(float(dd.get("width_um", 0.09) or 0.09) + d, 5))
+    elif key == "planar_um":                             # ML 평탄층(µm)
+        st["ml"]["planar_um"] = max(0.0, round(st["ml"].get("planar_um", 0) + d, 5))
+    elif key == "ml_h_um":                               # ML 돔 두께(전역+quad+lens)(µm)
+        ml = st["ml"]
+        ml["height_um"] = max(0.05, round(float(ml.get("height_um", 0)) + d, 5))
+        for row in (ml.get("quads") or []):
+            for q in row:
+                if float(q.get("height_um", 0) or 0) > 0:
+                    q["height_um"] = max(0.05, round(q["height_um"] + d, 5))
+        for L in (ml.get("lenses") or []):
+            hk = "h" if "h" in L else ("height_um" if "height_um" in L else None)
+            if hk and float(L[hk] or 0) > 0:
+                L[hk] = max(0.05, round(float(L[hk]) + d, 5))
+    elif key == "ml_scale":                              # ML radius 배율
+        ml = st["ml"]
+        for row in (ml.get("quads") or []):
+            for q in row:
+                q["scale"] = round(float(q.get("scale", 1.0)) + d, 5)
+        for L in (ml.get("lenses") or []):
+            if "scale" in L:
+                L["scale"] = round(float(L["scale"]) + d, 5)
+
+
 def apply_point(cfg, steps, axes=AXES_DEFAULT):
-    """cfg(dict, 원본 훼손 없음) 에 스텝지수 적용 -> 새 cfg."""
+    """cfg(dict, 원본 훼손 없음) 에 스텝지수 적용 -> 새 cfg. delta = 스텝지수 s × step."""
     import copy
     c = copy.deepcopy(cfg)
     st = c["stack"]
     for (key, _lb, step, _u), s in zip(axes, steps):
         if s == 0:
             continue
-        d = s * step
-        if key == "cf_dA":                               # (구버전) CF 3색 동시
-            for col in ("R", "G", "B"):
-                t = st["cf"][col]
-                t["thickness_um"] = max(0.05, round(t["thickness_um"] + d * 1e-4, 5))
-        elif key in _CF_AXIS_COL:                         # CF 색상별 독립 (R/G/B 각각)
-            col = _CF_AXIS_COL[key]
-            t = st["cf"][col]
-            t["thickness_um"] = max(0.05, round(t["thickness_um"] + d * 1e-4, 5))
-        elif key == "planar_um":
-            st["ml"]["planar_um"] = max(0.0, round(st["ml"]["planar_um"] + d, 5))
-        elif key == "ml_h_um":
-            # 전역 + quad별/렌즈별 개별 돔두께 모두 증감 (개별값은 전역보다 우선이라
-            # 전역만 바꾸면 개별 설정 quad 는 스윕에서 빠짐 -> 함께 이동)
-            ml = st["ml"]
-            ml["height_um"] = max(0.05, round(float(ml.get("height_um", 0)) + d, 5))
-            for row in (ml.get("quads") or []):
-                for q in row:
-                    if float(q.get("height_um", 0) or 0) > 0:
-                        q["height_um"] = max(0.05, round(q["height_um"] + d, 5))
-            for L in (ml.get("lenses") or []):
-                hk = "h" if "h" in L else ("height_um" if "height_um" in L else None)
-                if hk and float(L[hk] or 0) > 0:
-                    L[hk] = max(0.05, round(float(L[hk]) + d, 5))
-        elif key == "ml_scale":
-            ml = st["ml"]
-            if ml.get("quads"):
-                for row in ml["quads"]:
-                    for q in row:
-                        q["scale"] = round(float(q.get("scale", 1.0)) + d, 5)
-            if ml.get("lenses"):
-                for L in ml["lenses"]:
-                    if "scale" in L:
-                        L["scale"] = round(float(L["scale"]) + d, 5)
+        _apply_axis(st, key, s * step)
     return c
+
+
+# ------------------------------------------------------------ 축 카탈로그
+# 축별 추천 step = max(floor, frac × |중심값|)  — 구조 중심값에서 자동 스케일.
+# 기본 상자 ±2 = 정상 설계범위, ±3 = outlier 여유. (spec: key, 라벨, 단위, frac, floor)
+def _step_reco(center, frac, floor):
+    return round(max(floor, frac * abs(float(center or 0))), 6)
+
+
+def axis_catalog(cfg):
+    """이 구조에서 흔들 수 있는 모든 축 + 중심값·추천 step 목록.
+
+    반환: [{key,label,unit,center,step,kind("continuous"/"discrete"),present,note}, ...]
+    step 은 중심값 기반 자동 추천(사용자가 UI 에서 수정 가능). ±2step=정상, ±3step=outlier.
+    """
+    st = (cfg.get("stack") or {})
+    out = []
+
+    def add(key, label, unit, center, frac, floor, present=True, note=""):
+        out.append({"key": key, "label": label, "unit": unit,
+                    "center": round(float(center or 0), 5),
+                    "step": _step_reco(center, frac, floor),
+                    "kind": "continuous", "present": bool(present), "note": note})
+
+    si = st.get("si") or {}
+    add("si_um", "Si 두께", "um", si.get("thickness_um", 3.0), 0.08, 0.05)
+    dti = st.get("dti") or {}
+    if dti and (dti.get("mode") or "").lower() not in ("", "none"):
+        add("dti_w_um", "DTI 폭", "um", dti.get("width_um", 0.09), 0.1, 0.005)
+    for i, L in enumerate(st.get("barl") or []):
+        add(f"barl{i}_um", f"BARL[{i}] {L.get('material','')} 두께", "um",
+            L.get("thickness_um", 0.05), 0.1, 0.005)
+    g = st.get("grid") or {}
+    add("grid_w_um", "Grid 폭", "um", g.get("width_um", 0.15), 0.1, 0.01)
+    if g.get("coat_um"):
+        add("grid_coat_um", "Grid 측벽코팅", "um", g.get("coat_um", 0), 0.15, 0.005)
+    if float(g.get("deadzone_um", g.get("dz_um", 0)) or 0) > 0:
+        add("grid_dz_um", "Grid 교차점 deadzone", "um",
+            g.get("deadzone_um", g.get("dz_um", 0)), 0.2, 0.02)
+    for i, L in enumerate(g.get("stack") or []):
+        add(f"gridstk{i}_um", f"Grid스택[{i}] {L.get('material','')} 두께", "um",
+            L.get("height_um", 0.1), 0.1, 0.01)
+    cf = st.get("cf") or {}
+    for cclr in "RGB":
+        f = cf.get(cclr) or {}
+        add(f"cf_{cclr}_dA", f"CF {cclr} 두께", "A",
+            float(f.get("thickness_um", 0.6)) * 1e4, 0.08, 150.0)
+        add(f"cf_{cclr}_curv_um", f"CF {cclr} 곡률", "um",
+            f.get("curvature_um", 0), 0.15, 0.02)
+        add(f"cf_{cclr}_cham_um", f"CF {cclr} 챔퍼", "um",
+            f.get("chamfer_um", 0), 0.15, 0.02)
+        add(f"cf_{cclr}_scale", f"CF {cclr} 사이즈", "x",
+            f.get("scale_x", 1.0), 0.05, 0.02)
+    arl = st.get("arl_top") or {}
+    if arl:
+        add("arltop_um", "ARL top 두께", "um", arl.get("thickness_um", 0), 0.1, 0.005)
+    ml = st.get("ml") or {}
+    add("planar_um", "ML 평탄층", "um", ml.get("planar_um", 0.1), 0.1, 0.01)
+    add("ml_h_um", "ML 두께", "um", ml.get("height_um", 0.5), 0.08, 0.02)
+    add("ml_scale", "ML radius 배율", "x", 1.0, 0.0, 0.025)
+
+    # 이산(카테고리) — LHS 로 못 흔듦, 후보별 별도 실행·비교
+    if dti:
+        out.append({"key": "dti_liner", "label": "DTI liner(물질)", "unit": "cat",
+                    "kind": "discrete", "present": True,
+                    "note": "이산 — 후보 물질별로 따로 돌려 비교(LHS 제외)"})
+        out.append({"key": "dti_center_open", "label": "DTI center open(켬/끔)",
+                    "unit": "cat", "kind": "discrete", "present": True,
+                    "note": "이산 — 켬/끔 각각 돌려 비교(LHS 제외)"})
+    return out
 
 
 def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,

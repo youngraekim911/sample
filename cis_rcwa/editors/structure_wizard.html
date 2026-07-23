@@ -241,6 +241,21 @@
           </select></label>
         <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="교차검증 폴드 수(진짜 예측오차 추정)">CV folds<input id="doeCvFolds" type="number" step="1" min="2" value="5" style="width:60px"></label>
       </div>
+      <div id="doeAxisBox" style="display:none;margin-top:9px;padding:10px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <b class="hint" style="color:var(--accent)">🎛️ 설계축 선택</b>
+          <button class="btn ghost" id="doeAxisLoad" title="현재 구조에서 흔들 수 있는 축 + 중심값·추천 step 을 불러옵니다">↻ 현재 구조에서 축 불러오기</button>
+          <button class="btn ghost" id="doeAxisAll">전체 선택</button>
+          <button class="btn ghost" id="doeAxisDefault">기본 6축</button>
+          <span class="hint" id="doeAxisCount" style="margin-left:auto;font-family:var(--mono)">축 미로딩</span>
+        </div>
+        <div class="hint" style="margin:6px 0 8px">중심값=현재 구조값. <b>±2 step=정상 범위 · ±3 step=outlier</b>(상자±를 3으로 두면 outlier 커버). 추천 step 은 각 축 중심값 기반 자동 — 수정 가능. 이산축(dti liner/center-open)은 LHS 로 못 흔들어 <u>별도 비교</u>로 제외됩니다.</div>
+        <div id="doeAxisList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:3px;max-height:300px;overflow:auto"></div>
+      </div>
+      <div id="doeMeter" style="display:none;margin-top:9px;padding:10px;background:var(--panel);border:1px dashed var(--accent);border-radius:8px">
+        <div style="display:flex;align-items:center;gap:8px"><b class="hint">📊 용량 계량기 — 실행 전 예상</b><span class="hint" id="doeMeterBasis" style="margin-left:auto"></span></div>
+        <div id="doeMeterBody" class="hint" style="margin-top:6px;font-family:var(--mono);line-height:1.7">—</div>
+      </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:10px">
         <label class="hint" style="display:inline-flex;gap:5px;align-items:center" title="같은 구조·조건이면 저장된 surrogate 를 즉시 재사용(재계산 생략). 체크하면 무시하고 강제 재계산.">
           <input type="checkbox" id="doeForce"> 캐시 무시(강제 재계산)</label>
@@ -1619,8 +1634,80 @@ el("simBack").onclick=()=>goPage("wpage-build");
 el("simQE").onclick=()=>goPage("wpage-set");
 el("simDOE").onclick=()=>{ goPage("wpage-set"); setTimeout(()=>el("doeCard").scrollIntoView({behavior:"smooth"}),80); };
 // lhs(넓은 에뮬레이터) 모드일 때만 전용 파라미터 행 표시
-function doeModeSync(){ el("doeLhsRow").style.display = (el("doeMode").value==="lhs")?"flex":"none"; }
-el("doeMode").onchange=doeModeSync; doeModeSync();
+// ── 설계축 선택 + 용량 계량기 ──
+const DEFAULT_AXES=["cf_R_dA","cf_G_dA","cf_B_dA","planar_um","ml_h_um","ml_scale"];
+DOE.axesCat=[]; DOE.axisSel=new Set(DEFAULT_AXES); DOE.axisStep={}; DOE.perWl=null;
+function doeModeSync(){
+  const lhs=el("doeMode").value==="lhs";
+  el("doeLhsRow").style.display = lhs?"flex":"none";
+  el("doeAxisBox").style.display = lhs?"block":"none";
+  el("doeMeter").style.display = lhs?"block":"none";
+  if(lhs){ if(!DOE.axesCat.length) doeAxisLoad(); else doeMeterUpdate(); }
+}
+el("doeMode").onchange=doeModeSync;
+async function doeAxisLoad(){
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/doe/axes",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({yaml:structYAML()})})).json(); }
+  catch(e){ el("doeAxisList").innerHTML='<span class="hint">서버 응답 없음 — QE 서버 실행 확인</span>'; return; }
+  if(r.error){ el("doeAxisList").innerHTML='<span class="hint">오류: '+r.error+'</span>'; return; }
+  DOE.axesCat=r.axes||[]; DOE.axisStep={};
+  DOE.axesCat.forEach(a=>{ if(a.kind==="continuous") DOE.axisStep[a.key]=a.step; });
+  doeAxisRender();
+}
+function doeAxisRender(){
+  const box=el("doeAxisList"); box.innerHTML="";
+  DOE.axesCat.forEach(a=>{
+    const row=document.createElement("label");
+    row.style.cssText="display:flex;align-items:center;gap:6px;padding:3px 5px;border:1px solid var(--line);border-radius:6px;font-size:12px"
+      +(a.kind==="discrete"?";opacity:.55":"");
+    if(a.kind==="discrete"){
+      row.title=a.note||"";
+      row.innerHTML=`<input type="checkbox" disabled><span style="flex:1">${a.label}</span><span class="hint">이산·별도</span>`;
+    }else{
+      const ck=DOE.axisSel.has(a.key)?"checked":"";
+      row.innerHTML=`<input type="checkbox" data-k="${a.key}" ${ck}>`
+        +`<span style="flex:1" title="중심값 ${a.center} ${a.unit}">${a.label} <span class="hint">·중심 ${a.center}${a.unit}</span></span>`
+        +`<span class="hint">step</span><input type="number" data-step="${a.key}" value="${DOE.axisStep[a.key]}" step="0.001" style="width:74px;font-family:var(--mono)">`;
+      row.querySelector('input[type=checkbox]').onchange=e=>{
+        e.target.checked?DOE.axisSel.add(a.key):DOE.axisSel.delete(a.key); doeMeterUpdate(); };
+      row.querySelector('input[data-step]').onchange=e=>{ DOE.axisStep[a.key]=+e.target.value||a.step; };
+    }
+    box.appendChild(row);
+  });
+  const nc=DOE.axesCat.filter(a=>a.kind==="continuous").length, nd=DOE.axesCat.length-nc;
+  el("doeAxisCount").textContent=`선택 ${[...DOE.axisSel].filter(k=>DOE.axisStep[k]!=null).length} / 연속 ${nc} (이산 ${nd} 제외)`;
+  doeMeterUpdate();
+}
+function selectedAxes(){
+  return DOE.axesCat.filter(a=>a.kind==="continuous"&&DOE.axisSel.has(a.key))
+    .map(a=>[a.key,a.label,(DOE.axisStep[a.key]!=null?DOE.axisStep[a.key]:a.step),a.unit]);
+}
+el("doeAxisLoad").onclick=doeAxisLoad;
+el("doeAxisAll").onclick=()=>{ DOE.axesCat.forEach(a=>{ if(a.kind==="continuous")DOE.axisSel.add(a.key); }); doeAxisRender(); };
+el("doeAxisDefault").onclick=()=>{ DOE.axisSel=new Set(DEFAULT_AXES); doeAxisRender(); };
+function fmtBytes(b){ b=+b||0; return b<1024?b+"B":b<1048576?(b/1024).toFixed(0)+"KB":(b/1048576).toFixed(1)+"MB"; }
+function fmtSec(s){ s=Math.max(0,Math.round(+s||0)); if(s<90)return s+"초"; if(s<5400)return (s/60).toFixed(0)+"분"; return (s/3600).toFixed(1)+"시간"; }
+let _meterT=null;
+function doeMeterUpdate(){ if(el("doeMode").value!=="lhs")return;
+  clearTimeout(_meterT); _meterT=setTimeout(async()=>{
+    const ax=selectedAxes();
+    const body={ mode:"lhs", axes:ax.length?ax:null, naxes:ax.length||6,
+      n:+el("doeN").value||16, nsamples:+el("doeNsamples").value||80,
+      model:el("doeModel").value, nG:+(el("qeQual").value==="manual"?el("qeNG").value:151) };
+    if(DOE.perWl) body.per_wl_s=DOE.perWl;
+    let e; try{ e=await(await fetch(qeApiBase()+"/api/doe/estimate",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }catch(_){ return; }
+    if(!e||e.error){ el("doeMeterBody").textContent=e&&e.error?("오류: "+e.error):"—"; return; }
+    el("doeMeterBasis").textContent = e.time_basis==="measured"?"⏱ 실측기반(정확)":"⏱ 러프(nG추정)";
+    el("doeMeterBody").innerHTML=
+      `조건 <b>${e.points}</b>개 × ${(+el("doeN").value||16)}λ × 2편광 &nbsp;|&nbsp; 축 ${e.naxes}개<br>`
+     +`💾 예상 저장 <b>${fmtBytes(e.total_bytes)}</b> (csv ${fmtBytes(e.csv_bytes)} + model ${fmtBytes(e.json_bytes)})<br>`
+     +`⏱ 예상 시간 <b>${fmtSec(e.est_seconds)}</b> <span class="hint">(${fmtSec(e.est_seconds_lo)}~${fmtSec(e.est_seconds_hi)}, GPU면 단축)</span><br>`
+     +`🗂️ 현재 DB 총량 <b>${fmtBytes(e.db_total_bytes)}</b> <span class="hint">@ ${e.db_dir}</span>`;
+  }, 250);
+}
+["doeN","doeNsamples","doeModel","doeBound"].forEach(id=>{ const x=el(id); if(x){ x.addEventListener("input",doeMeterUpdate); x.addEventListener("change",doeMeterUpdate); } });
+doeModeSync();
 el("setBack").onclick=()=>goPage("wpage-sim");
 
 // ===== DOE · Surrogate 스윕 =====
@@ -1636,7 +1723,9 @@ el("doeRun").onclick=async()=>{ if(DOE.running)return;
     nG: manual? +el("qeNG").value : 151, downsample: manual? +el("qeDS").value : 2,
     force: el("doeForce")&&el("doeForce").checked };
   if(body.mode==="lhs"){ body.nsamples=+el("doeNsamples").value||80; body.bound=+el("doeBound").value||2;
-    body.model=el("doeModel").value; body.cv_folds=+el("doeCvFolds").value||5; }
+    body.model=el("doeModel").value; body.cv_folds=+el("doeCvFolds").value||5;
+    const ax=selectedAxes(); if(ax.length){ body.axes=ax;
+      if(ax.length<1){ alert("축을 1개 이상 선택하세요"); return; } } }
   let r; try{ r=await (await fetch("/api/doe",{method:"POST",body:JSON.stringify(body)})).json(); }
   catch(e){ alert("요청 실패: "+e.message); return; }
   if(!r.job){ alert("오류: "+(r.error||"?")); return; }
@@ -1661,6 +1750,9 @@ async function doePoll(){
   el("doeRun").disabled=false; el("doeCancel").style.display="none";
   if(s.state==="error"){ el("doeNote").textContent="❌ "+(s.error||"오류"); return; }
   el("doeProg").style.display="none"; el("doeDone").style.display="";
+  // 실측 파장당 시간 저장 → 다음 용량계량기 추정 정확도↑ (경과 / (완료조건 × 파장))
+  if(s.elapsed_s>0 && s.doe_done>0 && !s.cached){ const nwl=+el("doeN").value||16;
+    DOE.perWl=s.elapsed_s/(s.doe_done*nwl); }
   el("doeSummary").textContent=(s.state==="cancelled"?"중단됨 · ":"완료 · ")
     +`${s.doe_done}/${s.doe_total}${s.model?"샘플":"조건"} · ${doeFmtSec(s.elapsed_s||0)}`
     +(s.model?` · 에뮬레이터[${s.model}] 검증 CV R²=${s.r2_cv_mean} (in-sample ${s.r2_insample_mean})`
@@ -1824,7 +1916,7 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v89";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v90";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)
