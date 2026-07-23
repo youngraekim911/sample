@@ -111,6 +111,12 @@ def lint_wizard_cfg(cfg, material_names=None):
             s = _num(f.get(k))
             if s is not None and not (0 < s <= 1.5):
                 warn(f"stack.cf.{c}.{k}={s} 가 (0,1.5] 밖 — 0~1 권장(1=셀 가득).")
+        cu = _num(f.get("chamfer_um"))
+        if cu is not None and cu < 0:
+            err(f"stack.cf.{c}.chamfer_um 이 음수입니다 (상부모서리 컷 수평 reach µm).")
+        ca = _num(f.get("chamfer_angle"))
+        if ca is not None and not (0 < ca < 90):
+            warn(f"stack.cf.{c}.chamfer_angle={ca}° 가 (0,90) 밖 — 통상 20~60°.")
     if isinstance(bayer, list):
         used_c = {c for row in bayer for c in (row if isinstance(row, list) else [])}
         for c in used_c & _COLORS:
@@ -123,6 +129,9 @@ def lint_wizard_cfg(cfg, material_names=None):
         err("stack.ml.material 이 없습니다 (마이크로렌즈/평탄층 물질).")
     if (_num(ml.get("planar_um")) or 0) < 0:
         err("stack.ml.planar_um 이 음수입니다.")
+    mn = _num(ml.get("power"))                 # superellipse(Lamé) 지수
+    if mn is not None and not (1.0 <= mn <= 12.0):
+        warn(f"stack.ml.power(Lamé n)={mn} — 2=원, 3~6=squircle(무간극), 통상 2~8 권장.")
     q = ml.get("quads")
     has_h = (_num(ml.get("height_um")) or 0) > 0
     has_lens = bool(ml.get("lenses"))

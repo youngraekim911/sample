@@ -344,12 +344,16 @@ class MlBlock:
     겹치면 max(sag) -> 풍선 '찌부' 접촉선.
     """
 
-    def __init__(self, material, height_um=0.0, hr=0.55, quads=None, lenses=None):
+    def __init__(self, material, height_um=0.0, hr=0.55, quads=None, lenses=None,
+                 power=2.0):
         self.mat = material
         self.h = float(height_um or 0)
         self.hr = float(hr)
         self.quads = quads
         self.lenses = lenses
+        # superellipse(Lamé) 지수: 2=원/타원(기존), >2=squircle(둥근 사각, gapless
+        # 무간극 ML), →∞=사각, <2=오목. footprint 경계 |u|^n+|v|^n<1.
+        self.power = float(power or 2.0)
 
     def _lens_list(self, ctx):
         if self.lenses:
@@ -363,11 +367,13 @@ class MlBlock:
                 sh = sp["shape"]
                 orient = sp.get("orient", "h")
                 qh = float(sp.get("height_um", 0) or 0)   # quad별 돔 두께 (0=전역값)
+                qn = float(sp.get("power", 0) or 0)        # quad별 superellipse 지수 (0=전역)
                 x0, y0 = qx * 2 * p, qy * 2 * p
                 cx, cy = x0 + p, y0 + p
                 add = lambda ccx, ccy, ax, ay: out.append(
                     {"cx": ccx, "cy": ccy, "ax": ax * sc, "ay": ay * sc,
-                     **({"h": qh} if qh > 0 else {})})
+                     **({"h": qh} if qh > 0 else {}),
+                     **({"power": qn} if qn > 0 else {})})
                 if sh == "2x2":
                     add(cx, cy, p, p)
                 elif sh == "1x1":
@@ -393,13 +399,20 @@ class MlBlock:
             return self.h
         return self.hr * min(float(L["ax"]), float(L["ay"]))
 
+    def _power(self, L):
+        n = float(L.get("power", 0) or 0)
+        return n if n > 0 else self.power
+
     def build(self, ctx):
         sag = np.zeros_like(ctx.X)
         for L in self._lens_list(ctx):
             u = (ctx.X - float(L["cx"])) / float(L["ax"])
             v = (ctx.Y - float(L["cy"])) / float(L["ay"])
-            r2 = u * u + v * v
-            s = np.where(r2 < 1, self._height(L) * np.sqrt(np.clip(1 - r2, 0, 1)), 0.0)
+            n = self._power(L)
+            # superellipse(Lamé): |u|^n+|v|^n. n=2 면 u²+v²(원) 과 동일(하위호환).
+            re = (u * u + v * v) if abs(n - 2.0) < 1e-9 \
+                else (np.abs(u) ** n + np.abs(v) ** n)
+            s = np.where(re < 1, self._height(L) * np.sqrt(np.clip(1 - re, 0, 1)), 0.0)
             np.maximum(sag, s, out=sag)
         ctx.dome_sag = sag
         ctx.dome_mat = self.mat
@@ -542,7 +555,7 @@ def blocks_from_wizard_cfg(cfg, men_slices=8, taper_slices=8):
         PlanarBlock(ml["material"], ml.get("planar_um", 0)),
         MlBlock(ml["material"], height_um=ml.get("height_um", 0),
                 hr=ml.get("hr", 0.55), quads=ml.get("quads"),
-                lenses=ml.get("lenses")),
+                lenses=ml.get("lenses"), power=ml.get("power", 2.0)),
     ]
     arl = s.get("arl_top")
     if arl and float(arl.get("thickness_um", 0)) > 0:
