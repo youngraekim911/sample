@@ -643,6 +643,15 @@ def serve(port=8787, open_browser=True):
     url = f"http://127.0.0.1:{port}/"
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[cis-rcwa] wizard + QE server: {url}  (device={dev}, Ctrl+C 종료)")
+    # device 진단: cpu 로 떴는데 GPU 를 기대했다면 아래 세 줄로 원인 파악
+    #  (다른 파이썬? CPU 전용 torch? CUDA_VISIBLE_DEVICES 로 GPU 숨김?)
+    _cudab = getattr(torch.version, "cuda", None)
+    print(f"           python={sys.executable}")
+    print(f"           torch={torch.__version__} cuda_build={_cudab} "
+          f"is_available={torch.cuda.is_available()} "
+          f"device_count={torch.cuda.device_count() if torch.cuda.is_available() else 0}"
+          + (f" CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']!r}"
+             if 'CUDA_VISIBLE_DEVICES' in os.environ else ""))
     if open_browser:
         try:
             import webbrowser
