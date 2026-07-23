@@ -224,6 +224,14 @@
         <button class="btn primary" id="doeRun">🧪 DOE Run</button>
         <button class="btn" id="doeCancel" style="display:none">■ 중단</button>
       </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:10px">
+        <label class="hint" style="display:inline-flex;gap:5px;align-items:center" title="같은 구조·조건이면 저장된 surrogate 를 즉시 재사용(재계산 생략). 체크하면 무시하고 강제 재계산.">
+          <input type="checkbox" id="doeForce"> 캐시 무시(강제 재계산)</label>
+        <span class="hint">💾 저장된 surrogate(DB):</span>
+        <select id="doeCacheSel" class="hint" style="min-width:230px;max-width:340px"><option value="">— 없음 —</option></select>
+        <button class="btn ghost" id="doeCacheLoad" title="선택한 저장 결과를 바로 불러와 역설계/민감도에 사용 (계산 0회)">⤒ 불러오기</button>
+        <button class="btn ghost" id="doeCacheRefresh" title="목록 새로고침">↻</button>
+      </div>
       <div id="doeProg" style="display:none;margin-top:12px">
         <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:8px;height:14px;overflow:hidden">
           <div id="doeBar" style="height:100%;width:0%;background:var(--accent,#4c8dff);transition:width .4s"></div></div>
@@ -1273,7 +1281,7 @@ function linkFolderMaterials(){
 // 설정 페이지 진입 시 서버 연결 확인 + 안내
 async function qeEnterSettings(){
   const g=el("qeGuide"), p=await qePing();
-  if(p){ g.style.display="none"; el("qeRun").disabled=false; }
+  if(p){ g.style.display="none"; el("qeRun").disabled=false; doeCacheRefresh(); }
   else{ g.style.display="block"; el("qeRun").disabled=true;
     g.textContent="RCWA 서버가 꺼져 있습니다. 터미널에서 아래 한 줄을 실행하면 서버 모드로 동작합니다:\n\n"+
       "  cd cis_rcwa && python app.py\n\n(pip install torch numpy pyyaml · GPU 있으면 자동 사용)"; }
@@ -1558,7 +1566,8 @@ el("doeRun").onclick=async()=>{ if(DOE.running)return;
   const manual=el("qeQual").value==="manual";
   const body={ yaml:structYAML(), mode:el("doeMode").value, n:+el("doeN").value||16,
     lam0:+el("qeL0").value, lam1:+el("qeL1").value,
-    nG: manual? +el("qeNG").value : 151, downsample: manual? +el("qeDS").value : 2 };
+    nG: manual? +el("qeNG").value : 151, downsample: manual? +el("qeDS").value : 2,
+    force: el("doeForce")&&el("doeForce").checked };
   let r; try{ r=await (await fetch("/api/doe",{method:"POST",body:JSON.stringify(body)})).json(); }
   catch(e){ alert("요청 실패: "+e.message); return; }
   if(!r.job){ alert("오류: "+(r.error||"?")); return; }
@@ -1583,13 +1592,35 @@ el("doeRun").onclick=async()=>{ if(DOE.running)return;
     el("doeSur").style.display=hasSur?"":"none";
     if(hasSur){ el("doeSur").href="/api/doe/file?job="+DOE.job+"&kind=surrogate";
       try{ DOE.surrogate=await(await fetch(qeApiBase()+"/api/doe/file?job="+DOE.job+"&kind=surrogate")).json();
-        invUpdateAvail(); el("doeNote").textContent="✓ surrogate 저장 — 결과 페이지에서 🎯 역설계 사용 가능"; }catch(_){}
+        invUpdateAvail(); doeCacheRefresh();    // 새 캐시 항목이 목록에 뜨도록
+        el("doeNote").textContent=(s.cached?"✓ 캐시 적중 — 재계산 생략 · ":"✓ surrogate 저장(캐시됨) · ")
+          +"결과 페이지에서 🎯 역설계 사용 가능"; }catch(_){}
     }
   },1500); };
 el("doeCancel").onclick=()=>{ if(!DOE.job)return;
   el("doeCancel").disabled=true; el("doeCancel").textContent="⏳ 중단중…";
   el("doeNote").textContent="중단 요청됨 — 진행 중인 파장 계산만 마무리하고 멈춥니다 (완료된 조건까지 CSV 저장).";
   fetch("/api/doe/cancel",{method:"POST",body:JSON.stringify({job:DOE.job})}); };
+// ===== surrogate 캐시(DB) 목록/불러오기 =====
+function doeCacheLabel(e){ const d=e.created?new Date(e.created*1000):null;
+  const when=d?`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`:"?";
+  const ws=(e.wavelengths_nm||[]); const wl=ws.length?`${ws.length}λ ${ws[0]}–${ws[ws.length-1]}nm`:"";
+  return `${e.product||"구조"} · ${e.mode||"?"} · nG${e.nG||"?"} · ${wl} · R²(G)=${e.r2_G_mid!=null?e.r2_G_mid:"?"} · ${when} · ${(e.key||"").slice(0,8)}`; }
+async function doeCacheRefresh(){ const sel=el("doeCacheSel"); if(!sel)return;
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/doe/cache")).json(); }catch(e){ return; }
+  const items=(r&&r.items)||[]; sel.innerHTML=`<option value="">— ${items.length?items.length+"개 저장됨 (선택)":"없음"} —</option>`;
+  for(const e of items){ const o=document.createElement("option"); o.value=e.key; o.textContent=doeCacheLabel(e); sel.appendChild(o); } }
+async function doeCacheLoadSel(){ const k=el("doeCacheSel").value; if(!k){ alert("불러올 저장 항목을 선택하세요."); return; }
+  let sur; try{ sur=await(await fetch(qeApiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k))).json(); }
+  catch(e){ alert("불러오기 실패: "+e.message); return; }
+  if(sur&&sur.error){ alert("불러오기 실패: "+sur.error); return; }
+  DOE.surrogate=sur; invUpdateAvail();
+  el("doeDone").style.display=""; el("doeProg").style.display="none";
+  el("doeSummary").textContent=`💾 저장된 surrogate 불러옴 (계산 0회) · key ${k.slice(0,8)}`;
+  el("doeSur").style.display=""; el("doeSur").href=qeApiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k);
+  alert("불러왔습니다. 결과 페이지의 🎯 역설계 / 원인분석 민감도에서 바로 사용됩니다."); }
+if(el("doeCacheRefresh")) el("doeCacheRefresh").onclick=doeCacheRefresh;
+if(el("doeCacheLoad")) el("doeCacheLoad").onclick=doeCacheLoadSel;
 el("resultBack").onclick=()=>goPage("wpage-set");
 el("resultRerun").onclick=()=>goPage("wpage-set");
 
@@ -1670,7 +1701,7 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v84";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v85";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)

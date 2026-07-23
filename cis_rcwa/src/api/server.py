@@ -41,6 +41,7 @@ else:
     APP_DIR = ASSET_ROOT
 ROOT = ASSET_ROOT                              # 하위호환(html 등 읽기자원 기준)
 JOBS_DIR = os.path.join(APP_DIR, "out", "jobs")   # 쓰기 — exe 옆
+CACHE_DIR = os.path.join(APP_DIR, "out", "surrogate_cache")   # surrogate 영속 캐시(DB)
 
 JOBS = {}          # job id -> dict(state, progress, note, rows, error, cancel)
 _LOCK = threading.Lock()
@@ -256,6 +257,7 @@ def _run_doe_job(jid, cfg_path, p):
         from ..config.loader import load_config
         from ..sim.simulator import RCWAPlaneWaveSimulator
         from ..sim import doe as doe_mod
+        from ..sim import surrogate_cache as sc
         cfg = load_config(cfg_path)
         RCWAPlaneWaveSimulator._auto_model_defaults(cfg)   # QE 경로와 동일 자동 모델
         n = max(2, int(p.get("n", 16)))
@@ -263,6 +265,45 @@ def _run_doe_job(jid, cfg_path, p):
         waves = [round(lam0 * 1000 + i * (lam1 - lam0) * 1000 / (n - 1))
                  for i in range(n)]
         total = len(doe_mod.doe_points(p["mode"]))
+        lateral_n = p.get("lateral_n", 256)
+        mdir = _materials_dir()
+
+        # ── surrogate 캐시(DB) 조회: 구조·조건·물질이 동일하면 재계산 생략 ──
+        key = None
+        if p["mode"] != "axis":
+            try:
+                key = sc.compute_key(cfg, {"waves": waves, "mode": p["mode"],
+                                           "nG": p["nG"], "downsample": p["downsample"],
+                                           "lateral_n": lateral_n},
+                                     doe_mod.AXES_DEFAULT, mdir)
+                job["cache_key"] = key
+            except Exception:
+                key = None
+        if key and not p.get("force"):
+            rec = sc.load(CACHE_DIR, key)
+            if rec:
+                sur = rec["surrogate"]
+                sur_path = os.path.join(JOBS_DIR, jid + "_surrogate.json")
+                with open(sur_path, "w", encoding="utf-8") as f:
+                    json.dump(sur, f)
+                job["surrogate"] = sur_path
+                if rec.get("csv"):
+                    csv_path = os.path.join(JOBS_DIR, jid + "_doe.csv")
+                    with open(csv_path, "w", encoding="utf-8") as f:
+                        f.write(rec["csv"])
+                    job["csv"] = csv_path
+                ws = sur["wavelengths_nm"]
+                job["r2_G_mid"] = doe_mod.r2_at(sur, "G", ws[len(ws) // 2])
+                job["doe_total"] = total
+                job["doe_done"] = total
+                job["progress"] = 1.0
+                job["elapsed_s"] = 0
+                job["cached"] = True
+                job["state"] = "done"
+                job["note"] = (f"✓ 캐시 적중 — 동일 구조·조건, 재계산 생략 "
+                               f"(key {key[:8]})")
+                return
+
         job["note"] = f"{total}개 조건 × {n}λ — 1번째 조건 완료 후 예상시간 표시"
         job["doe_total"] = total
         job["doe_done"] = 0
@@ -290,6 +331,18 @@ def _run_doe_job(jid, cfg_path, p):
             # 대표 R² (그린 채널 중앙 파장) 리포트
             ws = sur["wavelengths_nm"]
             job["r2_G_mid"] = sur["r2"]["G"][int(ws[len(ws) // 2])]
+            # ── 캐시(DB) 저장: 다음에 같은 구조·조건이면 재계산 생략 ──
+            if key:
+                try:
+                    meta = {"mode": p["mode"], "nG": p["nG"],
+                            "downsample": p["downsample"], "wavelengths_nm": list(ws),
+                            "product": str(cfg.get("product", "")),
+                            "r2_G_mid": job["r2_G_mid"],
+                            "elapsed_s": res.get("elapsed_s")}
+                    sc.save(CACHE_DIR, key, sur, meta,
+                            csv_text=doe_mod.doe_csv(res))
+                except Exception:
+                    pass
         job["elapsed_s"] = res.get("elapsed_s")
         job["state"] = "cancelled" if res.get("cancelled") else "done"
         job["note"] = (f"{'중단' if res.get('cancelled') else '완료'} · "
@@ -368,7 +421,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "unknown job"}, 404); return
             self._json({k: job[k] for k in
                         ("state", "progress", "note", "error", "eta_s", "elapsed_s",
-                         "doe_done", "doe_total", "r2_G_mid")
+                         "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key")
                         if k in job})
         elif u.path == "/api/doe/file":
             q = parse_qs(u.query)
@@ -380,6 +433,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(404); self.end_headers(); return
             self._file(job[key], "application/json" if kind == "surrogate"
                        else "text/csv; charset=utf-8")
+        elif u.path == "/api/doe/cache":
+            # 저장된 surrogate 목록 (DB) — 최신순 메타
+            from ..sim import surrogate_cache as sc
+            self._json({"items": sc.index(CACHE_DIR)})
+        elif u.path == "/api/doe/cache/file":
+            # 캐시 키로 surrogate JSON 직접 로드 (재계산 0회 — 바로 역설계/민감도)
+            from ..sim import surrogate_cache as sc
+            k = (parse_qs(u.query).get("key") or [""])[0]
+            rec = sc.load(CACHE_DIR, k) if k else None
+            if not rec:
+                self.send_response(404); self.end_headers(); return
+            self._json(rec["surrogate"])
         else:
             self.send_response(404); self.end_headers()
 
@@ -519,7 +584,8 @@ class Handler(BaseHTTPRequestHandler):
                      "downsample": max(1, int(data.get("downsample", 2))),
                      "n": max(2, int(data.get("n", 16))),
                      "lam0": float(data.get("lam0", 0.40)),
-                     "lam1": float(data.get("lam1", 0.70))}
+                     "lam1": float(data.get("lam1", 0.70)),
+                     "force": bool(data.get("force", False))}
             except (TypeError, ValueError, AssertionError) as e:
                 self._json({"error": f"파라미터 오류: {e}"}, 400); return
             jid = start_doe_job(yaml_text, p)
