@@ -156,6 +156,28 @@ def lint_wizard_cfg(cfg, material_names=None):
         if not has_h and not (_num(ml.get("hr")) or 0) > 0 \
                 and not (_num(ml.get("sag_height_um")) or 0) > 0:
             warn("ML 돔 높이 근거(height_um/hr/sag_height_um)가 모두 없음 — 기본 hr 로 추정.")
+        # ML 하나가 서로 다른 색 픽셀을 덮는 조합(예: bayer 모자이크 + 2×2 ML)은
+        # 실존하지 않는다 — 공유 ML 은 tetra(동일색 quad)와 짝. 계산은 되므로 경고.
+        if npx == 4 and isinstance(bayer, list) and isinstance(q, list) \
+                and len(q) == 2 and not E:
+            def _fps(qr, qc, sp):
+                r0, c0 = qr * 2, qc * 2
+                sh, orient = sp.get("shape"), sp.get("orient", "h")
+                if sh == "2x2":
+                    return [[(r0, c0), (r0, c0 + 1), (r0 + 1, c0), (r0 + 1, c0 + 1)]]
+                if (sh == "2x1" and orient == "h"):
+                    return [[(r0 + a, c0), (r0 + a, c0 + 1)] for a in (0, 1)]
+                if sh in ("1x2",) or (sh == "2x1" and orient == "v"):
+                    return [[(r0, c0 + b), (r0 + 1, c0 + b)] for b in (0, 1)]
+                return []                                  # 1x1: 항상 단색
+            mixed = any(
+                len({bayer[r][c] for r, c in fp}) > 1
+                for qr in range(2) for qc in range(2)
+                for fp in _fps(qr, qc, (q[qr][qc] or {})))
+            if mixed:
+                warn("ML 렌즈 하나가 서로 다른 색 픽셀을 덮습니다 (예: bayer 모자이크 "
+                     "+ 2×2 ML) — 실제 제품에 없는 조합. CF array 를 tetra 로 "
+                     "바꾸거나 ML 을 1×1 로 하세요.")
 
     # --- ARL top (선택) ---
     arl = st.get("arl_top")

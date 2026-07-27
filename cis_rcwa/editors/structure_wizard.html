@@ -496,8 +496,10 @@ const DEFAULT = {
   product:"qcell_demo",
   ambient:"air",   // 상부 입사 매질 (step1 선택 — 뷰어 air 영역 + RCWA 입사 매질)
   grid:{ pixel_pitch_um:1.0, n_pixels:4, dxy_um:0.02, dz_um:0.02, air_margin_um:0.20 },
-  cf_array:"bayer",
-  bayer:[["R","G","R","G"],["G","B","G","B"],["R","G","R","G"],["G","B","G","B"]],
+  // 기본 = tetra(2×2 동일색 quad) + quad 당 2×2 ML — 실제 제품 조합 (qcell 스타일).
+  // bayer 모자이크 + 2×2 ML 은 렌즈 하나가 다른 색 픽셀을 덮어 실존하지 않음.
+  cf_array:"tetra",
+  bayer:[["R","R","G","G"],["R","R","G","G"],["G","G","B","B"],["G","G","B","B"]],
   // n,k 상수는 두지 않는다 — 이름(역할)만 정의하고 실제 n,k 는 오직 물질 폴더(txt)에서 셋업.
   // 폴더에 없는 물질은 '누락'으로 표시되고 QE/진단 계산이 거부된다 (si 포함 전부 폴더 필수).
   materials:{ air:{}, si:{}, oxide:{}, poly:{}, al2o3:{}, hfox:{}, peox:{}, teos:{}, tin:{},
@@ -525,6 +527,18 @@ function clampRes(){ const g=S.grid;
   g.dxy_um=Math.min(0.02,Math.max(0.01,+g.dxy_um||0.02));
   g.dz_um =Math.min(0.02,Math.max(0.01,+g.dz_um ||0.02)); }
 clampRes();
+// v110 교정: 예전 기본값(bayer 모자이크 + 2×2 ML)은 렌즈 하나가 다른 색 픽셀을 덮는
+// 실존하지 않는 조합 — '딱 그 기본값 그대로'인 저장분만 tetra 로 바꾼다 (사용자가
+// 직접 만진 구조는 건드리지 않음; 일반 조합 경고는 린터가 담당).
+(function(){ try{
+  const OLD=[["R","G","R","G"],["G","B","G","B"],["R","G","R","G"],["G","B","G","B"]];
+  const q=S.stack&&S.stack.ml&&S.stack.ml.quads;
+  const all22=Array.isArray(q)&&q.flat().every(x=>x&&x.shape==="2x2");
+  if(S.cf_array!=="tetra"&&all22&&JSON.stringify(S.bayer)===JSON.stringify(OLD)){
+    S.cf_array="tetra";
+    S.bayer=[["R","R","G","G"],["R","R","G","G"],["G","G","B","B"],["G","G","B","B"]];
+  }
+}catch(_){}})();
 function save(){ try{localStorage.setItem("cis_wizard_v3",JSON.stringify({S,refLambda}));}catch(e){} }  // folderLib 은 저장 안 함(서버가 소스)
 
 // ============================ 물질 ============================
@@ -2540,7 +2554,7 @@ async function imgReattach(){
 }
 
 // ============================ init ============================
-const WIZ_VERSION="v109";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v110";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)
