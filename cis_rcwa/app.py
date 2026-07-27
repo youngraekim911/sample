@@ -64,7 +64,13 @@ class _BootHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
-        else:                                       # 어떤 경로든 로딩 화면
+        elif self.path.startswith("/api/"):
+            # 본 서버 API 는 아직 없음 — 200 을 주면 로딩 화면이 '준비 완료'로
+            # 오판하고 너무 일찍 이동하므로 반드시 404
+            self.send_response(404)
+            self.end_headers()
+            return
+        else:                                       # 그 외 경로는 로딩 화면
             body = _boot_page_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -125,14 +131,15 @@ def _check_and_load(boot_httpd):
     _step("엔진 로딩 (torch)", "ok", "")
     try:
         import torch
-        _step("GPU (CUDA)", "ok" if torch.cuda.is_available() else "run",
+        _step("GPU (CUDA)", "ok",
               "사용" if torch.cuda.is_available() else "없음 — CPU 모드로 동작")
     except Exception:
         pass
 
     BOOT["ready"] = True
-    time.sleep(1.0)                                # 화면이 ✓ 를 보여줄 시간
+    time.sleep(1.5)                                # 화면이 최종 상태를 폴링할 여유
     boot_httpd.shutdown()                          # → 메인 스레드가 본 서버로 교체
+    # (로딩 화면은 마지막 상태를 캐시해 체크 애니메이션을 끝까지 보여준 뒤 넘어옴)
 
 
 if __name__ == "__main__":

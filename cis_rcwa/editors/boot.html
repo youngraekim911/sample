@@ -27,12 +27,23 @@
     0%,100%{opacity:.22;transform:scale(.9)}
     18%{opacity:1;transform:scale(1.02)}
     36%{opacity:.55;transform:scale(.96)}}
-  .steps{margin:0 auto;max-width:380px;text-align:left;font:12px/1.9 var(--mono);color:var(--faint)}
-  .steps .ok{color:var(--dim)} .steps .ok b{color:var(--mint);font-weight:400}
-  .steps .run b{color:var(--amber);font-weight:400}
-  .steps .bad{color:var(--red)}
-  .note{margin-top:14px;font-size:12px;color:var(--dim);min-height:18px}
-  .err{margin-top:12px;max-width:420px;font-size:12px;color:var(--red);
+  /* ── 체크리스트: 한 항목씩 나타나 확인중… → ✓ 팝 ── */
+  .steps{margin:0 auto;max-width:400px;text-align:left;font:12px/2.0 var(--mono);color:var(--faint);min-height:120px}
+  .row{display:flex;gap:8px;align-items:baseline;animation:fadein .35s ease}
+  @keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .ic{width:16px;display:inline-block;text-align:center}
+  .row.ok  .ic{color:var(--mint)} .row.ok .nm{color:var(--dim)}
+  .row.run .ic{color:var(--amber)}
+  .row.bad{color:var(--red)} .row.bad .ic{color:var(--red)}
+  .row .note{color:var(--faint)}
+  .row.ok .note{color:var(--mint);opacity:.75}
+  .row.run .note{color:var(--amber)}
+  .pop{display:inline-block;animation:pop .4s cubic-bezier(.2,1.6,.4,1)}
+  @keyframes pop{0%{transform:scale(0);opacity:0}60%{transform:scale(1.35)}100%{transform:scale(1)}}
+  .dots::after{content:"";animation:dots 1.2s steps(4,end) infinite}
+  @keyframes dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+  .note2{margin-top:14px;font-size:12px;color:var(--dim);min-height:18px}
+  .err{margin-top:12px;max-width:440px;font-size:12px;color:var(--red);
     background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;text-align:left;white-space:pre-wrap}
 </style>
 <div class="box">
@@ -42,42 +53,87 @@
   </div>
   <h1>CIS Simulator</h1>
   <p class="sub">환경을 준비하고 있습니다…</p>
-  <div class="steps" id="steps">· 서버 응답 대기중…</div>
-  <div class="note" id="note"></div>
+  <div class="steps" id="steps"></div>
+  <div class="note2" id="note"></div>
   <div class="err" id="err" style="display:none"></div>
 </div>
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-const ICON={ok:"✓",run:"…",wait:"·",bad:"✗"};
-function render(s){
-  const rows=(s.steps||[]).map(t=>{
-    const cls=t.state==="ok"?"ok":t.state==="bad"?"bad":"run";
-    const ic=ICON[t.state]||ICON.wait;
-    return `<div class="${cls}">${ic} ${t.name}${t.note?` <b>— ${t.note}</b>`:""}</div>`;
-  }).join("");
-  $("steps").innerHTML=rows||"· 확인중…";
-  if(s.error){ $("err").style.display=""; $("err").textContent=s.error;
-    $("note").textContent="문제를 해결한 뒤 창을 닫고 다시 실행해 주세요."; }
-}
-let readyShown=false;
-async function tryMain(){                       // 본 서버가 올라왔으면 시작 화면으로
-  try{ const r=await fetch("/api/ping",{cache:"no-store"});
-    if(r.ok){ location.href="/"; return true; } }catch(_){}
-  return false;
-}
-async function tick(){
+const STEP_MS=430;                 // 항목 하나가 등장/체크되는 리듬
+let SRV={steps:[],ready:false,error:null};   // 서버가 알려준 실제 상태 (캐시)
+let gone=false;
+
+// ── 서버 상태 폴링 (표시와 분리 — 표시는 아래 렌더 루프가 페이스 조절) ──
+async function poll(){
+  if(gone) return;
   try{
     const r=await fetch("/api/boot/status",{cache:"no-store"});
-    if(r.status===404){ location.reload(); return; }
-    const s=await r.json();
-    if(s.ready && !s.steps){ location.reload(); return; }   // 이미 본 서버
-    render(s);
-    if(s.ready && !s.error && !readyShown){ readyShown=true;
-      $("note").textContent="준비 완료 — 시작 화면으로 이동합니다…"; }
-    if(readyShown) await tryMain();
-  }catch(_){ await tryMain(); }                 // 부트→본 서버 교체 순간
-  setTimeout(tick, 400);
+    if(r.status===404){ if(SHOWN.length===0){ gone=true; location.reload(); return; } }
+    else{
+      const s=await r.json();
+      if(s.ready && !s.steps){
+        // 본 서버 응답: 연출 시작 전이면 바로 진입, 진행 중이면 캐시된
+        // 체크리스트로 애니메이션을 끝까지 보여준 뒤 이동
+        if(SHOWN.length===0){ gone=true; location.reload(); return; }
+        SRV.ready=true;
+      } else SRV=s;
+    }
+  }catch(_){/* 부트→본 서버 교체 순간: 마지막 상태로 계속 표시 */}
+  setTimeout(poll, 300);
 }
-tick();
+// ── 페이스 렌더: 한 틱에 한 항목만 (등장 → 확인중… → ✓ 팝) ──
+const SHOWN=[];                    // {name, state, note}
+function rowHTML(t, justChecked){
+  const ic = t.state==="ok" ? `<span class="ic ${justChecked?"pop":""}">✓</span>`
+           : t.state==="bad" ? `<span class="ic">✗</span>`
+           : `<span class="ic dots"></span>`;
+  const note = t.state==="run" ? (t.note||"확인중") : (t.note||"");
+  return `${ic}<span class="nm">${t.name}</span>`
+       + (note?` <span class="note">— ${note}</span>`:"");
+}
+function paint(justIdx){
+  $("steps").innerHTML = SHOWN.map((t,i)=>
+    `<div class="row ${t.state}">${rowHTML(t, i===justIdx)}</div>`).join("");
+}
+function displayDone(){
+  return SRV.steps.length>0 && SHOWN.length===SRV.steps.length
+    && SHOWN.every((t,i)=>t.state===SRV.steps[i].state && t.state!=="run"
+                          || (t.state==="run"&&SRV.steps[i].state==="run"));
+}
+let redirecting=false;
+async function tryMain(){
+  try{ const r=await fetch("/api/ping",{cache:"no-store"});
+    if(r.ok){ gone=true; location.href="/"; } }catch(_){}
+}
+function tick(){
+  if(gone) return;
+  const tgt=SRV.steps||[];
+  // 캐스케이드: 한 틱에 [뒤처진 항목 1개 체크(✓팝)] + [새 항목 1개 등장(확인중)]
+  // — 앞줄이 체크되는 동안 다음 줄이 나타나는 리듬
+  let adv=-1;
+  for(let i=0;i<SHOWN.length;i++){
+    const s=tgt[i]; if(!s) break;
+    if(SHOWN[i].state!==s.state || SHOWN[i].note!==s.note){
+      SHOWN[i]={name:s.name,state:s.state,note:s.note}; adv=i; break; }
+  }
+  if(SHOWN.length<tgt.length){
+    const t=tgt[SHOWN.length];
+    SHOWN.push({name:t.name, state:"run", note:t.state==="run"?(t.note||""):""});
+  }
+  if(SHOWN.length) paint(adv);
+  if(SRV.error && SHOWN.length>=tgt.length){
+    $("err").style.display=""; $("err").textContent=SRV.error;
+    $("note").textContent="문제를 해결한 뒤 창을 닫고 다시 실행해 주세요.";
+    return;                                        // 더 진행하지 않음 (안내 유지)
+  }
+  if(SRV.ready && !SRV.error && displayDone()){
+    if(!redirecting){ redirecting=true;
+      $("note").innerHTML="✓ 준비 완료 — 시작 화면으로 이동합니다";
+    }
+    tryMain();
+  }
+  setTimeout(tick, STEP_MS);
+}
+poll(); tick();
 </script>
