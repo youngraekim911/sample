@@ -277,6 +277,11 @@
             <button class="btn primary" id="doeRangeNorm" title="통상 설계 범위 안에서">정상 범위 ★</button>
             <button class="btn" id="doeRangeWide" title="극단값(outlier)까지 넓게 — 더 오래 걸리고 모델이 거칠 수 있음">outlier까지</button>
           </div>
+          <span style="width:1px;height:22px;background:var(--line)"></span>
+          <label class="hint" style="display:inline-flex;gap:5px;align-items:center"
+            title="조건마다 대표 위치(r=0.8)에서 비스듬한 빛(CRA+shift)도 계산해 동컬러 diff·빗각 QE 를 모델에 함께 학습합니다. 제품 CRA 스펙(data/cra/제품명.yaml) 필요 · 계산 약 2배">
+            <input type="checkbox" id="doeObl"> 🌈 사광 결과 포함</label>
+          <span class="hint" id="doeOblStat" style="font-size:11px"></span>
         </div>
         <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">⚙️ 고급 (숫자 직접 지정 — 몰라도 됩니다)</summary>
           <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:7px">
@@ -397,14 +402,14 @@
           </div></details>
       </div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:9px">
-        <span class="hint">필드 격자:</span>
-        <button class="btn primary" id="imgFs2" title="1옥탄트 14필드 — 빠른 전면 지도">성긴 0.2 ★</button>
-        <button class="btn" id="imgFs1" title="1옥탄트 45필드 — 정밀 지도 (4배 느림)">촘촘 0.1</button>
+        <span class="hint" title="센서 위에서 QE 를 재는 위치 수 — 1/8 만 계산하고 대칭으로 전면을 채웁니다">측정 위치:</span>
+        <button class="btn primary" id="imgFs2" title="간격 0.2 — 빠른 전면 지도">14곳 · 빠름 ★</button>
+        <button class="btn" id="imgFs1" title="간격 0.1 — 정밀 지도 (4배 느림)">45곳 · 정밀</button>
         <span style="width:1px;height:22px;background:var(--line)"></span>
-        <span class="hint">원뿔 평균:</span>
-        <button class="btn" id="imgC1" title="주광선 1점만 — 빠른 근사">끔 1×1</button>
-        <button class="btn primary" id="imgC3" title="F# 원뿔 9점 가중평균 — 권장">표준 3×3 ★</button>
-        <button class="btn" id="imgC5" title="25점 — 최고 정밀">정밀 5×5</button>
+        <span class="hint" title="렌즈 F# 가 만드는 원뿔 안 여러 방향의 빛을 가중평균 — 실제 카메라 조건에 가까움">입사광 평균:</span>
+        <button class="btn" id="imgC1" title="주광선 1방향만 — 빠른 근사">주광선만</button>
+        <button class="btn primary" id="imgC3" title="F# 원뿔 9방향 가중평균 — 권장">표준 · 9방향 ★</button>
+        <button class="btn" id="imgC5" title="25방향 — 최고 정밀">정밀 · 25방향</button>
         <button class="btn primary" id="imgRun" style="margin-left:auto">▶ 이미지 계산 시작</button>
         <button class="btn" id="imgCancel" style="display:none">■ 중단</button>
       </div>
@@ -1871,6 +1876,18 @@ async function boPoll(){
 }
 el("doeQual").onchange=()=>{ const m=el("doeQual").value==="manual";
   el("doeQAdv").style.display=m?"":"none"; el("doeQAdv").open=m; doeMeterUpdate(); };
+// 🌈 사광 포함 토글 — 제품 CRA 스펙이 있어야 켜진다 (없으면 안내 후 해제)
+el("doeObl").onchange=async()=>{
+  const st=el("doeOblStat");
+  if(!el("doeObl").checked){ st.textContent=""; doeMeterUpdate(); return; }
+  st.textContent="CRA 스펙 확인중…";
+  let r=null;
+  try{ r=await(await fetch(qeApiBase()+"/api/cra/spec?product="+encodeURIComponent((S.product||"").trim()))).json(); }catch(_){}
+  if(r&&r.found){ st.innerHTML=`✓ ${r.path} · 측정 위치 r=0.8 · F# ${r.f_number}`; }
+  else{ el("doeObl").checked=false;
+    st.innerHTML=`<span style="color:#c9531a">⚠ CRA 스펙 없음 — ${(r&&r.path)||"data/cra/<제품명>.yaml"} 을 넣어주세요`
+      +((r&&(r.available||[]).length)?` (있는 스펙: ${r.available.join(", ")})`:"")+`</span>`; }
+  doeMeterUpdate(); };
 // 모델탐색은 3·4·5 단계가 필요 없는 별도 흐름 — 같은 탭에서 탐색 페이지로 전환
 el("simExplore").onclick=()=>{ location.href=qeApiBase()+"/explorer"; };
 el("setBack").onclick=()=>goPage("wpage-sim");
@@ -1990,6 +2007,7 @@ function doeMeterUpdate(){ if(el("doeMode").value!=="lhs")return;
     const body={ mode:"lhs", axes:ax.length?ax:null, naxes:ax.length||6,
       n:+el("doeN").value||16, nsamples:+el("doeNsamples").value||80,
       model:el("doeModel").value, nG:+(el("doeQual").value==="manual"?el("doeNG").value:151) };
+    if(el("doeObl").checked){ body.oblique=true; body.oblique_cone=1; }
     if(DOE.perWl) body.per_wl_s=DOE.perWl;
     let e; try{ e=await(await fetch(qeApiBase()+"/api/doe/estimate",{method:"POST",
       headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
@@ -1997,7 +2015,8 @@ function doeMeterUpdate(){ if(el("doeMode").value!=="lhs")return;
     if(!e||e.error){ el("doeMeterBody").textContent=e&&e.error?("오류: "+e.error):"—"; return; }
     el("doeMeterBasis").textContent = e.time_basis==="measured"?"이전 실행 기준(정확)":"대략 추정";
     el("doeMeterBody").innerHTML=
-      `노브 <b>${e.naxes}개</b>를 <b>${e.points}가지</b> 조합으로 흔들어 계산합니다.<br>`
+      `노브 <b>${e.naxes}개</b>를 <b>${e.points}가지</b> 조합으로 흔들어 계산합니다.`
+     +(el("doeObl").checked?` <span style="color:var(--accent)">+ 🌈 조건마다 사광(동컬러 diff·빗각 QE)도 측정</span>`:"")+`<br>`
      +`⏱ 예상 <b>${fmtSec(e.est_seconds)}</b> <span class="hint">(${fmtSec(e.est_seconds_lo)}~${fmtSec(e.est_seconds_hi)} · GPU면 단축 · 걸어두고 퇴근 OK)</span>`
      +` &nbsp; 💾 저장 <b>${fmtBytes(e.total_bytes)}</b> <span class="hint">(DB 누적 ${fmtBytes(e.db_total_bytes)})</span>`;
   }, 250);
@@ -2044,7 +2063,8 @@ el("doeRun").onclick=async()=>{ if(DOE.running)return;
     nG: manual? +el("doeNG").value : 151, downsample: manual? +el("doeDS").value : 2,
     force: el("doeForce")&&el("doeForce").checked };
   if(body.mode==="lhs"){ body.nsamples=+el("doeNsamples").value||80; body.bound=+el("doeBound").value||2;
-    body.model=el("doeModel").value; body.cv_folds=+el("doeCvFolds").value||5; }
+    body.model=el("doeModel").value; body.cv_folds=+el("doeCvFolds").value||5;
+    if(el("doeObl").checked){ body.oblique=true; body.oblique_cone=1; } }
   if(body.mode==="lhs"||body.mode==="axis"){       // 선택한 노브를 스크리닝에도 적용
     const ax=selectedAxes(); if(ax.length) body.axes=ax; }
   let r; try{ r=await (await fetch("/api/doe",{method:"POST",body:JSON.stringify(body)})).json(); }
@@ -2135,7 +2155,7 @@ el("doeCancel").onclick=()=>{ if(!DOE.job)return;
 function doeCacheLabel(e){ const d=e.created?new Date(e.created*1000):null;
   const when=d?`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`:"?";
   const ws=(e.wavelengths_nm||[]); const wl=ws.length?`${ws.length}λ`:"";
-  const kind=e.mode==="lhs"?("예측모델"+(e.model?`[${e.model}]`:"")):(e.mode||"?");
+  const kind=(e.mode==="lhs"?("예측모델"+(e.model?`[${e.model}]`:"")):(e.mode||"?"))+(e.oblique?" 🌈사광":"");
   const ax=e.naxes?`노브${e.naxes}`:"";
   const cv=e.r2_cv_mean!=null
     ?`신뢰도 ${e.r2_cv_mean>=0.9?"높음✓":e.r2_cv_mean>=0.7?"보통":"낮음⚠"}`
@@ -2322,8 +2342,8 @@ function imgEstUpdate(){ const c=imgCond(), f=imgFieldCount(IMG.fs);
   const n=Math.max(1,Math.min(8,+el("imgN").value||3));
   const solves=f*n*IMG.cone*IMG.cone*2;
   const t=solves*0.9*Math.pow(c.nG/101,2.2);                          // CPU 실측(≈0.9s/solve @nG101) 기준
-  el("imgEst").textContent=`옥탄트 필드 ${f}개 × λ${n} × 원뿔 ${IMG.cone}×${IMG.cone} × 편광2 = RCWA ${solves}회`
-    +` · 예상 ~${fmtSec(t)} (CPU 기준 · GPU면 단축 · 전체 이미지는 대칭 확장이라 8배 절약)`; }
+  el("imgEst").textContent=`측정 위치 ${f}곳(1/8 대칭) × 파장 ${n}개 × 입사방향 ${IMG.cone*IMG.cone} × 편광 2 = RCWA ${solves}회`
+    +` · 예상 ~${fmtSec(t)} (CPU 기준 · GPU면 단축)`; }
 // 설정 페이지 진입 — 서버 확인 + 제품 CRA 스펙 상태 + 재접속
 async function imgEnterSettings(){
   const g=el("imgGuide"), p=await qePing();
@@ -2403,8 +2423,8 @@ async function imgShowDone(s){
   ["png","npz","json"].forEach(k=>{ const a=el("imgDl"+k[0].toUpperCase()+k.slice(1));
     if(a) a.href=qeApiBase()+"/api/image/file?job="+IMG.job+"&kind="+k; });
   el("imgSummary").textContent=((s&&s.state==="cancelled")?"중단(부분 조립) · ":"완료 · ")
-    +`필드 ${(s&&s.doe_done)||Object.keys(r.fields||{}).length}개 · λ ${r.wavelengths_nm.join("/")}nm`
-    +` · 원뿔 ${r.theta_samples}×${r.phi_samples} · F# ${r.spec?r.spec.f_number:"?"}`
+    +`측정 위치 ${(s&&s.doe_done)||Object.keys(r.fields||{}).length}곳 · λ ${r.wavelengths_nm.join("/")}nm`
+    +` · 입사방향 ${r.theta_samples*r.phi_samples} · F# ${r.spec?r.spec.f_number:"?"}`
     +((s&&s.elapsed_s)?` · ${fmtSec(s.elapsed_s)}`:"");
   imgDraw(); }
 // ── 동컬러 diff — 사광의 핵심 판정: 같은 색 픽셀끼리(tetra 2×2 quad 4개,
@@ -2420,7 +2440,7 @@ function imgDiffSummary(d){
   const chips=order.map(c=>{ const o=d.overall[c]; const ok=o.diff_pct<=thr;
     return `<span style="font-family:var(--mono);font-weight:600;color:${ok?"inherit":"#d9534f"}">`
       +`<span style="color:${CH_HEX[c]||"inherit"}">${c}</span> ${o.diff_pct.toFixed(1)}% ${ok?"✓":"⚠"}`
-      +`</span> <span class="hint">(λ${o.wl} · 필드 ${o.field} · r=${o.r})</span>`; }).join(" &nbsp; ");
+      +`</span> <span class="hint">(λ${o.wl} · 위치 ${o.field} · r=${o.r})</span>`; }).join(" &nbsp; ");
   box.innerHTML=`<b>동컬러 픽셀 diff</b> <span class="hint">— 같은 색끼리 (max−min)/평균, 기준 ≤${thr}% · 각 컬러는 자기 대역 λ에서 판정</span><br>`
     +chips+` &nbsp; → <b style="color:${d.pass?"#2f9e4f":"#d9534f"}">${d.pass?"✓ 기준 만족":"⚠ 기준 초과 — shrink ratio 조정 필요"}</b>`;
   box.style.display="";
@@ -2470,7 +2490,7 @@ function imgDrawDiff(){
     ctx.fillRect(X+1,Y+1,sc-2,sc-2);
     if(sc>34){ ctx.fillStyle="#fff"; ctx.font=`600 ${Math.min(15,sc*0.24)|0}px var(--mono,monospace)`;
       ctx.fillText(`${v.c} ${v.v.toFixed(0)}%`, X+sc/2, Y+sc/2); } }
-  el("imgScale").textContent=`동컬러 diff 맵 · 셀=필드(그 필드의 최악 컬러 표시) · 초록 0% → 빨강 ${thr}%(기준) 이상`
+  el("imgScale").textContent=`동컬러 diff 맵 · 셀=측정 위치(최악 컬러 표시) · 초록 0% → 빨강 ${thr}%(기준) 이상`
     +` · ${sel==="mean"?"각 컬러 on-band 전체 λ":"λ "+sel+"nm (on-band 컬러만)"} · 최악 ${worstCell.toFixed(1)}%`;
 }
 function imgDraw(){
@@ -2520,7 +2540,7 @@ async function imgReattach(){
 }
 
 // ============================ init ============================
-const WIZ_VERSION="v108";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v109";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)

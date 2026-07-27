@@ -74,6 +74,27 @@ def transform_unit(unit, labels, octant_index):
                      "octant 대칭을 끄고 region='full' 로 계산하세요")
 
 
+# ------------------------------------------------------------- 동컬러 diff
+def unit_color_diff(arr, labels):
+    """unit QE 격자(npx×npx) → 같은 라벨 픽셀끼리 (max−min)/mean 편차.
+
+    사광 핵심 지표: shrink 후에도 남는 초점 틀어짐이 같은 색 픽셀들(tetra 2×2
+    quad, bayer Gr/Gb)에 서로 다른 QE 를 주는 정도. 스펙: diff_pct ≤ 30 권장.
+    반환: {label: {"min","max","mean","n","diff_pct"}}
+    """
+    A = np.asarray(arr, float)
+    L = np.asarray(labels, dtype=object)
+    out = {}
+    for c in sorted({str(v) for v in L.flat}):
+        v = A[L == c]
+        mn, mx, mu = float(v.min()), float(v.max()), float(v.mean())
+        dp = (mx - mn) / mu * 100.0 if mu > 1e-12 else 0.0
+        out[c] = {"min": round(mn, 5), "max": round(mx, 5),
+                  "mean": round(mu, 5), "n": int(v.size),
+                  "diff_pct": round(dp, 2)}
+    return out
+
+
 # ------------------------------------------------------------- 필드 격자
 def make_xy_fields_set(field_step=0.1, region="octant", x_max=0.8, y_max=0.6):
     """정규화 필드 좌표 (x,y) 목록. octant=1옥탄트(x≥y≥0)만, full=전체.

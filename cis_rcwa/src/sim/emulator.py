@@ -182,6 +182,15 @@ def fit_emulator(doe_result, model="auto", cv_folds=5,
     ws = [int(w) for w in doe_result["wavelengths_nm"]]
     Y = {ch: {w: np.array([p["qe"][w][ch] for p in pts], float) for w in ws}
          for ch in "RGB"}
+    # ── 사광 채널: 점마다 obl(빗각 QE)·diff(동컬러 %)가 있으면 같은 모델로 학습.
+    #    oR/oG/oB = 대표 필드 빗각 QE, dR/dG/dB = 동컬러 diff% (0~100 그대로).
+    has_obl = bool(pts) and all(p.get("obl") and p.get("diff") for p in pts)
+    if has_obl:
+        for L in "RGB":
+            Y["o" + L] = {w: np.array([p["obl"][w][L] for p in pts], float)
+                          for w in ws}
+            Y["d" + L] = {w: np.array([float(p["diff"][w].get(L, 0.0))
+                                       for p in pts], float) for w in ws}
     k = Xsteps.shape[1]
 
     candidates = (["quadratic", "cubic", "rbf"] if model == "auto"
@@ -198,18 +207,33 @@ def fit_emulator(doe_result, model="auto", cv_folds=5,
               if model == "auto" else model)
     F = fitted[chosen]
 
+    # 대표 지표는 직광 R/G/B 만으로 (기존과 비교 가능하게) — 사광 채널은 별도 평균
+    direct = lambda m: {c: m[c] for c in "RGB" if c in m}
     out = {"type": "emulator", "model": chosen, "axes": doe_result["axes"],
            "naxes": k, "wavelengths_nm": ws,
            "bound": float(doe_result.get("bound", 2.0)),
            "box": {"lo": [round(float(v), 4) for v in Xsteps.min(0)],
                    "hi": [round(float(v), 4) for v in Xsteps.max(0)]},
-           "n_samples": len(pts),
+           "n_samples": len(pts), "channels": list(Y.keys()),
            "r2": F["ins"], "r2_cv": F["cvr"], "rmse_cv": F["cve"],
            "metrics": {
-               "r2_insample_mean": _mean_metric(F["ins"]),
-               "r2_cv_mean": _mean_metric(F["cvr"]),
-               "rmse_cv_mean": _mean_metric(F["cve"]),
+               "r2_insample_mean": _mean_metric(direct(F["ins"])),
+               "r2_cv_mean": _mean_metric(direct(F["cvr"])),
+               "rmse_cv_mean": _mean_metric(direct(F["cve"])),
                "per_model_cv": {m: fitted[m]["cv_mean"] for m in fitted}}}
+    if has_obl:
+        # on-band(각 컬러 평균 QE 가 최대치의 50% 이상인 λ) — diff 판정은 이 λ에서만.
+        onband = {}
+        for L in "RGB":
+            mus = {w: float(np.mean(Y[L][w])) for w in ws}
+            top = max(mus.values())
+            ob = [w for w in ws if mus[w] >= 0.5 * top]
+            onband[L] = ob if ob else list(ws)
+        ob_meta = dict(doe_result.get("oblique") or {})
+        ob_meta.update({"onband_nm": onband, "threshold_pct": 30.0,
+                        "r2_cv_mean": _mean_metric(
+                            {c: F["cvr"][c] for c in F["cvr"] if c not in "RGB"})})
+        out["oblique"] = ob_meta
     if chosen in ("quadratic", "cubic"):
         out["coef"] = F["param"]["coef"]
         out["feature_order"] = ("1, x1..xk, x1^2..xk^2, x_i*x_j(i<j)"

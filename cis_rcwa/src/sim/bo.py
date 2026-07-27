@@ -106,10 +106,18 @@ def suggest(X, y, lo, hi, n_pick=10, n_cand=6000, seed=0, xi=0.005):
 def points_from_csv(csv_text, k):
     """doe_csv 역파싱 — 캐시에 저장된 원자료를 points 리스트로 복원.
 
-    형식: 헤더(k개 축키 + nm,R,G,B), 행 = 조건×파장.
+    형식: 헤더(k개 축키 + nm,R,G,B [+ obl_R..B, diff_*]), 행 = 조건×파장.
+    사광 열(obl_*/diff_*)이 있으면 point 에 obl/diff 도 복원 — BO 재학습 때
+    사광 채널이 소실되지 않게 한다.
     """
     lines = [ln for ln in csv_text.strip().splitlines() if ln.strip()]
-    pts = {}
+    if not lines:
+        return []
+    hdr = lines[0].split(",")
+    col = {name: i for i, name in enumerate(hdr)}
+    obl_cols = [h for h in hdr if h.startswith("obl_")]
+    diff_cols = [h for h in hdr if h.startswith("diff_")]
+    pts, obls, diffs = {}, {}, {}
     order = []
     for ln in lines[1:]:
         c = ln.split(",")
@@ -117,8 +125,21 @@ def points_from_csv(csv_text, k):
             continue
         steps = tuple(round(float(x), 6) for x in c[:k])
         if steps not in pts:
-            pts[steps] = {}
+            pts[steps], obls[steps], diffs[steps] = {}, {}, {}
             order.append(steps)
-        pts[steps][int(float(c[k]))] = {"R": float(c[k + 1]), "G": float(c[k + 2]),
-                                        "B": float(c[k + 3])}
-    return [{"steps": list(s), "qe": pts[s]} for s in order]
+        wl = int(float(c[k]))
+        pts[steps][wl] = {"R": float(c[k + 1]), "G": float(c[k + 2]),
+                          "B": float(c[k + 3])}
+        if obl_cols and len(c) > max(col[h] for h in obl_cols):
+            obls[steps][wl] = {h[4:]: float(c[col[h]]) for h in obl_cols
+                               if c[col[h]] != ""}
+            diffs[steps][wl] = {h[5:]: float(c[col[h]]) for h in diff_cols
+                                if len(c) > col[h] and c[col[h]] != ""}
+    out = []
+    for s in order:
+        pt = {"steps": list(s), "qe": pts[s]}
+        if obls[s]:
+            pt["obl"] = obls[s]
+            pt["diff"] = diffs[s]
+        out.append(pt)
+    return out

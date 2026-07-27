@@ -298,14 +298,19 @@ def axis_catalog(cfg):
 def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
             lateral_n=256, materials_dir=None, axes=AXES_DEFAULT,
             nsamples=None, bound=2.0, seed=0, progress=None, cancel=None,
-            resume_points=None, on_point=None):
+            resume_points=None, on_point=None, oblique=None):
     """DOE 실행. progress(done,total,eta_s,point) 콜백, cancel() -> bool 중단.
 
     lhs 모드는 nsamples/bound/seed 로 공간채움 샘플 수·상자·시드 지정.
     resume_points: 이전 체크포인트의 points — 설계점 프리픽스와 일치하면 그만큼
                    건너뛰고 이어서 계산 (설계점은 seed 기반 결정적이라 재현됨).
     on_point(out): 조건 하나가 끝날 때마다 호출 — 중간 저장(체크포인트)용.
-    반환: {"axes":[...], "mode", "points": [{"steps":[...], "qe": {nm: {R,G,B}}}, ...],
+    oblique: 사광 동시 측정(없으면 기존과 동일). 조건마다 대표 필드 1곳에서
+             CRA shift + 빗각 RCWA 를 추가로 돌려 동컬러 diff·빗각 QE 를 기록.
+             {"spec": cra.load_cra_spec 결과, "x_field":0.8, "y_field":0.0,
+              "theta_samples":1, "phi_samples":1}
+    반환: {"axes":[...], "mode", "points": [{"steps":[...], "qe": {nm:{R,G,B}}
+           [, "obl": {nm:{R,G,B}}, "diff": {nm:{라벨: diff_pct}}]}, ...],
            "wavelengths_nm": [...], "elapsed_s": float, ["resumed": n]}
     """
     from ..structure.blocks import ir_from_wizard_cfg
@@ -316,6 +321,11 @@ def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
     out = {"axes": [list(a) for a in axes], "mode": mode, "nG": nG,
            "bound": float(bound), "seed": int(seed),
            "wavelengths_nm": list(wavelengths_nm), "points": []}
+    if oblique:
+        out["oblique"] = {k: oblique[k] for k in
+                          ("x_field", "y_field", "theta_samples", "phi_samples")
+                          if k in oblique}
+        out["oblique"]["product"] = str(oblique.get("spec", {}).get("product", ""))
     # ── 체크포인트 이어하기: 저장분 steps 가 설계점 프리픽스와 일치할 때만 ──
     if resume_points:
         okr = len(resume_points) <= total and all(
@@ -323,12 +333,23 @@ def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
             all(abs(float(a) - float(b)) < 1e-6
                 for a, b in zip(rp["steps"], pts[i]))
             for i, rp in enumerate(resume_points))
-        if okr:
+        # 사광 유무가 다른 체크포인트는 못 잇는다 (점마다 obl/diff 가 섞이면 안 됨)
+        if okr and not all(bool(rp.get("obl")) == bool(oblique)
+                           for rp in resume_points):
+            okr = False
+
+        def _norm_pt(rp):
             # JSON 왕복 시 파장 키가 str 로 바뀌므로 int 로 정규화 (새 점과 타입 통일)
-            out["points"] = [{"steps": [float(s) for s in rp["steps"]],
-                              "qe": {int(w): {ch: float(v) for ch, v in q.items()}
-                                     for w, q in (rp.get("qe") or {}).items()}}
-                             for rp in resume_points]
+            d = {"steps": [float(s) for s in rp["steps"]],
+                 "qe": {int(w): {ch: float(v) for ch, v in q.items()}
+                        for w, q in (rp.get("qe") or {}).items()}}
+            for kk in ("obl", "diff"):
+                if rp.get(kk):
+                    d[kk] = {int(w): {c: float(v) for c, v in m.items()}
+                             for w, m in rp[kk].items()}
+            return d
+        if okr:
+            out["points"] = [_norm_pt(rp) for rp in resume_points]
             out["resumed"] = len(resume_points)
     start_i = len(out["points"])
     t0 = time.time()
@@ -362,7 +383,31 @@ def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
             qe[int(w)] = {L: round(acc[L], 5) for L in "RGB"}
         if out.get("cancelled"):
             break
-        out["points"].append({"steps": list(p), "qe": qe})
+        pt = {"steps": list(p), "qe": qe}
+        if oblique:
+            # 같은 조건 구조에 CRA shift 를 먹여 대표 필드의 빗각 응답 측정 —
+            # 빗각 QE(obl)와 동컬러 diff%(diff)가 축과 함께 모델 채널로 학습된다.
+            from .cra import unit_qe_at_field
+            from .octant import unit_color_diff
+            u = unit_qe_at_field(
+                ir, oblique["spec"],
+                float(oblique.get("x_field", 0.8)),
+                float(oblique.get("y_field", 0.0)),
+                wavelengths_nm, nG=nG, downsample=downsample,
+                materials_dir=materials_dir,
+                theta_samples=int(oblique.get("theta_samples", 1)),
+                phi_samples=int(oblique.get("phi_samples", 1)),
+                cancel=cancel)
+            if u is None:                              # 사광 도중 취소 — 점 미완
+                out["cancelled"] = True
+                break
+            pt["obl"] = {int(w): {L: float(u["rgb"][int(w)][L]) for L in "RGB"}
+                         for w in wavelengths_nm}
+            pt["diff"] = {int(w): {c: v["diff_pct"] for c, v in
+                                   unit_color_diff(u["pixels"][int(w)],
+                                                   u["labels"]).items()}
+                          for w in wavelengths_nm}
+        out["points"].append(pt)
         if on_point:                                   # 매 조건 완료 즉시 중간 저장
             try:
                 on_point(out)
@@ -485,13 +530,27 @@ def predict(surrogate, steps, wavelength_nm, channel):
 
 
 def doe_csv(doe_result):
-    """DOE 결과 -> CSV 문자열 (한 줄 = 한 조건×파장)."""
+    """DOE 결과 -> CSV 문자열 (한 줄 = 한 조건×파장).
+
+    사광 동시 측정이 있으면 빗각 QE(obl_*)·동컬러 diff%(diff_*) 열이 추가된다.
+    """
     axes = doe_result["axes"]
+    pts = doe_result["points"]
+    has_obl = bool(pts) and all(p.get("obl") and p.get("diff") for p in pts)
+    dcols = (sorted({c for p in pts for m in p["diff"].values() for c in m})
+             if has_obl else [])
     hdr = [a[0] for a in axes] + ["nm", "R", "G", "B"]
+    if has_obl:
+        hdr += [f"obl_{L}" for L in "RGB"] + [f"diff_{c}" for c in dcols]
     lines = [",".join(hdr)]
-    for p in doe_result["points"]:
+    for p in pts:
         for w in doe_result["wavelengths_nm"]:
             q = p["qe"][int(w)]
-            lines.append(",".join([str(s) for s in p["steps"]] +
-                                  [str(int(w)), str(q["R"]), str(q["G"]), str(q["B"])]))
+            row = ([str(s) for s in p["steps"]] +
+                   [str(int(w)), str(q["R"]), str(q["G"]), str(q["B"])])
+            if has_obl:
+                o, d = p["obl"][int(w)], p["diff"][int(w)]
+                row += [str(o[L]) for L in "RGB"]
+                row += [str(d.get(c, "")) for c in dcols]
+            lines.append(",".join(row))
     return "\n".join(lines) + "\n"

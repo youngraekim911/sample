@@ -124,6 +124,11 @@ def _doe_estimate(data):
         per_solve = float(per_solve)
         est_s = per_solve * pts * nwl * 2                 # 2편광
 
+    # 🌈 사광 동시 측정: 조건마다 (원뿔²) 배의 빗각 RCWA 가 추가 → 직광 대비 ×(1+cone²)
+    if data.get("oblique"):
+        cone = max(1, min(5, int(data.get("oblique_cone", 1))))
+        est_s *= (1 + cone * cone)
+
     db = _cache_dir()
     return {"points": pts, "rows": rows, "naxes": k,
             "csv_bytes": int(csv_b), "json_bytes": int(json_b),
@@ -370,6 +375,20 @@ def _run_doe_job(jid, cfg_path, p):
         mdir = _materials_dir()
         is_lhs = p["mode"] == "lhs"
 
+        # ── 🌈 사광 동시 측정: 제품 CRA 스펙을 먼저 확보 (없으면 즉시 안내) ──
+        oblique_cfg = None
+        if p.get("oblique"):
+            from ..sim import cra as cra_mod
+            product = str(cfg.get("product", "")).strip()
+            spath = _cra_spec_path(product)
+            if not os.path.isfile(spath):
+                raise ValueError(
+                    f"사광 측정에는 CRA 스펙이 필요합니다: data/cra/{product}.yaml "
+                    f"이 없습니다 — 제품 CRA yaml 을 넣거나 사광 옵션을 끄세요 "
+                    f"(예시: data/cra/qcell_demo.yaml)")
+            oblique_cfg = dict(p["oblique"])
+            oblique_cfg["spec"] = cra_mod.load_cra_spec(spath)
+
         # ── surrogate 캐시(DB) 조회: 구조·조건·물질이 동일하면 재계산 생략 ──
         key = None
         if p["mode"] != "axis":
@@ -381,6 +400,8 @@ def _run_doe_job(jid, cfg_path, p):
                     conds.update({"nsamples": p["nsamples"], "bound": p["bound"],
                                   "seed": p["seed"], "model": p["model"],
                                   "cv_folds": p["cv_folds"]})
+                if p.get("oblique"):                          # 사광 유무·설정도 키에 반영
+                    conds["oblique"] = p["oblique"]
                 key = sc.compute_key(cfg, conds, axes, mdir)
                 job["cache_key"] = key
             except Exception:
@@ -466,10 +487,12 @@ def _run_doe_job(jid, cfg_path, p):
 
         res = doe_mod.run_doe(cfg, waves, mode=p["mode"], nG=p["nG"],
                               downsample=p["downsample"], lateral_n=p.get("lateral_n", 256),
+                              materials_dir=mdir,
                               axes=axes, nsamples=p.get("nsamples"),
                               bound=p.get("bound", 2.0), seed=p.get("seed", 0),
                               progress=prog, cancel=lambda: job["cancel"],
-                              resume_points=resume, on_point=on_point)
+                              resume_points=resume, on_point=on_point,
+                              oblique=oblique_cfg)
         csv_path = os.path.join(JOBS_DIR, jid + "_doe.csv")
         with open(csv_path, "w", encoding="utf-8") as f:
             f.write(doe_mod.doe_csv(res))
@@ -514,6 +537,8 @@ def _run_doe_job(jid, cfg_path, p):
                         meta.update({"model": job.get("model"),
                                      "r2_cv_mean": job.get("r2_cv_mean"),
                                      "n_samples": p.get("nsamples")})
+                    if p.get("oblique"):
+                        meta["oblique"] = True
                     sc.save(_cache_dir(), key, sur, meta,
                             csv_text=doe_mod.doe_csv(res))
                     sc.clear_checkpoint(_cache_dir(), key)   # 완주 → 중간 저장 정리
@@ -551,10 +576,11 @@ def _run_doe_job(jid, cfg_path, p):
         job["elapsed_s"] = res.get("elapsed_s")
         job["state"] = "cancelled" if res.get("cancelled") else "done"
         if is_lhs and not res.get("cancelled"):
+            obl_txt = " · 🌈 사광 채널 포함(diff·빗각 QE)" if p.get("oblique") else ""
             job["note"] = (
                 f"완료 · 넓은 에뮬레이터[{job.get('model')}] {job['doe_done']}/{total}샘플 · "
                 f"검증 CV R²={job.get('r2_cv_mean')} (in-sample "
-                f"{job.get('r2_insample_mean')}) · {res.get('elapsed_s', 0)}s")
+                f"{job.get('r2_insample_mean')}){obl_txt} · {res.get('elapsed_s', 0)}s")
         else:
             job["note"] = (f"{'중단' if res.get('cancelled') else '완료'} · "
                            f"{job['doe_done']}/{total} 조건 · {res.get('elapsed_s', 0)}s"
@@ -603,23 +629,17 @@ def _same_color_diff(units, labels, waves, threshold_pct=30.0):
         ob = [w for w in cmean[c] if cmean[c][w] >= 0.5 * top]
         onband[c] = ob if ob else [int(w) for w in waves]
 
+    from ..sim.octant import unit_color_diff
     per_field, worst = {}, {}                        # worst[(wl,c)] = 최악 필드
     for (x, y), u in units.items():
         fkey = f"{x},{y}"
         per_field[fkey] = {}
         for w in waves:
-            arr = np.asarray(u["pixels"][int(w)], float)
-            d = {}
+            d = unit_color_diff(u["pixels"][int(w)], labels)
             for c in colors:
-                v = arr[L == c]
-                mn, mx, mu = float(v.min()), float(v.max()), float(v.mean())
-                dp = (mx - mn) / mu * 100.0 if mu > 1e-12 else 0.0
-                d[c] = {"min": round(mn, 5), "max": round(mx, 5),
-                        "mean": round(mu, 5), "n": int(v.size),
-                        "diff_pct": round(dp, 2)}
                 k = (int(w), c)
-                if k not in worst or dp > worst[k]["diff_pct"]:
-                    worst[k] = {"diff_pct": round(dp, 2), "field": fkey,
+                if k not in worst or d[c]["diff_pct"] > worst[k]["diff_pct"]:
+                    worst[k] = {"diff_pct": d[c]["diff_pct"], "field": fkey,
                                 "r": round(math.hypot(x, y), 3)}
             per_field[fkey][int(w)] = d
     worst_wl = {}
@@ -799,6 +819,22 @@ def _run_bo_job(jid, p):
         if len(pts) < 5:
             raise ValueError("모델의 원자료(CSV)가 부족해 BO 를 시작할 수 없습니다")
 
+        # 사광 포함 모델이면 새 실측점도 같은 필드에서 사광을 재야 채널이 보존된다
+        oblq = None
+        obm = sur.get("oblique")
+        if obm and all(pp.get("obl") for pp in pts):
+            from ..sim import cra as cra_mod
+            product = str((base_cfg or {}).get("product", "")).strip()
+            spath = _cra_spec_path(product)
+            if not os.path.isfile(spath):
+                raise ValueError(
+                    f"사광 포함 모델인데 CRA 스펙(data/cra/{product}.yaml)이 없어 "
+                    f"새 실험점의 사광을 잴 수 없습니다 — 스펙을 넣고 다시 실행하세요")
+            oblq = {"spec": cra_mod.load_cra_spec(spath),
+                    "x": float(obm.get("x_field", 0.8)),
+                    "y": float(obm.get("y_field", 0.0)),
+                    "cone": int(obm.get("theta_samples", 1))}
+
         def val(qe):
             q = qe.get(wl) or qe.get(str(wl)) or {}
             return float(q.get(ch, 0.0))
@@ -824,8 +860,8 @@ def _run_bo_job(jid, p):
             if job["cancel"]:
                 break
             c = doe_mod.apply_point(base_cfg, sp, axes)
-            sim = RCWAPlaneWaveSimulator(ir_from_wizard_cfg(c, 256), nG=nG,
-                                         downsample=dsamp)
+            ir_pt = ir_from_wizard_cfg(c, 256)
+            sim = RCWAPlaneWaveSimulator(ir_pt, nG=nG, downsample=dsamp)
             qe = {}
             for w in ws:
                 if job["cancel"]:
@@ -838,7 +874,24 @@ def _run_bo_job(jid, p):
                 qe[w] = {L: round(acc[L], 5) for L in "RGB"}
             if job["cancel"] or len(qe) < len(ws):
                 break
-            pts.append({"steps": [round(float(v), 6) for v in sp], "qe": qe})
+            new_pt = {"steps": [round(float(v), 6) for v in sp], "qe": qe}
+            if oblq:                       # 모델과 같은 필드에서 사광도 실측
+                from ..sim.octant import unit_color_diff
+                from ..sim import cra as cra_mod
+                u = cra_mod.unit_qe_at_field(
+                    ir_pt, oblq["spec"], oblq["x"], oblq["y"], ws,
+                    nG=nG, downsample=dsamp, materials_dir=_materials_dir(),
+                    theta_samples=oblq["cone"], phi_samples=oblq["cone"],
+                    cancel=lambda: job["cancel"])
+                if u is None:
+                    break
+                new_pt["obl"] = {int(w): {L: float(u["rgb"][int(w)][L])
+                                          for L in "RGB"} for w in ws}
+                new_pt["diff"] = {int(w): {cc: v["diff_pct"] for cc, v in
+                                           unit_color_diff(u["pixels"][int(w)],
+                                                           u["labels"]).items()}
+                                  for w in ws}
+            pts.append(new_pt)
             v = sgn * val(qe)
             evaluated.append(round(val(qe), 5))
             X.append(sp); y.append(v)
@@ -855,6 +908,10 @@ def _run_bo_job(jid, p):
             res = {"axes": axes, "mode": "lhs", "nG": nG,
                    "bound": float(sur.get("bound", 2.0)), "seed": 0,
                    "wavelengths_nm": ws, "points": pts}
+            if oblq and obm:               # 사광 메타 승계 (fit 이 onband 재계산)
+                res["oblique"] = {kk: obm[kk] for kk in
+                                  ("x_field", "y_field", "theta_samples",
+                                   "phi_samples", "product") if kk in obm}
             sur2 = fit_emulator(res, model="auto",
                                 cv_folds=min(5, max(2, len(pts) // 4)),
                                 base_cfg=base_cfg)
@@ -1270,6 +1327,13 @@ class Handler(BaseHTTPRequestHandler):
                     p["model"] = str(data.get("model", "auto"))
                     assert p["model"] in ("auto", "quadratic", "cubic", "rbf"), "model"
                     p["cv_folds"] = max(2, int(data.get("cv_folds", 5)))
+                    # 🌈 사광 동시 측정: 대표 필드에서 빗각 QE + 동컬러 diff 를
+                    # 조건마다 함께 재서 모델 채널(oR..dB)로 학습 (CRA 스펙 필요)
+                    if data.get("oblique"):
+                        fx, fy = (data.get("oblique_field") or [0.8, 0.0])[:2]
+                        cone = max(1, min(5, int(data.get("oblique_cone", 1))))
+                        p["oblique"] = {"x_field": float(fx), "y_field": float(fy),
+                                        "theta_samples": cone, "phi_samples": cone}
                 # 사용자 선택 축: [[key,label,step,unit], ...] (연속축만). 없으면 기본 6축.
                 ax = data.get("axes")
                 if ax:
