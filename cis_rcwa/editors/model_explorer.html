@@ -58,10 +58,12 @@
   <div style="display:flex;flex-direction:column;gap:12px">
     <div class="card">
       <h2>① 모델 불러오기</h2>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <select id="dbSel" style="flex:1;min-width:150px"><option value="">— 서버 DB —</option></select>
-        <button class="btn" id="dbLoad">불러오기</button>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span class="hint" style="flex:1">📚 모델 라이브러리 <span id="dbCount"></span></span>
         <button class="btn ghost" id="dbRefresh" title="목록 새로고침">↻</button>
+      </div>
+      <div id="dbList" style="margin-top:6px;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px">
+        <div class="hint" style="padding:6px">서버 연결 시 저장된 모델이 여기 뜹니다.</div>
       </div>
       <div class="drop" id="drop" style="margin-top:8px">
         📄 모델 JSON을 여기로 <b>드래그</b> — 또는 <label style="text-decoration:underline;cursor:pointer">파일선택<input type="file" id="file" accept=".json" hidden></label>
@@ -125,7 +127,7 @@
 
 <script>
 "use strict";
-const VER="explorer v2";
+const VER="explorer v3";
 document.getElementById("ver").textContent=VER;
 const el=id=>document.getElementById(id);
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -172,21 +174,63 @@ function outOfBox(emu, steps){ const lo=emu.box.lo, hi=emu.box.hi;
 
 // ===================== 모델 로드 =====================
 function apiBase(){ return location.protocol.startsWith("http")? "" : "http://127.0.0.1:8787"; }
-async function dbRefresh(){ const sel=el("dbSel");
+// 모델 라이브러리 — 제품별 → 구조별 그룹. 같은 구조(조건만 다른 모델)끼리 묶이고,
+// 구조가 다른 그룹은 라벨로 구분(불러오면 구조 미리보기도 그 구조로 바뀜).
+let DB_LOADED_KEY=null;
+function _when(e){ const d=e.created?new Date(e.created*1000):null;
+  return d?`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`:""; }
+function _mrow(e){
+  const cv=e.r2_cv_mean!=null?`신뢰도 ${e.r2_cv_mean>=0.9?"높음✓":e.r2_cv_mean>=0.7?"보통":"낮음⚠"} (${e.r2_cv_mean})`
+        :(e.r2_G_mid!=null?`R² ${e.r2_G_mid}`:"");
+  const ax=e.naxes?`노브 ${e.naxes}개`:"";
+  const ws=(e.wavelengths_nm||[]);
+  const wl=ws.length?`${ws.length}λ`:"";
+  return [e.mode==="lhs"?("예측모델"+(e.model?`[${e.model}]`:"")):e.mode, ax, cv, wl, _when(e)]
+    .filter(Boolean).join(" · "); }
+async function dbRefresh(){ const box=el("dbList");
   let r; try{ r=await(await fetch(apiBase()+"/api/doe/cache")).json(); }
-  catch(e){ sel.innerHTML='<option value="">— 서버 미연결 —</option>'; return; }
+  catch(e){ box.innerHTML='<div class="hint" style="padding:6px">서버 미연결 — JSON 드래그로도 열 수 있습니다.</div>'; el("dbCount").textContent=""; return; }
   const items=(r&&r.items)||[];
-  sel.innerHTML=`<option value="">— ${items.length?items.length+"개 저장됨":"없음"} —</option>`;
-  items.forEach(e=>{ const o=document.createElement("option"); o.value=e.key;
-    const d=e.created?new Date(e.created*1000):null;
-    const when=d?`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`:"";
-    o.textContent=`${e.product||"구조"} · ${e.mode||"?"}${e.model?"["+e.model+"]":""} · ${e.r2_cv_mean!=null?"CV "+e.r2_cv_mean:"R² "+(e.r2_G_mid??"?")} · ${when}`;
-    sel.appendChild(o); }); }
-async function dbLoad(){ const k=el("dbSel").value; if(!k){ alert("불러올 모델을 선택하세요."); return; }
+  el("dbCount").textContent=items.length?`(${items.length}개)`:"";
+  if(!items.length){ box.innerHTML='<div class="hint" style="padding:6px">저장된 모델 없음 — 위저드에서 모델을 만들면 여기 쌓입니다.</div>'; return; }
+  // 그룹: product → struct_key
+  const prods={};
+  items.forEach(e=>{ const pr=e.product||"(제품 미지정)";
+    (prods[pr]=prods[pr]||{})[e.struct_key||"구버전(구조정보 없음)"] ??= [];
+    prods[pr][e.struct_key||"구버전(구조정보 없음)"].push(e); });
+  box.innerHTML="";
+  Object.keys(prods).sort().forEach(pr=>{
+    const ph=document.createElement("div");
+    ph.style.cssText="padding:4px 7px;font-weight:700;font-size:12px;color:var(--accent);border-bottom:1px solid var(--line)";
+    ph.textContent=`📦 ${pr}`;
+    box.appendChild(ph);
+    const structs=Object.keys(prods[pr]);
+    structs.forEach((sk,si)=>{
+      if(structs.length>1){                       // 구조가 여럿이면 구조 그룹 라벨로 구분
+        const sh=document.createElement("div");
+        sh.style.cssText="padding:3px 7px 1px;font-size:11px;color:var(--ink-dim)";
+        sh.innerHTML=`구조 ${String.fromCharCode(65+si)} <span style="font-family:var(--mono)">#${String(sk).slice(0,6)}</span>`
+          +(si>0?` <span style="color:var(--amber)">⚠ 위 구조와 다름</span>`:"");
+        box.appendChild(sh); }
+      prods[pr][sk].forEach(e=>{
+        const row=document.createElement("div");
+        const on=e.key===DB_LOADED_KEY;
+        row.style.cssText="display:flex;gap:7px;align-items:center;padding:4px 7px;margin:1px 3px;border-radius:6px;cursor:pointer;font-size:12px"
+          +(on?";background:var(--panel-2);outline:1px solid var(--accent-dim)":"");
+        row.onmouseenter=()=>{ if(!on) row.style.background="var(--panel-2)"; };
+        row.onmouseleave=()=>{ if(!on) row.style.background=""; };
+        row.innerHTML=`<span style="color:${on?"var(--accent)":"var(--ink-faint)"}">${on?"●":"○"}</span>`
+          +`<span style="flex:1">${_mrow(e)}</span><span class="hint">${on?"사용중":"열기"}</span>`;
+        row.onclick=()=>dbLoadKey(e.key);
+        box.appendChild(row); });
+    });
+  });
+}
+async function dbLoadKey(k){
   let j; try{ j=await(await fetch(apiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k))).json(); }
   catch(e){ alert("불러오기 실패: "+e.message); return; }
   if(j&&j.error){ alert("실패: "+j.error); return; }
-  setModel(j); }
+  DB_LOADED_KEY=k; setModel(j); dbRefresh(); }
 function setModel(j){
   if(!j || !(j.axes&&(j.coef||j.rbf))){ alert("에뮬레이터 JSON 이 아닙니다 (axes + coef/rbf 필요)."); return; }
   EMU=j;
@@ -199,14 +243,15 @@ function setModel(j){
   if(cv!=null){ const b=el("cvBadge"); b.style.display="";
     b.textContent=`검증 CV R²=${cv}`;
     b.className="badge "+(cv>=0.9?"ok":"warn"); }
-  el("mdlInfo").innerHTML=`샘플 ${EMU.n_samples||"?"}개로 학습`
+  const prod=(EMU.base_cfg&&EMU.base_cfg.product)?` · 📦 ${EMU.base_cfg.product}`:"";
+  el("mdlInfo").innerHTML=`샘플 ${EMU.n_samples||"?"}개로 학습${prod}`
     +(m.r2_insample_mean!=null?` · 학습 R²=${m.r2_insample_mean}`:"")
     +(cv!=null&&cv<0.9?`<br><span style="color:var(--amber)">⚠ CV R² 가 낮습니다 — 예측을 참고용으로만. 샘플을 늘려 재학습 권장.</span>`:"")
     +(EMU.base_cfg?"":`<br><span style="color:var(--amber)">⚠ 구조가 동봉되지 않은 모델 — 구조 미리보기 없음(QE 예측은 정상)</span>`);
   IV.nodes=[]; IV.pred=null;                     // 새 모델 -> 역설계 목표 초기화
   buildSliders(); redrawAll();
   if(location.hash==="#inverse") setTab("inv"); }
-el("dbRefresh").onclick=dbRefresh; el("dbLoad").onclick=dbLoad;
+el("dbRefresh").onclick=dbRefresh;
 el("file").onchange=e=>{ const f=e.target.files[0]; if(!f)return;
   const rd=new FileReader(); rd.onload=()=>{ try{ setModel(JSON.parse(rd.result)); }catch(_){ alert("JSON 파싱 실패"); } }; rd.readAsText(f); };
 (function(){ const d=el("drop");

@@ -79,6 +79,19 @@ def materials_fingerprint(cfg, materials_dir):
     return fp
 
 
+_STRUCT_KEYS = ("grid", "bayer", "cf_array", "stack", "materials", "ambient")
+
+
+def compute_struct_key(cfg, materials_dir):
+    """'구조 지문' — 구조(+물질 내용)만으로 결정되는 해시. DOE 조건(파장·nG·축·샘플)과
+    무관하므로, 같은 구조를 조건만 바꿔 여러 번 돌린 모델들이 같은 지문으로 묶인다.
+    모델 라이브러리에서 제품→구조→모델 그룹핑에 사용."""
+    payload = {"engine": "struct/v1",
+               "structure": {k: cfg.get(k) for k in _STRUCT_KEYS if k in cfg},
+               "materials": materials_fingerprint(cfg, materials_dir)}
+    return _sha(_canon(payload))
+
+
 def compute_key(cfg, conds, axes, materials_dir):
     """상태키 = sha256(정규화 구조 + 조건 + 축정의 + 물질지문 + 엔진버전).
 

@@ -1860,23 +1860,45 @@ el("doeCancel").onclick=()=>{ if(!DOE.job)return;
   fetch("/api/doe/cancel",{method:"POST",body:JSON.stringify({job:DOE.job})}); };
 // ===== surrogate 캐시(DB) 목록/불러오기 =====
 function doeCacheLabel(e){ const d=e.created?new Date(e.created*1000):null;
-  const when=d?`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`:"?";
-  const ws=(e.wavelengths_nm||[]); const wl=ws.length?`${ws.length}λ ${ws[0]}–${ws[ws.length-1]}nm`:"";
-  return `${e.product||"구조"} · ${e.mode||"?"} · nG${e.nG||"?"} · ${wl} · R²(G)=${e.r2_G_mid!=null?e.r2_G_mid:"?"} · ${when} · ${(e.key||"").slice(0,8)}`; }
+  const when=d?`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`:"?";
+  const ws=(e.wavelengths_nm||[]); const wl=ws.length?`${ws.length}λ`:"";
+  const kind=e.mode==="lhs"?("예측모델"+(e.model?`[${e.model}]`:"")):(e.mode||"?");
+  const ax=e.naxes?`노브${e.naxes}`:"";
+  const cv=e.r2_cv_mean!=null
+    ?`신뢰도 ${e.r2_cv_mean>=0.9?"높음✓":e.r2_cv_mean>=0.7?"보통":"낮음⚠"}`
+    :(e.r2_G_mid!=null?`R² ${e.r2_G_mid}`:"");
+  return [kind,ax,cv,wl,when].filter(Boolean).join(" · "); }
 async function doeCacheRefresh(){ const box=el("doeLoadList"); if(!box)return;
   let r; try{ r=await(await fetch(qeApiBase()+"/api/doe/cache")).json(); }
   catch(e){ box.textContent="서버 미연결 — QE 서버(python app.py)를 켜세요."; return; }
   const items=(r&&r.items)||[]; DOE.cacheItems=items;
-  if(!items.length){ box.textContent="저장된 모델 없음 — DOE Run 을 실행하면 여기에 쌓입니다."; return; }
+  if(!items.length){ box.textContent="저장된 모델 없음 — Run 을 실행하면 여기에 쌓입니다."; return; }
+  // 제품별 → 구조별 그룹 (같은 구조를 조건만 바꿔 돌린 모델끼리 묶임)
+  const prods={};
+  items.forEach(e=>{ const pr=e.product||"(제품 미지정)";
+    const sk=e.struct_key||"구버전";
+    (prods[pr]=prods[pr]||{})[sk]=(prods[pr][sk]||[]); prods[pr][sk].push(e); });
   box.innerHTML="";
-  for(const e of items){
-    const row=document.createElement("div");
-    row.style.cssText="display:flex;align-items:center;gap:8px;padding:5px 7px;border-bottom:1px dashed var(--line);cursor:pointer;border-radius:5px";
-    row.onmouseenter=()=>row.style.background="var(--panel)";
-    row.onmouseleave=()=>row.style.background="";
-    row.innerHTML=`<span style="flex:1;font-size:12px">${doeCacheLabel(e)}</span><span class="btn ghost" style="pointer-events:none">⤒ 불러오기</span>`;
-    row.onclick=()=>doeCacheLoadSel(e.key);
-    box.appendChild(row); } }
+  Object.keys(prods).sort().forEach(pr=>{
+    const ph=document.createElement("div");
+    ph.style.cssText="padding:3px 6px;font-weight:700;font-size:12px;color:var(--accent)";
+    ph.textContent=`📦 ${pr}`; box.appendChild(ph);
+    const structs=Object.keys(prods[pr]);
+    structs.forEach((sk,si)=>{
+      if(structs.length>1){
+        const sh=document.createElement("div");
+        sh.style.cssText="padding:1px 8px;font-size:11px;color:var(--ink-dim)";
+        sh.innerHTML=`구조 ${String.fromCharCode(65+si)} <span style="font-family:var(--mono)">#${String(sk).slice(0,6)}</span>`
+          +(si>0?` <span style="color:var(--amber)">⚠ 위와 구조 다름</span>`:"");
+        box.appendChild(sh); }
+      prods[pr][sk].forEach(e=>{
+        const row=document.createElement("div");
+        row.style.cssText="display:flex;align-items:center;gap:8px;padding:4px 8px;margin-left:6px;border-bottom:1px dashed var(--line);cursor:pointer;border-radius:5px";
+        row.onmouseenter=()=>row.style.background="var(--panel)";
+        row.onmouseleave=()=>row.style.background="";
+        row.innerHTML=`<span style="flex:1;font-size:12px">${doeCacheLabel(e)}</span><span class="btn ghost" style="pointer-events:none">⤒ 불러오기</span>`;
+        row.onclick=()=>doeCacheLoadSel(e.key);
+        box.appendChild(row); }); }); }); }
 async function doeCacheLoadSel(k){ if(!k)return;
   let sur; try{ sur=await(await fetch(qeApiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k))).json(); }
   catch(e){ alert("불러오기 실패: "+e.message); return; }
@@ -2003,7 +2025,7 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v94";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v95";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)

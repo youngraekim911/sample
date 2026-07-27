@@ -456,7 +456,11 @@ def _run_doe_job(jid, cfg_path, p):
                             "downsample": p["downsample"], "wavelengths_nm": list(ws),
                             "product": str(cfg.get("product", "")),
                             "r2_G_mid": job["r2_G_mid"],
-                            "elapsed_s": res.get("elapsed_s")}
+                            "elapsed_s": res.get("elapsed_s"),
+                            # 구조 지문 — 같은 구조를 조건만 바꿔 돌린 모델을 묶는 키
+                            "struct_key": sc.compute_struct_key(cfg, mdir)[:12],
+                            "naxes": len(axes),
+                            "axis_keys": [a[0] for a in axes]}
                     if is_lhs:
                         meta.update({"model": job.get("model"),
                                      "r2_cv_mean": job.get("r2_cv_mean"),
