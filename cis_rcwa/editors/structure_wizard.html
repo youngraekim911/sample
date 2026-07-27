@@ -658,9 +658,13 @@ function matFast(x,y,zc,upto){ const g=GC; if(!g)return matAt(x,y,zc,upto);
     if(upto>=4){ const wz=g.gH>0? g.gW*(1-(1-g.ratio)*Math.min(zabs/g.gH,1)) : g.gW; const d0=g.gD[k];
       if(zabs<=g.gH){ const gm=()=>{ for(const e of g.gB){ if(zabs<=e[0])return e[1]; } return g.gB.length?g.gB[g.gB.length-1][1]:"grid_metal"; };
         if(d0<wz/2) return gm();
-        if(g.dz>0){ const ex=g.gDx[k]-wz/2, ey=g.gDy[k]-wz/2; if(ex>0&&ey>0&&(ex+ey)<g.dz) return gm(); }   // 교차점 deadzone 8각 컷
+        if(g.dz>0){ const ex=g.gDx[k]-wz/2, ey=g.gDy[k]-wz/2;
+          if(ex>0&&ey>0&&(ex+ey)<g.dz) return gm();                          // 교차점 deadzone 8각 컷
+          if(g.cw>0&&ex>0&&ey>0&&(ex+ey)<g.dz+g.cwx*1.4142) return g.coatName; } // 대각면도 코팅이 감쌈
         if(g.cw>0&&d0<wz/2+g.cwx)return g.coatName; }
-      else if(g.cw>0&&zabs<=g.gH+g.cwz&&d0<wz/2+g.cwx)return g.coatName; }
+      else if(g.cw>0&&zabs<=g.gH+g.cwz){ if(d0<wz/2+g.cwx)return g.coatName;
+        if(g.dz>0){ const ex=g.gDx[k]-wz/2, ey=g.gDy[k]-wz/2;
+          if(ex>0&&ey>0&&(ex+ey)<g.dz+g.cwx*1.4142) return g.coatName; } } }
     if(upto>=5 && g.cfIn[k] && zabs<=g.cfT[k]) return g.names[g.cfI[k]];
     if(upto>=6) return g.mlName;
     return "air"; }
@@ -720,9 +724,14 @@ async function buildVoxPrep(){
         if(cfInM[k]&&zabs<=cfTopM[k]) m=cfIdM[k];
         const d=gD[k];
         if(inG){ if(d<wz/2)m=gid;
-          else if(gdz>0){ const ex=gDxM[k]-wz/2, ey=gDyM[k]-wz/2; if(ex>0&&ey>0&&(ex+ey)<gdz) m=gid; else if(cw>0&&d<wz/2+cwx)m=coatId; }
+          else if(gdz>0){ const ex=gDxM[k]-wz/2, ey=gDyM[k]-wz/2;
+            if(ex>0&&ey>0&&(ex+ey)<gdz) m=gid;                                // deadzone 코너 금속
+            else if(cw>0&&ex>0&&ey>0&&(ex+ey)<gdz+cwx*1.4142) m=coatId;       // 대각면 코팅
+            else if(cw>0&&d<wz/2+cwx)m=coatId; }
           else if(cw>0&&d<wz/2+cwx)m=coatId; }
-        else if(inCap && d<wz/2+cwx) m=coatId;
+        else if(inCap){ if(d<wz/2+cwx) m=coatId;
+          else if(gdz>0&&cw>0){ const ex=gDxM[k]-wz/2, ey=gDyM[k]-wz/2;
+            if(ex>0&&ey>0&&(ex+ey)<gdz+cwx*1.4142) m=coatId; } }
         out[off+k]=m; } }
     else { for(let k=0;k<nP;k++){ const surf=plTop+sagM[k]; let m=0;
         if(zc<=surf)m=mlId; else if(zc<=surf+arlT)m=arlId;
@@ -2088,7 +2097,7 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v102";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v103";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)

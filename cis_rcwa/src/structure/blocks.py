@@ -314,16 +314,29 @@ class GridCfBlock:
                     if zc <= b_:
                         gid = i_
                         break
-                m[dg < wz / 2] = gid
+                # 공정 순서: grid 벽 → 교차점 deadzone(코너 금속) → 그 '최종 금속
+                # 형상'의 표면을 따라 코팅. 코팅을 먼저 넓게 칠하고 금속이 안쪽을
+                # 덮어쓰면, 코너 45° 대각면에도 코팅이 남는다 (금속-CF 직접 접촉 X).
+                exx = dgx - wz / 2
+                eyy = dgy - wz / 2
+                corner = ((exx > 0) & (eyy > 0) & (exx + eyy < dz)) if dz > 0 else None
                 if cw > 0:
-                    m[(dg >= wz / 2) & (dg < wz / 2 + cws)] = coat_id
-                if dz > 0:                                 # 교차점 deadzone: 코너 45° 컷 → 8각 CF
+                    coatm = dg < wz / 2 + cws              # 직선 벽 둘레
+                    if corner is not None:                 # 코너 대각면 둘레 (선까지 거리 = (exx+eyy-dz)/√2)
+                        coatm |= ((exx > 0) & (eyy > 0)
+                                  & (exx + eyy < dz + cws * 1.4142136))
+                    m[coatm] = coat_id
+                m[dg < wz / 2] = gid                       # 벽 금속 (코팅 안쪽 덮어씀)
+                if corner is not None:
+                    m[corner] = gid                        # 코너 삼각형 금속
+            elif cw > 0 and zc <= gridH + cw:
+                capm = dg < wz / 2 + cws                   # 울타리 상면 캡 코팅
+                if dz > 0:                                 # 코너 금속 상면도 캡으로 덮음
                     exx = dgx - wz / 2
                     eyy = dgy - wz / 2
-                    corner = (exx > 0) & (eyy > 0) & (exx + eyy < dz)
-                    m[corner] = gid                        # 코너 삼각형을 grid 금속으로
-            elif cw > 0 and zc <= gridH + cw:
-                m[dg < wz / 2 + cws] = coat_id
+                    capm |= ((exx > 0) & (eyy > 0)
+                             & (exx + eyy < dz + cws * 1.4142136))
+                m[capm] = coat_id
             layers.append((m, z1 - z0))
         return layers
 
