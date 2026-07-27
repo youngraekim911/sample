@@ -212,50 +212,70 @@
     </div>
 
     <div class="wcard" id="doeCard" style="max-width:780px;margin-top:14px">
-      <h2>🧪 DOE · Surrogate 스윕</h2>
-      <p class="sub">현 구조 중심으로 6축을 5레벨(-2..+2)로 흔들어 QE 반응을 수집하고 2차 반응모델(surrogate)을 추출합니다.
-      축: <b>CF Red · Green · Blue 두께 각각</b> ±600Å(300Å 스텝) · ML 평탄층 ±0.05µm · ML 두께 ±0.05µm · ML radius ±0.05 (각 0.025 스텝)</p>
+      <h2>🧪 예측 모델 만들기 (DOE)</h2>
+      <p class="sub">구조 노브를 자동으로 여러 번 흔들어 <b>예측 모델</b>을 만듭니다.
+        완성된 모델은 <b>🔭 모델 탐색</b>에서 슬라이더로 즉석 QE 확인에 씁니다.
+        순서는 셋: <b>① 흔들 노브 고르기 → ② 정밀도 고르기 → ③ Run</b>.</p>
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="axis=주효과만 · surrogate=중심 2차모델(국소) · lhs=넓은 공간 에뮬레이터(권장, 교차검증) · full=전조합(GPU)">모드
-          <select id="doeMode" style="width:280px">
-            <option value="axis">axis — 25회 (주효과 스크리닝)</option>
-            <option value="surrogate" selected>surrogate — 85회 (국소 2차모델)</option>
-            <option value="lhs">lhs — 넓은 공간 에뮬레이터 (공간채움+검증) ★</option>
-            <option value="full">full — 15625회 (전조합, GPU)</option>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px">방식
+          <select id="doeMode" style="width:300px">
+            <option value="lhs" selected>★ 예측 모델 만들기 — 넓은 범위 학습+신뢰도 검증 (권장)</option>
+            <option value="axis">빠른 스크리닝 — 어떤 노브가 중요한지만 (25회)</option>
+            <option value="surrogate">국소 정밀 모델 — 현재값 근처만 (85회)</option>
+            <option value="full">전수조사 — 전 조합 (전문가·GPU)</option>
           </select></label>
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px">파장 스텝<input id="doeN" type="number" step="1" min="4" value="16" style="width:60px"></label>
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="λ범위·nG·downsample은 위 [시뮬레이션 공통 설정](고급 포함)을 그대로 사용">설정
-          <span style="font:11px var(--mono);padding:6px 0">λ·nG·ds = 위 공통 설정 공유</span></label>
-        <button class="btn primary" id="doeRun">🧪 DOE Run</button>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="QE 스펙트럼을 몇 개 파장에서 계산할지">파장 개수<input id="doeN" type="number" step="1" min="4" value="16" style="width:60px"></label>
+        <button class="btn primary" id="doeRun">▶ Run — 모델 만들기</button>
         <button class="btn" id="doeCancel" style="display:none">■ 중단</button>
       </div>
-      <div id="doeLhsRow" style="display:none;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:9px;padding:9px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px">
-        <span class="hint" style="width:100%;color:var(--accent)">★ 넓은 공간 에뮬레이터 — 중심 별모양이 아니라 설계상자 전체를 고르게 샘플하고, 여러 모델(2차/3차/RBF)을 <b>교차검증(CV)</b>으로 비교·자동선택합니다. QE가 넓게 비단조·공진성일 때 국소 2차보다 정확.</span>
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="공간채움 표본 수. 축 6개면 60~120 권장(축당 10~20).">샘플 수<input id="doeNsamples" type="number" step="1" min="8" value="80" style="width:70px"></label>
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="상자 반경(스텝지수). 2=기존 ±2스텝과 동일 범위. 넓히려면 3~4.">상자±<input id="doeBound" type="number" step="0.5" min="1" value="2" style="width:60px"></label>
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="auto=CV로 최선 자동선택(권장)">모델
-          <select id="doeModel" style="width:130px">
-            <option value="auto" selected>auto (CV 최선)</option>
-            <option value="quadratic">quadratic(2차)</option>
-            <option value="cubic">cubic(3차)</option>
-            <option value="rbf">rbf(보간)</option>
-          </select></label>
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="교차검증 폴드 수(진짜 예측오차 추정)">CV folds<input id="doeCvFolds" type="number" step="1" min="2" value="5" style="width:60px"></label>
-      </div>
       <div id="doeAxisBox" style="display:none;margin-top:9px;padding:10px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px">
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <b class="hint" style="color:var(--accent)">🎛️ 설계축 선택</b>
-          <button class="btn ghost" id="doeAxisLoad" title="현재 구조에서 흔들 수 있는 축 + 중심값·추천 step 을 불러옵니다">↻ 현재 구조에서 축 불러오기</button>
-          <button class="btn ghost" id="doeAxisAll">전체 선택</button>
-          <button class="btn ghost" id="doeAxisDefault">기본 6축</button>
-          <span class="hint" id="doeAxisCount" style="margin-left:auto;font-family:var(--mono)">축 미로딩</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <b class="hint" style="color:var(--accent)">① 흔들 노브 고르기</b>
+          <button class="btn ghost" id="doeAxisLoad" title="현재 구조를 읽어 조절 가능한 노브 목록을 만듭니다">↻ 내 구조에서 다시 읽기</button>
+          <button class="btn ghost" id="doeAxisDefault">추천 6개</button>
+          <button class="btn ghost" id="doeAxisAll">전부</button>
+          <button class="btn ghost" id="doeAxisNone">해제</button>
+          <label class="hint" style="display:inline-flex;gap:4px;align-items:center;margin-left:auto" title="노브별 ± 흔들 폭을 직접 조정하고 싶을 때만 켜세요 (기본: 자동 추천)">
+            <input type="checkbox" id="doeStepEdit"> ±폭 직접 조정</label>
+          <span class="hint" id="doeAxisCount" style="font-family:var(--mono)"></span>
         </div>
-        <div class="hint" style="margin:6px 0 8px">중심값=현재 구조값. <b>±2 step=정상 범위 · ±3 step=outlier</b>(상자±를 3으로 두면 outlier 커버). 추천 step 은 각 축 중심값 기반 자동 — 수정 가능. 이산축(dti liner/center-open)은 LHS 로 못 흔들어 <u>별도 비교</u>로 제외됩니다.</div>
+        <div class="hint" style="margin:6px 0 8px">각 노브는 <b>지금 값</b>을 중심으로 표시된 <b>±폭</b> 안에서 자동으로 흔들립니다 (폭은 자동 추천 — 그대로 두면 됩니다).
+          회색 항목은 켬/끔·물질 선택이라 이 방식으론 못 흔듭니다.</div>
         <div id="doeAxisList" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:3px;max-height:300px;overflow:auto"></div>
       </div>
+      <div id="doeLhsRow" style="display:none;margin-top:9px;padding:10px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+          <b class="hint" style="color:var(--accent)">② 정밀도 고르기</b>
+          <div style="display:flex;gap:6px">
+            <button class="btn" id="doePrecFast" title="계산을 적게 — 경향 파악용">빠르게</button>
+            <button class="btn primary" id="doePrecStd" title="권장 — 정확도/시간 균형">표준 ★</button>
+            <button class="btn" id="doePrecDeep" title="계산을 많이 — 최고 정확도">꼼꼼히</button>
+          </div>
+          <span style="width:1px;height:22px;background:var(--line)"></span>
+          <span class="hint">탐색 폭:</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn primary" id="doeRangeNorm" title="통상 설계 범위 안에서">정상 범위 ★</button>
+            <button class="btn" id="doeRangeWide" title="극단값(outlier)까지 넓게 — 더 오래 걸리고 모델이 거칠 수 있음">outlier까지</button>
+          </div>
+        </div>
+        <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">⚙️ 고급 (숫자 직접 지정 — 몰라도 됩니다)</summary>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:7px">
+            <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="흔들어 볼 조건(구조 변형) 개수. 비우면 정밀도 버튼이 자동 결정">샘플 수<input id="doeNsamples" type="number" step="1" min="8" value="80" style="width:70px"></label>
+            <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="탐색 상자 반경(스텝지수). 2=정상, 3=outlier">상자±<input id="doeBound" type="number" step="0.5" min="1" value="2" style="width:60px"></label>
+            <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="auto=검증 점수로 최선 자동선택(권장)">모델
+              <select id="doeModel" style="width:130px">
+                <option value="auto" selected>auto (권장)</option>
+                <option value="quadratic">quadratic(2차)</option>
+                <option value="cubic">cubic(3차)</option>
+                <option value="rbf">rbf(보간)</option>
+              </select></label>
+            <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="교차검증 폴드 수(신뢰도 점수 추정)">CV folds<input id="doeCvFolds" type="number" step="1" min="2" value="5" style="width:60px"></label>
+          </div>
+        </details>
+      </div>
       <div id="doeMeter" style="display:none;margin-top:9px;padding:10px;background:var(--panel);border:1px dashed var(--accent);border-radius:8px">
-        <div style="display:flex;align-items:center;gap:8px"><b class="hint">📊 용량 계량기 — 실행 전 예상</b><span class="hint" id="doeMeterBasis" style="margin-left:auto"></span></div>
-        <div id="doeMeterBody" class="hint" style="margin-top:6px;font-family:var(--mono);line-height:1.7">—</div>
+        <div style="display:flex;align-items:center;gap:8px"><b class="hint">③ 실행 전 미리보기</b><span class="hint" id="doeMeterBasis" style="margin-left:auto"></span></div>
+        <div id="doeMeterBody" class="hint" style="margin-top:6px;line-height:1.8">—</div>
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:10px">
         <label class="hint" style="display:inline-flex;gap:5px;align-items:center" title="같은 구조·조건이면 저장된 모델을 즉시 재사용(재계산 생략). 체크하면 무시하고 강제 재계산.">
@@ -1647,35 +1667,52 @@ async function doeAxisLoad(){
   DOE.axesCat.forEach(a=>{ if(a.kind==="continuous") DOE.axisStep[a.key]=a.step; });
   doeAxisRender();
 }
+function doeCurBound(){ return +el("doeBound").value||2; }
 function doeAxisRender(){
   const box=el("doeAxisList"); box.innerHTML="";
+  const editing=el("doeStepEdit").checked;
+  const bnd=doeCurBound();
   let lastG=null;
   DOE.axesCat.forEach(a=>{
-    const g=a.kind==="discrete"?"이산 (LHS 제외 · 별도 비교)":(a.group||"기타");
+    const g=a.kind==="discrete"?"켬/끔·물질 (여기선 못 흔듦)":(a.group||"기타");
     if(g!==lastG){ lastG=g;
       const h=document.createElement("div");
-      h.style.cssText="grid-column:1/-1;margin:5px 0 1px;padding:3px 8px;background:var(--panel);border-left:3px solid var(--accent);border-radius:4px;font-size:11px;font-weight:700;color:var(--ink-dim)";
-      h.textContent=g; box.appendChild(h); }
+      h.style.cssText="grid-column:1/-1;display:flex;gap:7px;align-items:center;margin:5px 0 1px;padding:3px 8px;background:var(--panel);border-left:3px solid var(--accent);border-radius:4px;font-size:11px;font-weight:700;color:var(--ink-dim)";
+      if(a.kind!=="discrete"){
+        const keys=DOE.axesCat.filter(x=>x.kind==="continuous"&&(x.group||"기타")===g).map(x=>x.key);
+        const allOn=keys.every(k=>DOE.axisSel.has(k));
+        h.innerHTML=`<input type="checkbox" ${allOn?"checked":""} title="이 섹션 전체 켜기/끄기" style="width:13px;height:13px"><span>${g}</span>`;
+        h.querySelector("input").onchange=e=>{ keys.forEach(k=>e.target.checked?DOE.axisSel.add(k):DOE.axisSel.delete(k)); doeAxisRender(); };
+      } else h.textContent=g;
+      box.appendChild(h); }
     const row=document.createElement("label");
     row.style.cssText="display:flex;align-items:center;gap:6px;padding:3px 5px;border:1px solid var(--line);border-radius:6px;font-size:12px"
       +(a.kind==="discrete"?";opacity:.55":"");
     if(a.kind==="discrete"){
       row.title=a.note||"";
-      row.innerHTML=`<input type="checkbox" disabled><span style="flex:1">${a.label}</span><span class="hint">이산·별도</span>`;
+      row.innerHTML=`<input type="checkbox" disabled><span style="flex:1">${a.label}</span><span class="hint">별도 비교</span>`;
     }else{
       const ck=DOE.axisSel.has(a.key)?"checked":"";
+      const step=DOE.axisStep[a.key]!=null?DOE.axisStep[a.key]:a.step;
+      const rng=+(bnd*step).toPrecision(3);
+      // 유저에게는 '지금 값 ± 폭' 만 보여줌 (step 이라는 용어 숨김)
       row.innerHTML=`<input type="checkbox" data-k="${a.key}" ${ck}>`
-        +`<span style="flex:1" title="중심값 ${a.center} ${a.unit}">${a.label} <span class="hint">·중심 ${a.center}${a.unit}</span></span>`
-        +`<span class="hint">step</span><input type="number" data-step="${a.key}" value="${DOE.axisStep[a.key]}" step="0.001" style="width:74px;font-family:var(--mono)">`;
+        +`<span style="flex:1">${a.label} <span class="hint">지금 ${a.center}${a.unit}</span></span>`
+        +(editing
+          ? `<span class="hint">±</span><input type="number" data-rng="${a.key}" value="${rng}" step="any" style="width:74px;font-family:var(--mono)"><span class="hint">${a.unit}</span>`
+          : `<span class="hint" style="font-family:var(--mono)">±${rng}${a.unit}</span>`);
       row.querySelector('input[type=checkbox]').onchange=e=>{
-        e.target.checked?DOE.axisSel.add(a.key):DOE.axisSel.delete(a.key); doeMeterUpdate(); };
-      row.querySelector('input[data-step]').onchange=e=>{ DOE.axisStep[a.key]=+e.target.value||a.step; };
+        e.target.checked?DOE.axisSel.add(a.key):DOE.axisSel.delete(a.key); doeSimpleSync(); doeAxisCountSync(); };
+      const ri=row.querySelector('input[data-rng]');
+      if(ri) ri.onchange=e=>{ const v=+e.target.value; if(v>0) DOE.axisStep[a.key]=v/doeCurBound(); doeMeterUpdate(); };
     }
     box.appendChild(row);
   });
-  const nc=DOE.axesCat.filter(a=>a.kind==="continuous").length, nd=DOE.axesCat.length-nc;
-  el("doeAxisCount").textContent=`선택 ${[...DOE.axisSel].filter(k=>DOE.axisStep[k]!=null).length} / 연속 ${nc} (이산 ${nd} 제외)`;
-  doeMeterUpdate();
+  doeAxisCountSync(); doeSimpleSync();
+}
+function doeAxisCountSync(){
+  const nc=DOE.axesCat.filter(a=>a.kind==="continuous").length;
+  el("doeAxisCount").textContent=`${[...DOE.axisSel].filter(k=>DOE.axisStep[k]!=null).length}개 선택 / ${nc}개 가능`;
 }
 function selectedAxes(){
   return DOE.axesCat.filter(a=>a.kind==="continuous"&&DOE.axisSel.has(a.key))
@@ -1684,6 +1721,33 @@ function selectedAxes(){
 el("doeAxisLoad").onclick=doeAxisLoad;
 el("doeAxisAll").onclick=()=>{ DOE.axesCat.forEach(a=>{ if(a.kind==="continuous")DOE.axisSel.add(a.key); }); doeAxisRender(); };
 el("doeAxisDefault").onclick=()=>{ DOE.axisSel=new Set(DEFAULT_AXES); doeAxisRender(); };
+el("doeAxisNone").onclick=()=>{ DOE.axisSel=new Set(); doeAxisRender(); };
+el("doeStepEdit").onchange=doeAxisRender;
+// ── ② 정밀도/탐색폭: 쉬운 버튼 → 내부 숫자(샘플수·상자)를 자동 결정 ──
+DOE.prec="std"; DOE.rangeWide=false; DOE.nsManual=false;
+const PREC_PER_AXIS={fast:8,std:15,deep:25};        // 노브당 샘플 수
+function doeAutoN(){ const k=selectedAxes().length||DEFAULT_AXES.length;
+  return Math.max(40, k*PREC_PER_AXIS[DOE.prec]); }
+function doeSimpleSync(){
+  if(!DOE.nsManual) el("doeNsamples").value=doeAutoN();
+  el("doeBound").value=DOE.rangeWide?3:2;
+  doeMeterUpdate();
+}
+function doePrecSet(p){ DOE.prec=p;
+  el("doePrecFast").classList.toggle("primary",p==="fast");
+  el("doePrecStd").classList.toggle("primary",p==="std");
+  el("doePrecDeep").classList.toggle("primary",p==="deep");
+  DOE.nsManual=false; doeSimpleSync(); }
+el("doePrecFast").onclick=()=>doePrecSet("fast");
+el("doePrecStd").onclick=()=>doePrecSet("std");
+el("doePrecDeep").onclick=()=>doePrecSet("deep");
+function doeRangeSet(w){ DOE.rangeWide=w;
+  el("doeRangeNorm").classList.toggle("primary",!w);
+  el("doeRangeWide").classList.toggle("primary",w);
+  doeSimpleSync(); doeAxisRender(); }             // ±폭 표시가 상자 반경에 따라 변함
+el("doeRangeNorm").onclick=()=>doeRangeSet(false);
+el("doeRangeWide").onclick=()=>doeRangeSet(true);
+el("doeNsamples").addEventListener("input",()=>{ DOE.nsManual=true; });
 function fmtBytes(b){ b=+b||0; return b<1024?b+"B":b<1048576?(b/1024).toFixed(0)+"KB":(b/1048576).toFixed(1)+"MB"; }
 function fmtSec(s){ s=Math.max(0,Math.round(+s||0)); if(s<90)return s+"초"; if(s<5400)return (s/60).toFixed(0)+"분"; return (s/3600).toFixed(1)+"시간"; }
 let _meterT=null;
@@ -1695,19 +1759,21 @@ function doeMeterUpdate(){ if(el("doeMode").value!=="lhs")return;
       model:el("doeModel").value, nG:+(el("qeQual").value==="manual"?el("qeNG").value:151) };
     if(DOE.perWl) body.per_wl_s=DOE.perWl;
     let e; try{ e=await(await fetch(qeApiBase()+"/api/doe/estimate",{method:"POST",
-      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }catch(_){ return; }
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
+    catch(_){ el("doeMeterBody").textContent="서버 연결 후 표시됩니다 (python app.py)"; return; }
     if(!e||e.error){ el("doeMeterBody").textContent=e&&e.error?("오류: "+e.error):"—"; return; }
-    el("doeMeterBasis").textContent = e.time_basis==="measured"?"⏱ 실측기반(정확)":"⏱ 러프(nG추정)";
+    el("doeMeterBasis").textContent = e.time_basis==="measured"?"이전 실행 기준(정확)":"대략 추정";
     el("doeMeterBody").innerHTML=
-      `조건 <b>${e.points}</b>개 × ${(+el("doeN").value||16)}λ × 2편광 &nbsp;|&nbsp; 축 ${e.naxes}개<br>`
-     +`💾 예상 저장 <b>${fmtBytes(e.total_bytes)}</b> (csv ${fmtBytes(e.csv_bytes)} + model ${fmtBytes(e.json_bytes)})<br>`
-     +`⏱ 예상 시간 <b>${fmtSec(e.est_seconds)}</b> <span class="hint">(${fmtSec(e.est_seconds_lo)}~${fmtSec(e.est_seconds_hi)}, GPU면 단축)</span><br>`
-     +`🗂️ 현재 DB 총량 <b>${fmtBytes(e.db_total_bytes)}</b> <span class="hint">@ ${e.db_dir}</span>`;
+      `노브 <b>${e.naxes}개</b>를 <b>${e.points}가지</b> 조합으로 흔들어 계산합니다.<br>`
+     +`⏱ 예상 <b>${fmtSec(e.est_seconds)}</b> <span class="hint">(${fmtSec(e.est_seconds_lo)}~${fmtSec(e.est_seconds_hi)} · GPU면 단축 · 걸어두고 퇴근 OK)</span>`
+     +` &nbsp; 💾 저장 <b>${fmtBytes(e.total_bytes)}</b> <span class="hint">(DB 누적 ${fmtBytes(e.db_total_bytes)})</span>`;
   }, 250);
 }
 ["doeN","doeNsamples","doeModel","doeBound"].forEach(id=>{ const x=el(id); if(x){ x.addEventListener("input",doeMeterUpdate); x.addEventListener("change",doeMeterUpdate); } });
 doeModeSync();
 function doeFmtSec(s){ s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600),m=Math.floor(s%3600/60); return (h?h+"시간 ":"")+(m?m+"분 ":"")+(s%60)+"초"; }
+function doeCvLabel(cv){ if(cv==null) return "?";
+  return cv>=0.9?"높음 ✓":cv>=0.7?"보통 — 샘플 늘리면 좋아짐":"낮음 ⚠ 참고용 (샘플 늘려 재실행 권장)"; }
 el("doeRun").onclick=async()=>{ if(DOE.running)return;
   await fetchServerMaterials();                                  // 물질 최신화 (run 과 동일 규약)
   const miss=usedMats().filter(matMissing);
@@ -1750,8 +1816,8 @@ async function doePoll(){
     DOE.perWl=s.elapsed_s/(s.doe_done*nwl); }
   el("doeSummary").textContent=(s.state==="cancelled"?"중단됨 · ":"완료 · ")
     +`${s.doe_done}/${s.doe_total}${s.model?"샘플":"조건"} · ${doeFmtSec(s.elapsed_s||0)}`
-    +(s.model?` · 에뮬레이터[${s.model}] 검증 CV R²=${s.r2_cv_mean} (in-sample ${s.r2_insample_mean})`
-             :(s.r2_G_mid!=null?` · surrogate R²(G,중앙λ)=${s.r2_G_mid}`:""));
+    +(s.model?` · 모델 신뢰도 ${doeCvLabel(s.r2_cv_mean)} (CV R²=${s.r2_cv_mean})`
+             :(s.r2_G_mid!=null?` · R²(G,중앙λ)=${s.r2_G_mid}`:""));
   el("doeCsv").href=qeApiBase()+"/api/doe/file?job="+DOE.job+"&kind=csv";
   const hasSur=s.r2_G_mid!=null;
   el("doeSur").style.display=hasSur?"":"none";
@@ -1937,7 +2003,7 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v93";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v94";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)
