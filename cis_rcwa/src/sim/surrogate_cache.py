@@ -186,13 +186,54 @@ def _read_index(cache_dir):
 
 
 def list_keys(cache_dir):
-    """폴더에 실제 존재하는 surrogate 키 목록 (<key>.json, index.json 제외)."""
+    """폴더에 실제 존재하는 surrogate 키 목록 (<key>.json — index/체크포인트 제외)."""
     try:
         files = os.listdir(cache_dir)
     except OSError:
         return []
     return sorted(fn[:-5] for fn in files
-                  if fn.endswith(".json") and fn != "index.json")
+                  if fn.endswith(".json") and fn != "index.json"
+                  and not fn.endswith(".part.json"))
+
+
+# --------------------------------------------------- 체크포인트 (중간 저장/이어하기)
+# 장시간 DOE 가 취소/크래시/정전으로 죽어도 완료된 조건은 <key>.part.json 에
+# 남는다. 같은 키로 다시 Run 하면 그 지점부터 이어서 계산한다.
+def _ckpt_path(cache_dir, key):
+    return os.path.join(cache_dir, key + ".part.json")
+
+
+def save_checkpoint(cache_dir, key, doe_partial, meta=None):
+    """완료된 조건까지의 DOE 부분결과를 원자적으로 저장 (매 조건마다 호출해도 가벼움)."""
+    os.makedirs(cache_dir, exist_ok=True)
+    rec = {"engine": ENGINE, "key": key, "checkpoint": True,
+           "meta": meta or {}, "doe": doe_partial, "updated": _now()}
+    tmp = _ckpt_path(cache_dir, key) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(rec, f, ensure_ascii=False)
+    os.replace(tmp, _ckpt_path(cache_dir, key))
+
+
+def load_checkpoint(cache_dir, key):
+    """있으면 {..., doe:{points:[...]}} 반환, 없거나 엔진 불일치면 None."""
+    p = _ckpt_path(cache_dir, key)
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as f:
+            rec = json.load(f)
+        if rec.get("engine") != ENGINE or not rec.get("checkpoint"):
+            return None
+        return rec
+    except (OSError, ValueError):
+        return None
+
+
+def clear_checkpoint(cache_dir, key):
+    try:
+        os.remove(_ckpt_path(cache_dir, key))
+    except OSError:
+        pass
 
 
 def index(cache_dir):

@@ -297,12 +297,16 @@ def axis_catalog(cfg):
 
 def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
             lateral_n=256, materials_dir=None, axes=AXES_DEFAULT,
-            nsamples=None, bound=2.0, seed=0, progress=None, cancel=None):
+            nsamples=None, bound=2.0, seed=0, progress=None, cancel=None,
+            resume_points=None, on_point=None):
     """DOE 실행. progress(done,total,eta_s,point) 콜백, cancel() -> bool 중단.
 
     lhs 모드는 nsamples/bound/seed 로 공간채움 샘플 수·상자·시드 지정.
+    resume_points: 이전 체크포인트의 points — 설계점 프리픽스와 일치하면 그만큼
+                   건너뛰고 이어서 계산 (설계점은 seed 기반 결정적이라 재현됨).
+    on_point(out): 조건 하나가 끝날 때마다 호출 — 중간 저장(체크포인트)용.
     반환: {"axes":[...], "mode", "points": [{"steps":[...], "qe": {nm: {R,G,B}}}, ...],
-           "wavelengths_nm": [...], "elapsed_s": float}
+           "wavelengths_nm": [...], "elapsed_s": float, ["resumed": n]}
     """
     from ..structure.blocks import ir_from_wizard_cfg
     from .simulator import RCWAPlaneWaveSimulator
@@ -312,8 +316,25 @@ def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
     out = {"axes": [list(a) for a in axes], "mode": mode, "nG": nG,
            "bound": float(bound), "seed": int(seed),
            "wavelengths_nm": list(wavelengths_nm), "points": []}
+    # ── 체크포인트 이어하기: 저장분 steps 가 설계점 프리픽스와 일치할 때만 ──
+    if resume_points:
+        okr = len(resume_points) <= total and all(
+            len(rp.get("steps", [])) == len(pts[i]) and
+            all(abs(float(a) - float(b)) < 1e-6
+                for a, b in zip(rp["steps"], pts[i]))
+            for i, rp in enumerate(resume_points))
+        if okr:
+            # JSON 왕복 시 파장 키가 str 로 바뀌므로 int 로 정규화 (새 점과 타입 통일)
+            out["points"] = [{"steps": [float(s) for s in rp["steps"]],
+                              "qe": {int(w): {ch: float(v) for ch, v in q.items()}
+                                     for w, q in (rp.get("qe") or {}).items()}}
+                             for rp in resume_points]
+            out["resumed"] = len(resume_points)
+    start_i = len(out["points"])
     t0 = time.time()
     for i, p in enumerate(pts):
+        if i < start_i:                                  # 이미 계산된 조건 건너뜀
+            continue
         if cancel and cancel():
             out["cancelled"] = True
             break
@@ -342,10 +363,16 @@ def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
         if out.get("cancelled"):
             break
         out["points"].append({"steps": list(p), "qe": qe})
+        if on_point:                                   # 매 조건 완료 즉시 중간 저장
+            try:
+                on_point(out)
+            except Exception:
+                pass                                    # 저장 실패가 계산을 멈추면 안 됨
         if progress:
             done = i + 1
             el = time.time() - t0
-            eta = el / done * (total - done)
+            new_done = done - start_i                   # eta 는 새로 계산한 것 기준
+            eta = el / max(new_done, 1) * (total - done)
             progress(done, total, eta, p)
     out["elapsed_s"] = round(time.time() - t0, 1)
     return out

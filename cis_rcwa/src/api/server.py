@@ -415,18 +415,35 @@ def _run_doe_job(jid, cfg_path, p):
         dev = "cuda(GPU)" if torch.cuda.is_available() else "cpu"
         job["device"] = dev
 
+        # ── 체크포인트: 매 조건 완료마다 <key>.part.json 저장 + 같은 키로 재실행
+        #    시 이어하기 — 장시간 스윕이 취소/크래시/정전으로 죽어도 완료분 보존 ──
+        resume = None
+        if key:
+            ck = sc.load_checkpoint(_cache_dir(), key)
+            if ck and not p.get("force"):
+                resume = (ck.get("doe") or {}).get("points") or None
+                if resume:
+                    job["resumed"] = len(resume)
+                    job["note"] = (f"🔄 이어서 계산 — 중간 저장된 {len(resume)}/{total}"
+                                   f"개 조건 재사용")
+        ck_meta = {"mode": p["mode"], "product": str(cfg.get("product", "")),
+                   "total": total}
+        on_point = ((lambda out: sc.save_checkpoint(_cache_dir(), key, out, ck_meta))
+                    if key else None)
+
         def prog(done, tot, eta, point):
             job["doe_done"] = done
             job["progress"] = done / tot
             job["eta_s"] = round(eta)
             job["note"] = (f"[{dev}] {done}/{tot} 조건 · 남은시간 ~{int(eta//60)}분"
-                           f"{int(eta % 60)}초 · 현재 {list(point)}")
+                           f"{int(eta % 60)}초 · 현재 {list(point)} · 💾 중간저장됨")
 
         res = doe_mod.run_doe(cfg, waves, mode=p["mode"], nG=p["nG"],
                               downsample=p["downsample"], lateral_n=p.get("lateral_n", 256),
                               axes=axes, nsamples=p.get("nsamples"),
                               bound=p.get("bound", 2.0), seed=p.get("seed", 0),
-                              progress=prog, cancel=lambda: job["cancel"])
+                              progress=prog, cancel=lambda: job["cancel"],
+                              resume_points=resume, on_point=on_point)
         csv_path = os.path.join(JOBS_DIR, jid + "_doe.csv")
         with open(csv_path, "w", encoding="utf-8") as f:
             f.write(doe_mod.doe_csv(res))
@@ -467,6 +484,30 @@ def _run_doe_job(jid, cfg_path, p):
                                      "n_samples": p.get("nsamples")})
                     sc.save(_cache_dir(), key, sur, meta,
                             csv_text=doe_mod.doe_csv(res))
+                    sc.clear_checkpoint(_cache_dir(), key)   # 완주 → 중간 저장 정리
+                except Exception:
+                    pass
+        # ── 중단(취소)돼도: 체크포인트는 유지(이어하기용) + 완료분으로 부분 모델 ──
+        partial_note = ""
+        if res.get("cancelled") and key:
+            npts = len(res.get("points") or [])
+            partial_note = (f" · 💾 {npts}개 조건 중간 저장됨 — 같은 조건으로 다시 "
+                            f"Run 하면 이어서 계산")
+            if is_lhs and npts >= max(10, len(axes) + 2):
+                try:                                   # 완료분만으로도 임시 모델 제공
+                    from ..sim.emulator import fit_emulator
+                    sur = fit_emulator(res, model=p["model"],
+                                       cv_folds=min(p["cv_folds"], max(2, npts // 4)),
+                                       base_cfg=cfg)
+                    sur_path = os.path.join(JOBS_DIR, jid + "_surrogate.json")
+                    with open(sur_path, "w", encoding="utf-8") as f:
+                        json.dump(sur, f)
+                    job["surrogate"] = sur_path
+                    job["model"] = sur["model"]
+                    job["r2_cv_mean"] = sur["metrics"]["r2_cv_mean"]
+                    job["r2_G_mid"] = doe_mod.r2_at(sur, "G",
+                                                    sur["wavelengths_nm"][len(sur["wavelengths_nm"]) // 2])
+                    partial_note += f" · 부분 모델 생성(CV R²={job['r2_cv_mean']})"
                 except Exception:
                     pass
         job["elapsed_s"] = res.get("elapsed_s")
@@ -478,7 +519,8 @@ def _run_doe_job(jid, cfg_path, p):
                 f"{job.get('r2_insample_mean')}) · {res.get('elapsed_s', 0)}s")
         else:
             job["note"] = (f"{'중단' if res.get('cancelled') else '완료'} · "
-                           f"{job['doe_done']}/{total} 조건 · {res.get('elapsed_s', 0)}s")
+                           f"{job['doe_done']}/{total} 조건 · {res.get('elapsed_s', 0)}s"
+                           + partial_note)
     except Exception as e:
         job["error"] = f"{type(e).__name__}: {e}"
         job["trace"] = traceback.format_exc()[-2000:]
@@ -563,7 +605,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({k: job[k] for k in
                         ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                          "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
-                         "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes")
+                         "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed")
                         if k in job})
         elif u.path == "/api/doe/last":
             # 브라우저 재시작 후 재접속: 이 서버가 마지막으로 시작한 DOE 작업 상태.
@@ -574,7 +616,7 @@ class Handler(BaseHTTPRequestHandler):
             out = {k: job[k] for k in
                    ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                     "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
-                    "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes")
+                    "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed")
                    if k in job}
             out["job"] = LAST_DOE_JID
             self._json(out)

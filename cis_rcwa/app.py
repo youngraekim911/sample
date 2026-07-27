@@ -21,7 +21,9 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-BASE = os.path.dirname(os.path.abspath(globals().get("__file__", sys.argv[0] or ".")))
+# exe(PyInstaller) 실행이면 번들 자원 폴더(_MEIPASS)에서 boot.html 을 찾는다
+BASE = getattr(sys, "_MEIPASS",
+               os.path.dirname(os.path.abspath(globals().get("__file__", sys.argv[0] or "."))))
 
 # (모듈명, pip 패키지명, 필수 여부)
 REQUIRED = [("numpy", "numpy", True), ("yaml", "pyyaml", True),
