@@ -1434,6 +1434,23 @@ el("qeRun").onclick=async()=>{ if(QE.running)return;
   el("qeStop").disabled=false; el("qeStop").textContent="■ 중단";   // 이전 중단 상태 리셋
   goPage("wpage-run");
   QE.timer=setInterval(qePoll,700); };
+// 페이지 이동(모델 탐색 등)/새로고침 후에도 마지막 QE 실행을 복구 — 다시 Run 불필요
+async function qeReattach(){
+  if(QE.running || QE.rows.length) return;
+  let s; try{ s=await(await fetch(qeApiBase()+"/api/qe/last")).json(); }catch(e){ return; }
+  if(!s || !s.job) return;
+  QE.job=s.job; QE.yaml=s.yaml||QE.yaml;
+  if(s.state==="running"){                      // 아직 계산중 → 진행 화면에 다시 물림
+    QE.rows=s.rows||[]; QE.running=true; QE_T0=performance.now();
+    ["wpage-build","wpage-sim","wpage-set"].forEach(id=>pageReached[id]=true);
+    goPage("wpage-run"); QE.timer=setInterval(qePoll,700);
+  } else if(s.state==="done" && s.rows && s.rows.length){   // 완료 → 결과 조용히 복구
+    QE.rows=s.rows; el("qeCsv").disabled=false;
+    ["wpage-build","wpage-sim","wpage-set","wpage-run","wpage-result"]
+      .forEach(id=>pageReached[id]=true);
+    renderNav();                                 // 상단 5결과 칩 활성 — 클릭하면 바로 결과
+  }
+}
 async function qePoll(){ let s; try{ s=await(await fetch(qeApiBase()+"/api/qe/status?job="+QE.job)).json(); }catch(e){ return; }
   QE.rows=s.rows||QE.rows;
   const pct=Math.round((s.progress||0)*100), el_s=(performance.now()-QE_T0)/1000;
@@ -2071,7 +2088,7 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v101";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v102";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)
@@ -2086,5 +2103,5 @@ renderStep(); goPage("wpage-start");           // 시작 페이지부터
 fetchServerMaterials().then(n=>{ if(n){ save(); renderStep(); renderViews(); } updateMatBadge(); });
 // 브라우저를 껐다 다시 열어도 이전 DOE/surrogate 를 자동 복구 → 2→3 을 다시 걷지 않고
 // 상단 5결과 탭에서 곧장 역설계/민감도 사용. 서버 켜져 있을 때만.
-(async()=>{ try{ if(await qePing()){ await doeReattach(); doeCacheRefresh(); } }catch(_){} })();
+(async()=>{ try{ if(await qePing()){ await doeReattach(); await qeReattach(); doeCacheRefresh(); } }catch(_){} })();
 </script>

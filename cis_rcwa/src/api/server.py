@@ -324,7 +324,11 @@ def _run_job(jid, cfg_path, p):
         job["state"] = "error"
 
 
+LAST_QE_JID = None        # 페이지 이동/새로고침 후에도 마지막 QE 결과를 복구(reattach)
+
+
 def start_job(yaml_text, p):
+    global LAST_QE_JID
     os.makedirs(JOBS_DIR, exist_ok=True)
     jid = uuid.uuid4().hex[:12]
     cfg_path = os.path.join(JOBS_DIR, jid + ".yaml")
@@ -332,6 +336,7 @@ def start_job(yaml_text, p):
         f.write(yaml_text)
     JOBS[jid] = {"state": "running", "progress": 0.0, "note": "시작중...",
                  "rows": [], "error": None, "cancel": False, "params": p}
+    LAST_QE_JID = jid
     th = threading.Thread(target=_run_job, args=(jid, cfg_path, p), daemon=True)
     th.start()
     return jid
@@ -597,6 +602,23 @@ class Handler(BaseHTTPRequestHandler):
             self._json({k: job[k] for k in
                         ("state", "progress", "note", "rows", "error", "csv", "nG_auto")
                         if k in job})
+        elif u.path == "/api/qe/last":
+            # 페이지 이동/새로고침 후 마지막 QE 실행 복구 — rows(결과) + 실행 당시
+            # yaml(원인분석이 그 구조를 그대로 재사용)까지 돌려준다
+            if not LAST_QE_JID or LAST_QE_JID not in JOBS:
+                self._json({"job": None}); return
+            job = JOBS[LAST_QE_JID]
+            out = {k: job[k] for k in
+                   ("state", "progress", "note", "rows", "error", "nG_auto")
+                   if k in job}
+            out["job"] = LAST_QE_JID
+            try:
+                with open(os.path.join(JOBS_DIR, LAST_QE_JID + ".yaml"),
+                          encoding="utf-8") as f:
+                    out["yaml"] = f.read()
+            except OSError:
+                pass
+            self._json(out)
         elif u.path == "/api/doe/status":
             jid = (parse_qs(u.query).get("job") or [""])[0]
             job = JOBS.get(jid)
