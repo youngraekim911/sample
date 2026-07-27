@@ -588,6 +588,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(404); self.end_headers(); return
             self._file(job[key], "application/json" if kind == "surrogate"
                        else "text/csv; charset=utf-8")
+        elif u.path == "/api/boot/status":
+            # 부트(로딩) 화면이 본 서버 전환을 감지할 때 사용 — steps 없이 ready 만
+            self._json({"ready": True})
         elif u.path == "/api/doe/cache":
             # 저장된 surrogate 목록 (DB) — 최신순 메타
             from ..sim import surrogate_cache as sc
