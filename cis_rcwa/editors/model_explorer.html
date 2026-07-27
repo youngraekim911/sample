@@ -127,7 +127,7 @@
 
 <script>
 "use strict";
-const VER="explorer v3";
+const VER="explorer v4";
 document.getElementById("ver").textContent=VER;
 const el=id=>document.getElementById(id);
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -155,6 +155,18 @@ function rbfPhi(r,eps,kernel){
   if(kernel==="thinplate"){ const rr=r<1e-12?1e-12:r; return rr*rr*Math.log(rr); }
   return Math.sqrt((r/eps)*(r/eps)+1); }
 function predict(emu, steps, wl, ch){
+  if(emu.combo){
+    // 결합 모델: 같은 중심(구조) 주변에서 노브셋만 다르게 학습한 모델들의 델타 합.
+    //   QE(x) ≈ QE_base(0) + Σ_m [QE_m(x_m) − QE_m(0)]   (모델 간 교차 상호작용은 근사 생략)
+    const base=emu.sub[emu.baseIdx];
+    let v=predict(base, base.axes.map(()=>0), wl, ch);
+    emu.sub.forEach((se,si)=>{
+      const s2=se.axes.map(()=>0); let any=false;
+      emu.subMap.forEach((m,ci)=>{ if(m.si===si){ s2[m.ai]=steps[ci]; if(steps[ci]) any=true; } });
+      if(any) v+=predict(se,s2,wl,ch)-predict(se,se.axes.map(()=>0),wl,ch);
+    });
+    return v;
+  }
   const x=steps.map(s=>s/2);
   const mdl=emu.model||"quadratic";
   if(mdl==="quadratic"||mdl==="cubic"){
@@ -223,8 +235,48 @@ async function dbRefresh(){ const box=el("dbList");
           +`<span style="flex:1">${_mrow(e)}</span><span class="hint">${on?"사용중":"열기"}</span>`;
         row.onclick=()=>dbLoadKey(e.key);
         box.appendChild(row); });
+      // 같은 구조 모델이 2개 이상이면 노브 합쳐서 한 번에 (제품 중심구조 고정 전제)
+      if(prods[pr][sk].length>1 && !String(sk).startsWith("구버전")){
+        const on=DB_LOADED_KEY==="combo:"+sk;
+        const cb=document.createElement("div");
+        cb.style.cssText="margin:2px 3px 7px;padding:0 4px";
+        cb.innerHTML=`<button class="btn ${on?"primary":"ghost"}" style="width:100%;font-size:12px">`
+          +`⧉ ${on?"사용중 — ":""}통합 열기 — 같은 구조 ${prods[pr][sk].length}개 모델의 노브를 하나로</button>`;
+        cb.querySelector("button").onclick=()=>dbLoadCombo(sk, prods[pr][sk].map(e=>e.key));
+        box.appendChild(cb); }
     });
   });
+}
+// ── 통합(콤보) 로드: 같은 구조(=같은 중심) 모델들의 노브 합집합을 한 모델처럼 ──
+async function dbLoadCombo(sk, keys){
+  const subs=[];
+  for(const k of keys){
+    try{ const j=await(await fetch(apiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k))).json();
+      if(j&&!j.error&&(j.coef||j.rbf)) subs.push(j); }catch(_){}
+  }
+  if(subs.length<2){ alert("통합할 모델을 불러오지 못했습니다."); return; }
+  // 공통 파장 (모델마다 λ그리드가 다르면 겹치는 것만)
+  let ws=subs[0].wavelengths_nm.map(Number);
+  subs.slice(1).forEach(s=>{ const set=new Set(s.wavelengths_nm.map(Number)); ws=ws.filter(w=>set.has(w)); });
+  if(!ws.length){ alert("모델들의 파장이 겹치지 않아 통합할 수 없습니다."); return; }
+  // 노브 합집합 — 중복 노브는 검증(CV) 좋은 모델이 소유
+  const cvOf=e=>((e.metrics||{}).r2_cv_mean??-1);
+  const own={};
+  subs.forEach((e,si)=>e.axes.forEach((ax,ai)=>{ const k2=ax[0];
+    if(!(k2 in own) || cvOf(e)>cvOf(subs[own[k2].si])) own[k2]={si,ai}; }));
+  const axes=[], lo=[], hi=[], map=[];
+  Object.keys(own).forEach(k2=>{ const {si,ai}=own[k2]; const e=subs[si];
+    axes.push(e.axes[ai]); lo.push(e.box.lo[ai]); hi.push(e.box.hi[ai]); map.push({si,ai}); });
+  let bi=0; subs.forEach((e,i)=>{ if(cvOf(e)>cvOf(subs[bi])) bi=i; });
+  const combo={type:"emulator", combo:true, model:`결합(${subs.length})`,
+    axes, naxes:axes.length, box:{lo,hi}, wavelengths_nm:ws,
+    n_samples:subs.reduce((a,e)=>a+(e.n_samples||0),0),
+    metrics:{r2_cv_mean:null,
+             per_model_cv:Object.fromEntries(subs.map((e,i)=>[`모델${i+1}(${e.model||"?"},${e.naxes}노브)`,cvOf(e)<0?null:cvOf(e)]))},
+    base_cfg:(subs[bi].base_cfg || (subs.find(e=>e.base_cfg)||{}).base_cfg),
+    sub:subs, subMap:map, baseIdx:bi};
+  DB_LOADED_KEY="combo:"+sk;
+  setModel(combo); dbRefresh();
 }
 async function dbLoadKey(k){
   let j; try{ j=await(await fetch(apiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k))).json(); }
@@ -232,7 +284,7 @@ async function dbLoadKey(k){
   if(j&&j.error){ alert("실패: "+j.error); return; }
   DB_LOADED_KEY=k; setModel(j); dbRefresh(); }
 function setModel(j){
-  if(!j || !(j.axes&&(j.coef||j.rbf))){ alert("에뮬레이터 JSON 이 아닙니다 (axes + coef/rbf 필요)."); return; }
+  if(!j || !(j.axes&&(j.coef||j.rbf||j.combo))){ alert("에뮬레이터 JSON 이 아닙니다 (axes + coef/rbf 필요)."); return; }
   EMU=j;
   if(!EMU.box){ const b=EMU.bound||2; EMU.box={lo:EMU.axes.map(()=>-b/2),hi:EMU.axes.map(()=>b/2)}; }
   STEPS=EMU.axes.map(()=>0);
@@ -240,10 +292,22 @@ function setModel(j){
   el("mdlBadge").textContent=`${EMU.model||"quadratic"} · ${EMU.axes.length}축 · ${EMU.wavelengths_nm.length}λ`;
   el("mdlBadge").className="badge ok";
   const cv=m.r2_cv_mean;
-  if(cv!=null){ const b=el("cvBadge"); b.style.display="";
-    b.textContent=`검증 CV R²=${cv}`;
-    b.className="badge "+(cv>=0.9?"ok":"warn"); }
+  { const b=el("cvBadge");
+    if(cv!=null){ b.style.display=""; b.textContent=`검증 CV R²=${cv}`;
+      b.className="badge "+(cv>=0.9?"ok":"warn"); }
+    else if(EMU.combo){ b.style.display=""; b.textContent="결합 — 모델별 신뢰도 아래 참조"; b.className="badge warn"; }
+    else b.style.display="none"; }
   const prod=(EMU.base_cfg&&EMU.base_cfg.product)?` · 📦 ${EMU.base_cfg.product}`:"";
+  if(EMU.combo){
+    const cvs=Object.entries(EMU.metrics.per_model_cv||{})
+      .map(([k2,v])=>`${k2}: ${v==null?"?":v}`).join(" · ");
+    el("mdlInfo").innerHTML=`⧉ <b>결합 모델</b> — 같은 구조 ${EMU.sub.length}개 모델의 노브 ${EMU.naxes}개를 합침${prod}`
+      +`<br><span class="hint">${cvs}</span>`
+      +`<br><span style="color:var(--amber)">근사 주의: 서로 다른 모델의 노브를 동시에 움직이면 그 교차효과는 반영되지 않습니다 (각 모델 영향의 합).</span>`;
+    IV.nodes=[]; IV.pred=null;
+    buildSliders(); redrawAll();
+    if(location.hash==="#inverse") setTab("inv");
+    return; }
   el("mdlInfo").innerHTML=`샘플 ${EMU.n_samples||"?"}개로 학습${prod}`
     +(m.r2_insample_mean!=null?` · 학습 R²=${m.r2_insample_mean}`:"")
     +(cv!=null&&cv<0.9?`<br><span style="color:var(--amber)">⚠ CV R² 가 낮습니다 — 예측을 참고용으로만. 샘플을 늘려 재학습 권장.</span>`:"")
