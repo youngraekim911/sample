@@ -127,7 +127,7 @@
 
 <script>
 "use strict";
-const VER="explorer v6";
+const VER="explorer v7";
 document.getElementById("ver").textContent=VER;
 const el=id=>document.getElementById(id);
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -765,7 +765,13 @@ function setView(v){ VIEW=v; el("cvTop").style.display=v==="top"?"":"none"; el("
   el("vTop").classList.toggle("primary",v==="top"); el("vCut").classList.toggle("primary",v==="cut"); redrawAll(); }
 el("vTop").onclick=()=>setView("top"); el("vCut").onclick=()=>setView("cut");
 setView("top");
-// 위저드 DOE 완료의 [결과 보기] 로 진입하면 ?load=<key> 로 그 모델을 자동 오픈
-dbRefresh().then(()=>{ const k=new URLSearchParams(location.search).get("load");
-  if(k) dbLoadKey(k); });
+// 위저드에서 ?load=<key> 로 진입하면 그 모델 자동 오픈, &steps=1.2,-0.5,... 가 있으면
+// (최적화가 찾은 조건 등) 슬라이더를 그 위치로 세팅해서 보여줌
+dbRefresh().then(async()=>{ const qs=new URLSearchParams(location.search);
+  const k=qs.get("load");
+  if(k){ await dbLoadKey(k);
+    const st=qs.get("steps");
+    if(st&&EMU){ const a=st.split(",").map(Number);
+      if(a.length===EMU.axes.length&&a.every(v=>isFinite(v))){
+        STEPS=a.map((v,i)=>clampStep(i,v)); redrawAll(); } } } });
 </script>

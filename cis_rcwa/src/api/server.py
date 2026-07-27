@@ -562,6 +562,128 @@ def _run_doe_job(jid, cfg_path, p):
         job["state"] = "error"
 
 
+# --------------------------------------------------------------- BO(최적 조건 찾기)
+def _run_bo_job(jid, p):
+    """베이지안 최적화 1라운드: 저장된 모델(키)의 원자료 -> GP+EI 로 다음 실험
+    추천 -> RCWA 실측 -> 데이터에 합쳐 모델 재학습 -> 같은 키로 저장.
+    목표는 유저 언어 그대로: {ch, wl, goal(max/min)}."""
+    job = JOBS[jid]
+    try:
+        from ..sim import bo as bo_mod
+        from ..sim import doe as doe_mod
+        from ..sim import surrogate_cache as sc
+        from ..sim.emulator import fit_emulator
+        from ..sim.simulator import RCWAPlaneWaveSimulator
+        from ..structure.blocks import ir_from_wizard_cfg
+
+        cdir = _cache_dir()
+        rec = sc.load(cdir, p["key"])
+        if not rec:
+            raise ValueError("모델을 DB 에서 찾지 못했습니다 (key)")
+        sur = rec["surrogate"]
+        axes = [list(a) for a in sur["axes"]]
+        k = len(axes)
+        base_cfg = sur.get("base_cfg")
+        if not base_cfg:
+            raise ValueError("구조가 동봉되지 않은 모델 — 새로 만든 모델로 시도하세요")
+        ws = sorted(int(w) for w in sur["wavelengths_nm"])
+        wl = min(ws, key=lambda w: abs(w - int(p["wl"])))    # 모델 파장 중 가장 가까운 것
+        ch, goal = p["ch"], p["goal"]
+        pts = bo_mod.points_from_csv(rec.get("csv", ""), k)
+        if len(pts) < 5:
+            raise ValueError("모델의 원자료(CSV)가 부족해 BO 를 시작할 수 없습니다")
+
+        def val(qe):
+            q = qe.get(wl) or qe.get(str(wl)) or {}
+            return float(q.get(ch, 0.0))
+        sgn = 1.0 if goal == "max" else -1.0
+        X = [pp["steps"] for pp in pts]
+        y = [sgn * val(pp["qe"]) for pp in pts]
+        base_best = max(y)                                    # 지금까지의 최고(부호 적용)
+
+        lo = [v * 2 for v in sur["box"]["lo"]]
+        hi = [v * 2 for v in sur["box"]["hi"]]
+        n = int(p["n"])
+        sugg = bo_mod.suggest(X, y, lo, hi, n_pick=n, seed=len(pts))
+        job["doe_total"] = n
+        job["doe_done"] = 0
+        meta = dict(rec.get("meta") or {})
+        nG = int(meta.get("nG", 101))
+        dsamp = int(meta.get("downsample", 2))
+        dev = "cuda(GPU)" if torch.cuda.is_available() else "cpu"
+        obj_txt = f"{ch}@{wl}nm {'최대' if goal == 'max' else '최소'}"
+        evaluated = []
+        t0 = time.time()
+        for i, sp in enumerate(sugg):
+            if job["cancel"]:
+                break
+            c = doe_mod.apply_point(base_cfg, sp, axes)
+            sim = RCWAPlaneWaveSimulator(ir_from_wizard_cfg(c, 256), nG=nG,
+                                         downsample=dsamp)
+            qe = {}
+            for w in ws:
+                if job["cancel"]:
+                    break
+                acc = {"R": 0.0, "G": 0.0, "B": 0.0}
+                for pol in ((1.0, 0.0), (0.0, 1.0)):
+                    o = sim.run(w / 1000.0, pol_te=pol[0], pol_tm=pol[1])
+                    for L in "RGB":
+                        acc[L] += 0.5 * o["QE_rgb"][L]
+                qe[w] = {L: round(acc[L], 5) for L in "RGB"}
+            if job["cancel"] or len(qe) < len(ws):
+                break
+            pts.append({"steps": [round(float(v), 6) for v in sp], "qe": qe})
+            v = sgn * val(qe)
+            evaluated.append(round(val(qe), 5))
+            X.append(sp); y.append(v)
+            job["doe_done"] = i + 1
+            el = time.time() - t0
+            eta = el / (i + 1) * (n - i - 1)
+            cur_best = max(y)
+            job["progress"] = (i + 1) / n
+            job["note"] = (f"[{dev}] 자동실험 {i+1}/{n} · {obj_txt} 지금까지 최고 "
+                           f"{sgn*cur_best:.4f} · 남은 ~{int(eta//60)}분{int(eta%60)}초")
+
+        done_n = job["doe_done"]
+        if done_n:                        # 하나라도 실측했으면 모델 갱신 + 저장
+            res = {"axes": axes, "mode": "lhs", "nG": nG,
+                   "bound": float(sur.get("bound", 2.0)), "seed": 0,
+                   "wavelengths_nm": ws, "points": pts}
+            sur2 = fit_emulator(res, model="auto",
+                                cv_folds=min(5, max(2, len(pts) // 4)),
+                                base_cfg=base_cfg)
+            meta.update({"n_samples": len(pts),
+                         "bo_rounds": int(meta.get("bo_rounds", 0)) + 1,
+                         "r2_cv_mean": sur2["metrics"]["r2_cv_mean"],
+                         "model": sur2["model"]})
+            sc.save(cdir, p["key"], sur2, meta, csv_text=doe_mod.doe_csv(res))
+            job["cache_key"] = p["key"]
+            job["r2_cv_mean"] = sur2["metrics"]["r2_cv_mean"]
+        bi = int(np.argmax(y))
+        best_steps = [round(float(v), 3) for v in X[bi]]
+        job["bo"] = {
+            "objective": obj_txt, "n_done": done_n,
+            "base_value": round(sgn * base_best, 5),
+            "best_value": round(sgn * max(y), 5),
+            "improved": bool(max(y) > base_best + 1e-9),
+            "delta": round(sgn * (max(y) - base_best), 5),
+            "best_steps": best_steps,
+            "best_params": [{"label": a[1], "unit": a[3],
+                             "delta": round(float(best_steps[i]) * float(a[2]), 4)}
+                            for i, a in enumerate(axes)],
+            "saved": bool(done_n)}
+        job["elapsed_s"] = round(time.time() - t0, 1)
+        job["state"] = "cancelled" if job["cancel"] else "done"
+        job["note"] = (f"{'중단' if job['cancel'] else '완료'} · 자동실험 {done_n}/{n} · "
+                       f"{obj_txt}: {job['bo']['base_value']} → {job['bo']['best_value']}"
+                       + (f" (+{abs(job['bo']['delta'])})" if job["bo"]["improved"]
+                          else " (개선 없음 — 라운드를 더 돌리거나 목표를 바꿔보세요)"))
+    except Exception as e:
+        job["error"] = f"{type(e).__name__}: {e}"
+        job["trace"] = traceback.format_exc()[-2000:]
+        job["state"] = "error"
+
+
 LAST_DOE_JID = None       # 브라우저가 꺼졌다 다시 열려도 재접속(reattach)할 최근 DOE 작업
 
 
@@ -658,7 +780,7 @@ class Handler(BaseHTTPRequestHandler):
                         ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                          "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
                          "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed",
-                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening")
+                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening", "bo")
                         if k in job})
         elif u.path == "/api/doe/last":
             # 브라우저 재시작 후 재접속: 이 서버가 마지막으로 시작한 DOE 작업 상태.
@@ -670,7 +792,7 @@ class Handler(BaseHTTPRequestHandler):
                    ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                     "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
                     "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed",
-                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening")
+                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening", "bo")
                    if k in job}
             out["job"] = LAST_DOE_JID
             self._json(out)
@@ -924,6 +1046,24 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(_doe_estimate(data))
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+        elif u.path == "/api/bo":
+            # 🎯 최적 조건 찾기(BO) 시작 — 저장된 모델 키 + 유저 언어 목표
+            try:
+                bp = {"key": str(data.get("key") or ""),
+                      "ch": str(data.get("ch", "G")),
+                      "wl": int(data.get("wl", 550)),
+                      "goal": str(data.get("goal", "max")),
+                      "n": max(3, min(30, int(data.get("n", 10))))}
+                assert bp["key"], "key"
+                assert bp["ch"] in ("R", "G", "B"), "ch"
+                assert bp["goal"] in ("max", "min"), "goal"
+            except (TypeError, ValueError, AssertionError) as e:
+                self._json({"error": f"파라미터 오류: {e}"}, 400); return
+            jid = "bo" + uuid.uuid4().hex[:9]
+            JOBS[jid] = {"state": "running", "progress": 0.0, "note": "다음 실험 고르는 중…",
+                         "error": None, "cancel": False, "params": bp}
+            threading.Thread(target=_run_bo_job, args=(jid, bp), daemon=True).start()
+            self._json({"job": jid, "total": bp["n"]})
         elif u.path == "/api/doe/cancel":
             job = JOBS.get(data.get("job") or "")
             if job:
