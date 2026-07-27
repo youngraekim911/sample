@@ -182,8 +182,9 @@
 <div class="wpage" id="wpage-set">
   <div class="wpad">
     <div class="wcard" style="max-width:780px">
-      <h2>시뮬레이션 공통 설정</h2>
-      <p class="sub">파장 범위·품질(nG·downsample)을 정합니다. <b>이 값들은 아래 [단일 QE 실행] 과 [🧪 DOE 스윕] 이 함께 사용</b>합니다. 실행 시 물질~구조를 다시 물려 현재 편집 상태가 반영됩니다.</p>
+      <h2>QE 시뮬레이션 설정</h2>
+      <p class="sub">파장 범위·품질(nG·downsample)을 정하고 <b>현재 구조 그대로 1회</b> 계산합니다.
+        (예측 모델 만들기는 2시뮬 → 🧪 DOE 에 별도 설정이 있습니다)</p>
       <div id="qeGuide" class="hint" style="display:none;white-space:pre-wrap;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px"></div>
       <div id="qeCtl" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
         <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 시작 (µm)<input id="qeL0" type="number" step="0.01" value="0.40" style="width:76px"></label>
@@ -211,11 +212,31 @@
       </div>
     </div>
 
-    <div class="wcard" id="doeCard" style="max-width:780px;margin-top:14px">
+  </div>
+  <div class="wfoot"><button class="btn ghost" id="setBack">← 시뮬 선택</button><div class="spacer"></div></div>
+</div>
+
+<!-- ══════════ 페이지 3b: DOE(예측 모델) 설정 + 실행 — QE 와 완전 분리 ══════════ -->
+<div class="wpage" id="wpage-doe">
+  <div class="wpad">
+    <div class="wcard" id="doeCard" style="max-width:780px">
       <h2>🧪 예측 모델 만들기 (DOE)</h2>
       <p class="sub">구조 노브를 자동으로 여러 번 흔들어 <b>예측 모델</b>을 만듭니다.
-        완성된 모델은 <b>🔭 모델 탐색</b>에서 슬라이더로 즉석 QE 확인에 씁니다.
+        완성되면 <b>결과 = 🔭 모델 탐색</b> — 슬라이더로 즉석 QE 를 봅니다.
         순서는 셋: <b>① 흔들 노브 고르기 → ② 정밀도 고르기 → ③ Run</b>.</p>
+      <div id="doeGuide" class="hint" style="display:none;white-space:pre-wrap;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px"></div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:9px">
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 시작 (µm)<input id="doeL0" type="number" step="0.01" value="0.40" style="width:76px"></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 끝 (µm)<input id="doeL1" type="number" step="0.01" value="0.70" style="width:76px"></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="QE 스펙트럼을 몇 개 파장에서 계산할지">파장 개수<input id="doeN" type="number" step="1" min="4" value="16" style="width:60px"></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="표준=자동 설정(권장). 수동은 nG/downsample 직접">품질
+          <select id="doeQual" style="width:130px"><option value="std" selected>표준 (추천)</option><option value="manual">수동 (고급)</option></select></label>
+        <details id="doeQAdv" style="display:none"><summary class="hint">고급</summary>
+          <div style="display:flex;gap:10px;align-items:flex-end;padding-top:6px">
+            <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="Fourier 차수 — 클수록 정확·느림">nG<input id="doeNG" type="number" step="2" min="9" value="151" style="width:80px"></label>
+            <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="구조 격자 다운샘플">downsample<input id="doeDS" type="number" step="1" min="1" value="2" style="width:60px"></label>
+          </div></details>
+      </div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
         <label class="hint" style="display:flex;flex-direction:column;gap:3px">방식
           <select id="doeMode" style="width:300px">
@@ -224,7 +245,6 @@
             <option value="surrogate">국소 정밀 모델 — 현재값 근처만 (85회)</option>
             <option value="full">전수조사 — 전 조합 (전문가·GPU)</option>
           </select></label>
-        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="QE 스펙트럼을 몇 개 파장에서 계산할지">파장 개수<input id="doeN" type="number" step="1" min="4" value="16" style="width:60px"></label>
         <button class="btn primary" id="doeRun">▶ Run — 모델 만들기</button>
         <button class="btn" id="doeCancel" style="display:none">■ 중단</button>
       </div>
@@ -310,14 +330,15 @@
       </div>
       <div id="doeDone" style="display:none;margin-top:12px">
         <span class="hint" id="doeSummary"></span>
-        <div style="display:flex;gap:9px;margin-top:8px">
+        <div style="display:flex;gap:9px;margin-top:8px;flex-wrap:wrap">
+          <a class="btn primary" id="doeExplore" style="display:none">🔭 결과 보기 — 모델 탐색에서 열기</a>
           <a class="btn" id="doeCsv" download="doe.csv">⤓ CSV (원자료)</a>
-          <a class="btn" id="doeSur" download="surrogate.json" style="display:none">⤓ Surrogate JSON</a>
+          <a class="btn" id="doeSur" download="surrogate.json" style="display:none">⤓ 모델 JSON</a>
         </div>
       </div>
     </div>
   </div>
-  <div class="wfoot"><button class="btn ghost" id="setBack">← 시뮬 선택</button><div class="spacer"></div></div>
+  <div class="wfoot"><button class="btn ghost" id="doeBack">← 시뮬 선택</button><div class="spacer"></div></div>
 </div>
 
 <!-- ══════════ 페이지 4: 실행중 (로딩 게이지) ══════════ -->
@@ -1364,13 +1385,24 @@ function linkFolderMaterials(){
       S.materials[nm].k=+interp1(refLambda,L,t.map(r=>r[2])).toFixed(4); }
     else { delete S.materials[nm].n; delete S.materials[nm].k; } }   // 폴더 없으면 상수 없음(누락)
 }
-// 설정 페이지 진입 시 서버 연결 확인 + 안내
+// QE 설정 페이지 진입 — 서버 연결 확인 + 안내 (QE 전용)
 async function qeEnterSettings(){
   const g=el("qeGuide"), p=await qePing();
-  if(p){ g.style.display="none"; el("qeRun").disabled=false; doeCacheRefresh(); doeReattach(); doeDbConfig(); }
+  if(p){ g.style.display="none"; el("qeRun").disabled=false; }
   else{ g.style.display="block"; el("qeRun").disabled=true;
     g.textContent="RCWA 서버가 꺼져 있습니다. 터미널에서 아래 한 줄을 실행하면 서버 모드로 동작합니다:\n\n"+
       "  cd cis_rcwa && python app.py\n\n(pip install torch numpy pyyaml · GPU 있으면 자동 사용)"; }
+}
+// DOE(예측 모델) 설정 페이지 진입 — 서버 확인 + 모델 DB/재접속/노브 로딩 (DOE 전용)
+async function doeEnterSettings(){
+  const g=el("doeGuide"), p=await qePing();
+  if(p){ g.style.display="none"; el("doeRun").disabled=DOE.running;
+    doeCacheRefresh(); doeReattach(); doeDbConfig();
+    if(!DOE.axesCat.length) doeAxisLoad();
+    doeModeSync(); }
+  else{ g.style.display="block"; el("doeRun").disabled=true;
+    g.textContent="RCWA 서버가 꺼져 있습니다. 터미널에서 아래 한 줄을 실행하세요:\n\n"+
+      "  cd cis_rcwa && python app.py"; }
 }
 el("qeQual").onchange=()=>{ const m=el("qeQual").value==="manual";
   el("qeAdv").style.display = m?"block":"none"; el("qeAdv").open = m; };
@@ -1595,23 +1627,28 @@ const PAGES=[
 ];
 let curPage="wpage-start"; const pageReached={"wpage-start":true};
 function pageIdx(id){ return PAGES.findIndex(p=>p.id===id); }
+let lastSetPage="wpage-set";     // 3설정 칩이 기억할 마지막 설정 페이지 (QE or DOE)
 function goPage(id){
   curPage=id; pageReached[id]=true;
   for(const p of PAGES){ const e=el(p.id); if(e)e.classList.toggle("on", p.id===id); }
-  if(id==="wpage-set") qeEnterSettings();
+  const dz=el("wpage-doe"); if(dz) dz.classList.toggle("on", id==="wpage-doe");   // 별칭 페이지
+  if(id==="wpage-set"){ lastSetPage=id; qeEnterSettings(); }
+  if(id==="wpage-doe"){ lastSetPage=id; doeEnterSettings(); }
   if(id==="wpage-build"){ renderStep(); renderViews(); }
   if(id==="wpage-result"){ drawQEChart(); qeTableFill();
     invBind(); invUpdateAvail(); if(DOE.surrogate&&INV.nodes.length) drawInvChart(); }
   renderNav(); window.scrollTo(0,0);
 }
 function renderNav(){
-  const nav=el("wnav"); if(!nav)return; nav.innerHTML=""; const ci=pageIdx(curPage);
+  const nav=el("wnav"); if(!nav)return; nav.innerHTML="";
+  const navCur=(curPage==="wpage-doe")?"wpage-set":curPage;    // DOE 설정도 '3 설정' 칩
+  const ci=pageIdx(navCur);
   PAGES.forEach((p,i)=>{
     if(i>0) nav.appendChild(h("span",{class:"wsep"},["›"]));
-    const reached=!!pageReached[p.id];
-    const chip=h("div",{class:"wstep"+(p.id===curPage?" on":(reached&&i<ci?" done":""))+(reached?"":" disabled")},
+    const reached=!!pageReached[p.id]||(p.id==="wpage-set"&&pageReached["wpage-doe"]);
+    const chip=h("div",{class:"wstep"+(p.id===navCur?" on":(reached&&i<ci?" done":""))+(reached?"":" disabled")},
       [h("span",{class:"wn"},[p.n]), p.label]);
-    if(reached) chip.onclick=()=>goPage(p.id);
+    if(reached) chip.onclick=()=>goPage(p.id==="wpage-set"?lastSetPage:p.id);
     nav.appendChild(chip);
   });
 }
@@ -1639,7 +1676,10 @@ el("buildBack").onclick=()=>goPage("wpage-start");
 el("buildDone").onclick=()=>goPage("wpage-sim");
 el("simBack").onclick=()=>goPage("wpage-build");
 el("simQE").onclick=()=>goPage("wpage-set");
-el("simDOE").onclick=()=>{ goPage("wpage-set"); setTimeout(()=>el("doeCard").scrollIntoView({behavior:"smooth"}),80); };
+el("simDOE").onclick=()=>goPage("wpage-doe");            // DOE 는 전용 설정 페이지로
+el("doeBack").onclick=()=>goPage("wpage-sim");
+el("doeQual").onchange=()=>{ const m=el("doeQual").value==="manual";
+  el("doeQAdv").style.display=m?"":"none"; el("doeQAdv").open=m; doeMeterUpdate(); };
 // 모델탐색은 3·4·5 단계가 필요 없는 별도 흐름 — 같은 탭에서 탐색 페이지로 전환
 el("simExplore").onclick=()=>{ location.href=qeApiBase()+"/explorer"; };
 el("setBack").onclick=()=>goPage("wpage-sim");
@@ -1756,7 +1796,7 @@ function doeMeterUpdate(){ if(el("doeMode").value!=="lhs")return;
     const ax=selectedAxes();
     const body={ mode:"lhs", axes:ax.length?ax:null, naxes:ax.length||6,
       n:+el("doeN").value||16, nsamples:+el("doeNsamples").value||80,
-      model:el("doeModel").value, nG:+(el("qeQual").value==="manual"?el("qeNG").value:151) };
+      model:el("doeModel").value, nG:+(el("doeQual").value==="manual"?el("doeNG").value:151) };
     if(DOE.perWl) body.per_wl_s=DOE.perWl;
     let e; try{ e=await(await fetch(qeApiBase()+"/api/doe/estimate",{method:"POST",
       headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
@@ -1778,10 +1818,10 @@ el("doeRun").onclick=async()=>{ if(DOE.running)return;
   await fetchServerMaterials();                                  // 물질 최신화 (run 과 동일 규약)
   const miss=usedMats().filter(matMissing);
   if(miss.length){ alert("❌ 물질 폴더에 없는 물질: "+miss.join(", ")); return; }
-  const manual=el("qeQual").value==="manual";
+  const manual=el("doeQual").value==="manual";           // DOE 자체 조건 (QE 와 분리)
   const body={ yaml:structYAML(), mode:el("doeMode").value, n:+el("doeN").value||16,
-    lam0:+el("qeL0").value, lam1:+el("qeL1").value,
-    nG: manual? +el("qeNG").value : 151, downsample: manual? +el("qeDS").value : 2,
+    lam0:+el("doeL0").value, lam1:+el("doeL1").value,
+    nG: manual? +el("doeNG").value : 151, downsample: manual? +el("doeDS").value : 2,
     force: el("doeForce")&&el("doeForce").checked };
   if(body.mode==="lhs"){ body.nsamples=+el("doeNsamples").value||80; body.bound=+el("doeBound").value||2;
     body.model=el("doeModel").value; body.cv_folds=+el("doeCvFolds").value||5;
@@ -1822,10 +1862,13 @@ async function doePoll(){
   const hasSur=s.r2_G_mid!=null;
   el("doeSur").style.display=hasSur?"":"none";
   if(hasSur){ el("doeSur").href=qeApiBase()+"/api/doe/file?job="+DOE.job+"&kind=surrogate";
+    // 결과 = 모델 탐색: 방금 만든 모델을 자동으로 물고 열리는 링크
+    el("doeExplore").style.display="";
+    el("doeExplore").href=qeApiBase()+"/explorer"+(s.cache_key?("?load="+encodeURIComponent(s.cache_key)):"");
     try{ DOE.surrogate=await(await fetch(qeApiBase()+"/api/doe/file?job="+DOE.job+"&kind=surrogate")).json();
       invUpdateAvail(); doeEnableDownstream(); doeCacheRefresh();    // 결과탭 활성 + 캐시목록 갱신
-      el("doeNote").textContent=(s.cached?"✓ 캐시 적중 — 재계산 생략 · ":"✓ surrogate 저장(캐시됨) · ")
-        +"결과 페이지에서 🎯 역설계 사용 가능"; }catch(_){}
+      el("doeNote").textContent=(s.cached?"✓ 캐시 적중 — 재계산 생략 · ":"✓ 모델 저장됨 · ")
+        +"🔭 [결과 보기] 를 누르면 모델 탐색이 이 모델로 열립니다"; }catch(_){}
   }
 }
 // 브라우저가 꺼졌다 다시 열려도, 서버에서 계속 돌던(혹은 끝난) DOE 에 자동 재접속
@@ -1850,6 +1893,8 @@ async function doeReattach(){
       +`${s.doe_done||"?"}/${s.doe_total||"?"}조건${emu}`;
     el("doeCsv").href=qeApiBase()+"/api/doe/file?job="+s.job+"&kind=csv";
     el("doeSur").style.display=""; el("doeSur").href=qeApiBase()+"/api/doe/file?job="+s.job+"&kind=surrogate";
+    el("doeExplore").style.display="";
+    el("doeExplore").href=qeApiBase()+"/explorer"+(s.cache_key?("?load="+encodeURIComponent(s.cache_key)):"");
     try{ DOE.surrogate=await(await fetch(qeApiBase()+"/api/doe/file?job="+s.job+"&kind=surrogate")).json();
       invUpdateAvail(); doeEnableDownstream(); }catch(_){}
   }
@@ -1908,7 +1953,8 @@ async function doeCacheLoadSel(k){ if(!k)return;
   el("doeDone").style.display=""; el("doeProg").style.display="none";
   el("doeSummary").textContent=`💾 저장된 모델 불러옴 (계산 0회) · key ${k.slice(0,8)}`;
   el("doeSur").style.display=""; el("doeSur").href=qeApiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k);
-  alert("불러왔습니다. 상단 5결과 탭 활성화 · 🔭 모델 탐색에서도 이 모델을 쓸 수 있습니다."); }
+  el("doeExplore").style.display="";
+  el("doeExplore").href=qeApiBase()+"/explorer?load="+encodeURIComponent(k); }
 if(el("doeLoadBtn")) el("doeLoadBtn").onclick=async()=>{
   const p=el("doeLoadPanel"), show=p.style.display==="none";
   p.style.display=show?"":"none"; el("doeDbPanel").style.display="none";
@@ -2025,7 +2071,7 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v96";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v97";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)

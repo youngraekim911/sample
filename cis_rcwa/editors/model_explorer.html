@@ -127,7 +127,7 @@
 
 <script>
 "use strict";
-const VER="explorer v4";
+const VER="explorer v5";
 document.getElementById("ver").textContent=VER;
 const el=id=>document.getElementById(id);
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -765,5 +765,7 @@ function setView(v){ VIEW=v; el("cvTop").style.display=v==="top"?"":"none"; el("
   el("vTop").classList.toggle("primary",v==="top"); el("vCut").classList.toggle("primary",v==="cut"); redrawAll(); }
 el("vTop").onclick=()=>setView("top"); el("vCut").onclick=()=>setView("cut");
 setView("top");
-dbRefresh();
+// 위저드 DOE 완료의 [결과 보기] 로 진입하면 ?load=<key> 로 그 모델을 자동 오픈
+dbRefresh().then(()=>{ const k=new URLSearchParams(location.search).get("load");
+  if(k) dbLoadKey(k); });
 </script>
