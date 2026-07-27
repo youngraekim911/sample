@@ -19,8 +19,8 @@
   .btn.ghost{background:transparent}
   select,input{background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:5px 8px;font:13px var(--ui)}
   .hint{color:var(--ink-dim);font-size:12px}
-  .wrap{display:grid;grid-template-columns:330px 1fr 1fr;gap:12px;padding:12px;align-items:start}
-  @media(max-width:1100px){.wrap{grid-template-columns:1fr}}
+  .wrap{display:grid;grid-template-columns:minmax(380px,470px) 1fr;gap:12px;padding:12px;align-items:start}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
   .card h2{font-size:13px;margin:0 0 8px;color:var(--accent);letter-spacing:.3px;text-transform:uppercase}
   .axrow{padding:6px 0;border-bottom:1px dashed var(--line)}
@@ -72,31 +72,35 @@
       <div class="hint" id="mdlInfo" style="margin-top:8px">모델을 불러오면 아래 슬라이더가 생깁니다.</div>
     </div>
 
+    <!-- ② 조건 조절 / 구조 미리보기 — 둘 다 '조건'이라 좌측 탭으로 묶음 -->
     <div class="card">
-      <h2>② 조건 조절 <span class="hint" style="text-transform:none">— 움직이면 즉시 반영</span></h2>
-      <div id="axBox"><div class="hint">— 모델 없음 —</div></div>
-      <div style="display:flex;gap:6px;margin-top:10px">
-        <button class="btn ghost" id="resetBtn">↺ 중심으로</button>
-        <button class="btn ghost" id="copyBtn">📋 현재 조건 복사</button>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button class="btn primary" id="tabCond">🎛 ② 조건 조절</button>
+        <button class="btn" id="tabStruct">🧱 구조 미리보기</button>
+        <span class="hint" style="margin-left:auto;align-self:center">움직이면 우측 QE 즉시 반영</span>
+      </div>
+      <div id="viewCond">
+        <div id="axBox"><div class="hint">— 모델 없음 —</div></div>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          <button class="btn ghost" id="resetBtn">↺ 중심으로</button>
+          <button class="btn ghost" id="copyBtn">📋 현재 조건 복사</button>
+        </div>
+      </div>
+      <div id="viewStruct" style="display:none">
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <button class="btn ghost" id="vTop">▦ 위에서(XY)</button>
+          <button class="btn ghost" id="vCut">▤ 단면(YZ)</button>
+          <span class="hint" id="vNote" style="margin-left:auto"></span>
+        </div>
+        <canvas id="cvTop" width="520" height="380"></canvas>
+        <canvas id="cvCut" width="520" height="380" style="display:none"></canvas>
+        <div class="hint" id="structNote" style="margin-top:8px"></div>
       </div>
     </div>
   </div>
 
-  <!-- 구조 미리보기 -->
-  <div class="card">
-    <h2>구조 <span class="hint" style="text-transform:none">— 조건에 실시간 반응</span></h2>
-    <div style="display:flex;gap:6px;margin-bottom:8px">
-      <button class="btn ghost" id="vTop">▦ 위에서(XY)</button>
-      <button class="btn ghost" id="vCut">▤ 단면(YZ)</button>
-      <span class="hint" id="vNote" style="margin-left:auto"></span>
-    </div>
-    <canvas id="cvTop" width="520" height="380"></canvas>
-    <canvas id="cvCut" width="520" height="380" style="display:none"></canvas>
-    <div class="hint" id="structNote" style="margin-top:8px"></div>
-  </div>
-
-  <!-- ③ QE 결과 / 역설계 -->
-  <div class="card">
+  <!-- ③ QE 결과 / 역설계 — 좌측 스크롤 중에도 항상 보이게 고정(sticky) -->
+  <div class="card" style="position:sticky;top:54px">
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
       <button class="btn primary" id="tabQE">③ QE 예측</button>
       <button class="btn" id="tabInv">🎯 역설계</button>
@@ -128,7 +132,7 @@
 
 <script>
 "use strict";
-const VER="explorer v9";
+const VER="explorer v10";
 document.getElementById("ver").textContent=VER;
 const el=id=>document.getElementById(id);
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -367,6 +371,16 @@ function updateAxLabels(){
     const r=el("ar"+i); if(r) r.value=STEPS[i];
   });
 }
+// ── 좌측 탭: 조건 조절 ↔ 구조 미리보기 (둘 다 조건 조작 — 우측 QE 는 항상 고정) ──
+function setLeftTab(t){
+  el("tabCond").className="btn"+(t==="cond"?" primary":"");
+  el("tabStruct").className="btn"+(t==="struct"?" primary":"");
+  el("viewCond").style.display=(t==="cond")?"":"none";
+  el("viewStruct").style.display=(t==="struct")?"":"none";
+  if(t==="struct") redrawAll();                    // 탭 열 때 캔버스 최신화
+}
+el("tabCond").onclick=()=>setLeftTab("cond");
+el("tabStruct").onclick=()=>setLeftTab("struct");
 el("resetBtn").onclick=()=>{ if(!EMU)return; STEPS=EMU.axes.map(()=>0); redrawAll(); };
 el("copyBtn").onclick=()=>{ if(!EMU)return;
   const txt=EMU.axes.map((ax,i)=>`${ax[1]}: ${STEPS[i]*ax[2]>=0?"+":""}${(+(STEPS[i]*ax[2]).toFixed(4))} ${ax[3]}`).join("\n");
@@ -402,6 +416,11 @@ function applyAxes(){
       const q=((ml.quads||[])[a]||[])[b2]; if(q){ const base=(+q.height_um>0?+q.height_um:(+ml.height_um||0.4)); q.height_um=Math.max(0.05,base+d); } }
     else if(/^ml_q[01][01]_d[xy]_um$/.test(key)){ const a=+key[4],b2=+key[5];
       const q=((ml.quads||[])[a]||[])[b2]; if(q){ const kk=key.includes("_dx_")?"dx_um":"dy_um"; q[kk]=(+q[kk]||0)+d; } }
+    else if(/^ml_q[01][01]_l\d+_d[xy]_um$/.test(key)){ const a=+key[4],b2=+key[5];
+      const i=+key.split("_l")[1].split("_")[0];       // 렌즈 개별 이동 (독립)
+      const q=((ml.quads||[])[a]||[])[b2];
+      if(q){ q.lens_dxy=q.lens_dxy||[]; while(q.lens_dxy.length<=i) q.lens_dxy.push([0,0]);
+        const j=key.includes("_dx_")?0:1; q.lens_dxy[i][j]=(+q.lens_dxy[i][j]||0)+d; } }
     else if(/^cf_[RGB]_chang_deg$/.test(key)){ const t=cf[key[3]]; if(t) t.chamfer_angle=Math.max(5,Math.min(85,(+t.chamfer_angle||45)+d)); }
     else if(key==="dti_open_um"){ st.dti=st.dti||{};
       st.dti.center_gap_x_um=Math.max(0.02,(+st.dti.center_gap_x_um||0.28)+d);
@@ -418,9 +437,12 @@ function lensList(cfg){
     for(let qy=0;qy<2;qy++) for(let qx=0;qx<2;qx++){
       const sp=q[qy][qx]||{}, sc=+sp.scale||1, sh=sp.shape||"1x1", orient=sp.orient||"h";
       const qdx=+sp.dx_um||0, qdy=+sp.dy_um||0;               // quad별 위치 오프셋
+      const ldxy=sp.lens_dxy||[]; let li=0;                    // 렌즈별 오프셋(독립 이동)
       const x0=qx*2*p, y0=qy*2*p, cx=x0+p, cy=y0+p;
-      const add=(ccx,ccy,ax,ay)=>out.push({cx:ccx+qdx,cy:ccy+qdy,ax:ax*sc,ay:ay*sc,
-        h:+sp.height_um||0,power:+sp.power||0,qy,qx});         // qy/qx = 드래그 매핑용
+      const add=(ccx,ccy,ax,ay)=>{ const off=ldxy[li]||[0,0];
+        out.push({cx:ccx+qdx+(+off[0]||0),cy:ccy+qdy+(+off[1]||0),ax:ax*sc,ay:ay*sc,
+          h:+sp.height_um||0,power:+sp.power||0,qy,qx,li});    // qy/qx/li = 드래그 매핑용
+        li++; };
       if(sh==="2x2") add(cx,cy,p,p);
       else if(sh==="1x1"){ for(let a=0;a<2;a++) for(let b=0;b<2;b++) add(x0+(b+.5)*p,y0+(a+.5)*p,p/2,p/2); }
       else{ const horiz=(sh==="2x1"&&orient==="h");
@@ -492,7 +514,8 @@ function mlPosAxes(){ if(!EMU) return {any:false};
   const gx=axIdx("ml_shift_x_um"), gy=axIdx("ml_shift_y_um");
   let anyQ=false;
   for(let a=0;a<2;a++) for(let b=0;b<2;b++) if(axIdx(`ml_q${a}${b}_dx_um`)>=0||axIdx(`ml_q${a}${b}_dy_um`)>=0) anyQ=true;
-  return {any:(gx>=0||gy>=0||anyQ), gx, gy, anyQ}; }
+  const anyL=EMU.axes.some(a=>/^ml_q[01][01]_l\d+_d[xy]_um$/.test(a[0]));
+  return {any:(gx>=0||gy>=0||anyQ||anyL), gx, gy, anyQ, anyL}; }
 function clampStep(i,v){ const lo=EMU.box.lo[i]*2, hi=EMU.box.hi[i]*2; return Math.min(hi,Math.max(lo,v)); }
 (function(){
   const cv=el("cvTop");
@@ -508,9 +531,12 @@ function clampStep(i,v){ const lo=EMU.box.lo[i]*2, hi=EMU.box.hi[i]*2; return Ma
       if(d<bd && d<Math.max(+L.ax,+L.ay)*1.15){ bd=d; best=L; } });
     if(!best) return;
     const P=mlPosAxes();
-    // 이 렌즈에 물릴 축: quad별 축이 있으면 그 quad 의 dx/dy, 없으면 전체 shift
+    // 이 렌즈에 물릴 축 우선순위: 렌즈 개별(독립) > quad별 > 전체 shift
     let ix=-1, iy=-1;
-    if(best.qy!=null){ ix=axIdx(`ml_q${best.qy}${best.qx}_dx_um`); iy=axIdx(`ml_q${best.qy}${best.qx}_dy_um`); }
+    if(best.qy!=null&&best.li!=null){
+      ix=axIdx(`ml_q${best.qy}${best.qx}_l${best.li}_dx_um`);
+      iy=axIdx(`ml_q${best.qy}${best.qx}_l${best.li}_dy_um`); }
+    if(ix<0&&iy<0&&best.qy!=null){ ix=axIdx(`ml_q${best.qy}${best.qx}_dx_um`); iy=axIdx(`ml_q${best.qy}${best.qx}_dy_um`); }
     if(ix<0&&iy<0){ ix=P.gx; iy=P.gy; }
     if(ix<0&&iy<0) return;
     MLDRAG={ix,iy,x0:u.x,y0:u.y,sx0:ix>=0?STEPS[ix]:0,sy0:iy>=0?STEPS[iy]:0};

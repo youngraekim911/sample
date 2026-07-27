@@ -172,6 +172,17 @@ def _apply_axis(st, key, d):
         q = ml["quads"][a][b]
         base = float(q.get("height_um", 0) or 0) or float(ml.get("height_um", 0) or 0.4)
         q["height_um"] = max(0.05, round(base + d, 5))
+    elif key[:4] == "ml_q" and "_l" in key \
+            and key[-6:] in ("_dx_um", "_dy_um"):        # ML 렌즈 개별 위치(µm)
+        # ml_q{a}{b}_l{i}_dx_um — quad (a,b) 안의 i번째 렌즈만 이동 (독립)
+        a, b = int(key[4]), int(key[5])
+        i = int(key.split("_l")[1].split("_")[0])
+        q = st["ml"]["quads"][a][b]
+        ld = q.setdefault("lens_dxy", [])
+        while len(ld) <= i:
+            ld.append([0.0, 0.0])
+        j = 0 if key.endswith("_dx_um") else 1
+        ld[i][j] = round(float(ld[i][j] or 0) + d, 5)
     elif key[:4] == "ml_q" and key[-6:] in ("_dx_um", "_dy_um"):   # ML quad별 위치(µm)
         a, b = int(key[4]), int(key[5])
         q = st["ml"]["quads"][a][b]
@@ -283,6 +294,27 @@ def axis_catalog(cfg):
                     q.get("dx_um", 0), 0.0, round(_pp * 0.04, 4))
                 add("ML", f"ml_q{a}{b}_dy_um", f"ML({a},{b}) 위치 Y", "um",
                     q.get("dy_um", 0), 0.0, round(_pp * 0.04, 4))
+                # 렌즈 개별 위치 — quad 에 렌즈가 2개 이상일 때(1x1=4개, 2x1/1x2=2개).
+                # 인덱스 순서는 생성 순서: 1x1=[좌상,우상,좌하,우하], 2x1h=[위,아래],
+                # 1x2(세로)=[왼쪽,오른쪽]. (2x2 는 렌즈 1개 = quad 위치축과 동일이라 제외)
+                n_l = {"2x2": 1, "1x1": 4, "2x1": 2, "1x2": 2}.get(
+                    str(q.get("shape", "1x1")), 1)
+                if str(q.get("shape")) == "2x1" and q.get("orient", "h") != "h":
+                    pass                                   # 세로 2x1 도 2개 — n_l 동일
+                if n_l > 1:
+                    ld = q.get("lens_dxy") or []
+                    pos = (["좌상", "우상", "좌하", "우하"] if n_l == 4
+                           else (["위", "아래"] if (str(q.get("shape")) == "2x1"
+                                                  and q.get("orient", "h") == "h")
+                                 else ["왼쪽", "오른쪽"]))
+                    for i in range(n_l):
+                        cur = ld[i] if i < len(ld) else [0, 0]
+                        add("ML", f"ml_q{a}{b}_l{i}_dx_um",
+                            f"ML({a},{b}) {pos[i]}렌즈 X", "um",
+                            cur[0], 0.0, round(_pp * 0.04, 4))
+                        add("ML", f"ml_q{a}{b}_l{i}_dy_um",
+                            f"ML({a},{b}) {pos[i]}렌즈 Y", "um",
+                            cur[1], 0.0, round(_pp * 0.04, 4))
 
     # 이산(카테고리) — LHS 로 못 흔듦, 후보별 별도 실행·비교
     if dti:

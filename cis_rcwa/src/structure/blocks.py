@@ -405,12 +405,20 @@ class MlBlock:
                 qn = float(sp.get("power", 0) or 0)        # quad별 superellipse 지수 (0=전역)
                 qdx = float(sp.get("dx_um", 0) or 0)       # quad별 위치 오프셋 (µm)
                 qdy = float(sp.get("dy_um", 0) or 0)
+                ldxy = sp.get("lens_dxy") or []            # 렌즈별 [dx,dy] (add 순서)
                 x0, y0 = qx * 2 * p, qy * 2 * p
                 cx, cy = x0 + p, y0 + p
-                add = lambda ccx, ccy, ax, ay: out.append(
-                    {"cx": ccx + qdx, "cy": ccy + qdy, "ax": ax * sc, "ay": ay * sc,
-                     **({"h": qh} if qh > 0 else {}),
-                     **({"power": qn} if qn > 0 else {})})
+                li = [0]                                   # quad 내 렌즈 인덱스
+
+                def add(ccx, ccy, ax, ay):
+                    off = ldxy[li[0]] if li[0] < len(ldxy) else (0, 0)
+                    out.append(
+                        {"cx": ccx + qdx + float(off[0] or 0),
+                         "cy": ccy + qdy + float(off[1] or 0),
+                         "ax": ax * sc, "ay": ay * sc,
+                         **({"h": qh} if qh > 0 else {}),
+                         **({"power": qn} if qn > 0 else {})})
+                    li[0] += 1
                 if sh == "2x2":
                     add(cx, cy, p, p)
                 elif sh == "1x1":
