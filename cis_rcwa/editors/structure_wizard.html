@@ -1762,27 +1762,35 @@ async function doePoll(){
   el("doeSur").style.display=hasSur?"":"none";
   if(hasSur){ el("doeSur").href=qeApiBase()+"/api/doe/file?job="+DOE.job+"&kind=surrogate";
     try{ DOE.surrogate=await(await fetch(qeApiBase()+"/api/doe/file?job="+DOE.job+"&kind=surrogate")).json();
-      invUpdateAvail(); doeCacheRefresh();    // 새 캐시 항목이 목록에 뜨도록
+      invUpdateAvail(); doeEnableDownstream(); doeCacheRefresh();    // 결과탭 활성 + 캐시목록 갱신
       el("doeNote").textContent=(s.cached?"✓ 캐시 적중 — 재계산 생략 · ":"✓ surrogate 저장(캐시됨) · ")
         +"결과 페이지에서 🎯 역설계 사용 가능"; }catch(_){}
   }
 }
 // 브라우저가 꺼졌다 다시 열려도, 서버에서 계속 돌던(혹은 끝난) DOE 에 자동 재접속
+// surrogate 가 (재접속/캐시로드/완료로) 살아나면 하위 단계(시뮬~결과) 네비 활성화 —
+// 브라우저 재시작 후 2→3 을 다시 걷지 않고 곧장 5결과(역설계/민감도)로 갈 수 있게.
+function doeEnableDownstream(){
+  ["wpage-build","wpage-sim","wpage-set","wpage-run","wpage-result"].forEach(id=>pageReached[id]=true);
+  renderNav();
+}
 async function doeReattach(){
   if(DOE.running) return;                       // 이미 이 세션에서 물고 있음
   let s; try{ s=await (await fetch(qeApiBase()+"/api/doe/last")).json(); }catch(e){ return; }
   if(!s || !s.job) return;
   if(s.state==="running"){
     doeAttach(s.job, s.doe_total, "🔄 실행 중이던 작업에 재접속 — "+(s.note||""));
+    doeEnableDownstream();
   } else if((s.state==="done"||s.state==="cancelled") && s.r2_G_mid!=null){
     DOE.job=s.job;
     el("doeProg").style.display="none"; el("doeDone").style.display="";
+    const emu = s.model? ` · 에뮬레이터[${s.model}] CV R²=${s.r2_cv_mean}` : ` · R²(G)=${s.r2_G_mid}`;
     el("doeSummary").textContent="🔄 이전 실행 결과 · "+(s.state==="cancelled"?"중단됨 · ":"완료 · ")
-      +`${s.doe_done||"?"}/${s.doe_total||"?"}조건 · R²(G)=${s.r2_G_mid}`;
+      +`${s.doe_done||"?"}/${s.doe_total||"?"}조건${emu}`;
     el("doeCsv").href=qeApiBase()+"/api/doe/file?job="+s.job+"&kind=csv";
     el("doeSur").style.display=""; el("doeSur").href=qeApiBase()+"/api/doe/file?job="+s.job+"&kind=surrogate";
     try{ DOE.surrogate=await(await fetch(qeApiBase()+"/api/doe/file?job="+s.job+"&kind=surrogate")).json();
-      invUpdateAvail(); }catch(_){}
+      invUpdateAvail(); doeEnableDownstream(); }catch(_){}
   }
 }
 el("doeCancel").onclick=()=>{ if(!DOE.job)return;
@@ -1802,11 +1810,11 @@ async function doeCacheLoadSel(){ const k=el("doeCacheSel").value; if(!k){ alert
   let sur; try{ sur=await(await fetch(qeApiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k))).json(); }
   catch(e){ alert("불러오기 실패: "+e.message); return; }
   if(sur&&sur.error){ alert("불러오기 실패: "+sur.error); return; }
-  DOE.surrogate=sur; invUpdateAvail();
+  DOE.surrogate=sur; invUpdateAvail(); doeEnableDownstream();
   el("doeDone").style.display=""; el("doeProg").style.display="none";
   el("doeSummary").textContent=`💾 저장된 surrogate 불러옴 (계산 0회) · key ${k.slice(0,8)}`;
   el("doeSur").style.display=""; el("doeSur").href=qeApiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k);
-  alert("불러왔습니다. 결과 페이지의 🎯 역설계 / 원인분석 민감도에서 바로 사용됩니다."); }
+  alert("불러왔습니다. 상단 5결과 탭이 활성화됐습니다 — 🎯 역설계 / 원인분석 민감도에서 바로 사용됩니다."); }
 if(el("doeCacheRefresh")) el("doeCacheRefresh").onclick=doeCacheRefresh;
 if(el("doeCacheLoad")) el("doeCacheLoad").onclick=doeCacheLoadSel;
 // ===== surrogate DB 위치 지정 / 동기화 =====
@@ -1916,9 +1924,12 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v90";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v91";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)
 fetchServerMaterials().then(n=>{ if(n){ save(); renderStep(); renderViews(); } updateMatBadge(); });
+// 브라우저를 껐다 다시 열어도 이전 DOE/surrogate 를 자동 복구 → 2→3 을 다시 걷지 않고
+// 상단 5결과 탭에서 곧장 역설계/민감도 사용. 서버 켜져 있을 때만.
+(async()=>{ try{ if(await qePing()){ await doeReattach(); doeCacheRefresh(); } }catch(_){} })();
 </script>

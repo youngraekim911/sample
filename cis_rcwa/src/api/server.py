@@ -553,7 +553,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "unknown job"}, 404); return
             self._json({k: job[k] for k in
                         ("state", "progress", "note", "error", "eta_s", "elapsed_s",
-                         "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device")
+                         "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
+                         "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes")
                         if k in job})
         elif u.path == "/api/doe/last":
             # 브라우저 재시작 후 재접속: 이 서버가 마지막으로 시작한 DOE 작업 상태.
@@ -563,7 +564,8 @@ class Handler(BaseHTTPRequestHandler):
             job = JOBS[LAST_DOE_JID]
             out = {k: job[k] for k in
                    ("state", "progress", "note", "error", "eta_s", "elapsed_s",
-                    "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device")
+                    "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
+                    "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes")
                    if k in job}
             out["job"] = LAST_DOE_JID
             self._json(out)
