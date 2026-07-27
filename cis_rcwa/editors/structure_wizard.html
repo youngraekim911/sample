@@ -2456,8 +2456,32 @@ function imgDiffSummary(d){
     return `<span style="font-family:var(--mono);font-weight:600;color:${ok?"inherit":"#d9534f"}">`
       +`<span style="color:${CH_HEX[c]||"inherit"}">${c}</span> ${o.diff_pct.toFixed(1)}% ${ok?"✓":"⚠"}`
       +`</span> <span class="hint">(λ${o.wl} · 위치 ${o.field} · r=${o.r})</span>`; }).join(" &nbsp; ");
+  // ── shrink 검증 관점의 반경별 판정 — diff=0 이 이상(보정 완벽), CRA 가 커지는
+  //    바깥쪽에서 자라므로 "어느 반경까지 전 채널 합격인지"가 핵심 판정선이다.
+  const perF=[];
+  for(const fkey in d.per_field){
+    const [x,y]=fkey.split(",").map(Number);
+    let worst=0, wch=null;
+    for(const c in d.onband_nm) for(const w of d.onband_nm[c]){
+      const rec=(d.per_field[fkey][String(w)]||{})[c];
+      if(rec && rec.diff_pct>worst){ worst=rec.diff_pct; wch=c; } }
+    perF.push({fkey, r:Math.hypot(x,y), worst, wch});
+  }
+  perF.sort((a,b)=>a.r-b.r);
+  let verify="";
+  if(perF.length>1){
+    const center=perF[0], firstFail=perF.find(f=>f.worst>thr);
+    let rOk=null;                                  // 이 반경까지의 '모든' 위치가 합격
+    for(const f of perF){ if(f.worst>thr) break; rOk=f.r; }
+    verify=`<br>📐 <b>shrink 보정 검증</b> <span class="hint">(diff 0%=보정 완벽 · CRA 커지는 바깥쪽에서 증가)</span> — `
+      +`중심 ${center.worst.toFixed(1)}%`
+      +(firstFail
+        ? ` · <b style="color:#2f9e4f">r ≤ ${(rOk??0).toFixed(2)} 전 채널 ✓</b> · <b style="color:#d9534f">r=${firstFail.r.toFixed(2)} 부터 ${firstFail.wch} 초과</b> (위치 ${firstFail.fkey})`
+        : ` · <b style="color:#2f9e4f">전 영역(코너 r=${perF[perF.length-1].r.toFixed(2)} 까지) 합격 ✓</b>`);
+  }
   box.innerHTML=`<b>동컬러 픽셀 diff</b> <span class="hint">— 채널(R/Gr/Gb/B)별 같은 색 픽셀 (max−min)/평균, 기준 ≤${thr}% · 각 채널은 자기 대역 λ에서 판정</span><br>`
-    +chips+` &nbsp; → <b style="color:${d.pass?"#2f9e4f":"#d9534f"}">${d.pass?"✓ 기준 만족":"⚠ 기준 초과 — shrink ratio 조정 필요"}</b>`;
+    +chips+` &nbsp; → <b style="color:${d.pass?"#2f9e4f":"#d9534f"}">${d.pass?"✓ 기준 만족":"⚠ 기준 초과 — shrink ratio 조정 필요"}</b>`
+    +verify;
   box.style.display="";
 }
 // viridis 근사(5점 선형) — NaN(미계산 타일)=회색
@@ -2555,7 +2579,7 @@ async function imgReattach(){
 }
 
 // ============================ init ============================
-const WIZ_VERSION="v111";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v112";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)
