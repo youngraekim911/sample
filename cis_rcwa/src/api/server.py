@@ -286,11 +286,13 @@ def _run_job(jid, cfg_path, p):
                 job["state"] = "cancelled"
                 return
             t0 = time.time()
-            o_te = sim.run(float(lam), theta=p["theta"], pol_te=1.0, pol_tm=0.0)
+            o_te = sim.run(float(lam), theta=p["theta"], phi=p.get("phi", 0.0),
+                           pol_te=1.0, pol_tm=0.0)
             if job.get("cancel"):                        # 편광 사이에도 반응 (체감 지연 ↓)
                 job["state"] = "cancelled"
                 return
-            o_tm = sim.run(float(lam), theta=p["theta"], pol_te=0.0, pol_tm=1.0)
+            o_tm = sim.run(float(lam), theta=p["theta"], phi=p.get("phi", 0.0),
+                           pol_te=0.0, pol_tm=1.0)
             w = 1.0 if p.get("pol") == "sum" else 0.5    # 평균(비편광 표준) | 합산(참조 호환, x2)
             R = w * (o_te["R"] + o_tm["R"])
             QE = w * (o_te["QE"] + o_tm["QE"])
@@ -562,6 +564,134 @@ def _run_doe_job(jid, cfg_path, p):
         job["state"] = "error"
 
 
+# --------------------------------------------------------------- 사광 이미지 시뮬
+LAST_IMG_JID = None
+
+
+def _cra_spec_path(product):
+    return os.path.join(APP_DIR, "data", "cra", str(product).strip() + ".yaml")
+
+
+def _run_image_job(jid, cfg_path, p):
+    """센서 전면 QE 이미지: 옥탄트 필드 격자 → 필드별 (CRA shift + F# 원뿔 적분 +
+    편광평균) unit QE → 8-fold 대칭 확장 조립 → json/png/npz 저장."""
+    job = JOBS[jid]
+    try:
+        from ..config.loader import load_config
+        from ..sim.simulator import RCWAPlaneWaveSimulator
+        from ..structure.blocks import ir_from_wizard_cfg
+        from ..sim import cra as cra_mod
+        from ..sim import octant as oc
+        cfg = load_config(cfg_path)
+        RCWAPlaneWaveSimulator._auto_model_defaults(cfg)
+        product = str(cfg.get("product", "")).strip()
+        spec = p.get("spec")
+        if not spec:
+            path = _cra_spec_path(product)
+            if not os.path.isfile(path):
+                raise ValueError(f"CRA 스펙 파일이 없습니다: data/cra/{product}.yaml "
+                                 f"— 제품 CRA yaml 을 그 위치에 넣어주세요 "
+                                 f"(예시: data/cra/qcell_demo.yaml)")
+            spec = cra_mod.load_cra_spec(path)
+        n = max(1, int(p["n"]))
+        waves = [round(p["lam0"] * 1000 + i * (p["lam1"] - p["lam0"]) * 1000
+                       / max(n - 1, 1)) for i in range(n)]
+        fields = oc.make_xy_fields_set(p["field_step"], p.get("region", "octant"))
+        ts, ps = int(p["theta_samples"]), int(p["phi_samples"])
+        total = len(fields) * len(waves) * ts * ps * 2
+        job["doe_total"] = len(fields)
+        job["doe_done"] = 0
+        base_ir = ir_from_wizard_cfg(cfg, p.get("lateral_n", 256))
+        dev = "cuda(GPU)" if torch.cuda.is_available() else "cpu"
+        job["device"] = dev
+        units = {}
+        t0 = time.time()
+        solves = {"n": 0}
+
+        def on_solve():
+            solves["n"] += 1
+            el = time.time() - t0
+            eta = el / solves["n"] * (total - solves["n"])
+            job["progress"] = solves["n"] / total
+            job["note"] = (f"[{dev}] 필드 {min(job['doe_done']+1, len(fields))}"
+                           f"/{len(fields)} · RCWA {solves['n']}/{total} · "
+                           f"남은 ~{int(eta//60)}분{int(eta % 60)}초")
+
+        for i, (x, y) in enumerate(fields):
+            if job["cancel"]:
+                break
+            u = cra_mod.unit_qe_at_field(
+                base_ir, spec, x, y, waves, nG=p["nG"], downsample=p["downsample"],
+                theta_samples=ts, phi_samples=ps,
+                on_solve=on_solve, cancel=lambda: job["cancel"])
+            if u is None:
+                break
+            units[(x, y)] = u
+            job["doe_done"] = i + 1
+        if not units:
+            raise ValueError("계산된 필드가 없습니다 (시작 직후 중단됨)")
+        labels = units[next(iter(units))]["labels"]
+        images = {}
+        meta = None
+        for w in waves:
+            uw = {f: units[f]["pixels"][int(w)] for f in units}
+            img, meta = oc.assemble_image(uw, p["field_step"], labels)
+            images[int(w)] = img
+        mean = np.nanmean(np.stack([images[int(w)] for w in waves]), axis=0)
+
+        def j2(a):                                  # NaN -> None (JS JSON 호환)
+            return [[(None if not np.isfinite(v) else round(float(v), 5))
+                     for v in row] for row in np.asarray(a)]
+        res = {"wavelengths_nm": [int(w) for w in waves],
+               "field_step": p["field_step"], "meta": meta, "labels": labels,
+               "product": product, "region": p.get("region", "octant"),
+               "theta_samples": ts, "phi_samples": ps,
+               "spec": {k: spec[k] for k in
+                        ("f_number", "ml_um_per_deg", "cf_um_per_deg")},
+               "fields": {f"{x},{y}": {"cra_deg": units[(x, y)]["cra_deg"],
+                                       "shift_ml_um": units[(x, y)]["shift_ml_um"],
+                                       "rgb": units[(x, y)]["rgb"]}
+                          for (x, y) in units},
+               "images": {str(int(w)): j2(images[int(w)]) for w in waves},
+               "mean": j2(mean)}
+        jp = os.path.join(JOBS_DIR, jid + "_image.json")
+        with open(jp, "w", encoding="utf-8") as f:
+            json.dump(res, f, ensure_ascii=False)
+        job["image"] = jp
+        try:                                        # npz (수치 후처리용)
+            zp = os.path.join(JOBS_DIR, jid + "_image.npz")
+            np.savez(zp, mean=mean,
+                     **{f"wl{int(w)}": images[int(w)] for w in waves})
+            job["npz"] = zp
+        except Exception:
+            pass
+        try:                                        # png (mean 히트맵)
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(figsize=(7, 5.4))
+            im = ax.imshow(mean, cmap="viridis")
+            ax.set_title(f"QE map (mean of {len(waves)} wavelengths)")
+            fig.colorbar(im, ax=ax, shrink=0.85)
+            pp = os.path.join(JOBS_DIR, jid + "_image.png")
+            fig.savefig(pp, dpi=120, bbox_inches="tight")
+            plt.close(fig)
+            job["png"] = pp
+        except Exception:
+            pass
+        job["image_ready"] = True
+        mn, mx = float(np.nanmin(mean)), float(np.nanmax(mean))
+        job["elapsed_s"] = round(time.time() - t0, 1)
+        job["state"] = "cancelled" if job["cancel"] else "done"
+        job["note"] = (f"{'중단(부분 조립)' if job['cancel'] else '완료'} · "
+                       f"필드 {job['doe_done']}/{len(fields)} · QE {mn:.3f}~{mx:.3f} · "
+                       f"{job['elapsed_s']}s")
+    except Exception as e:
+        job["error"] = f"{type(e).__name__}: {e}"
+        job["trace"] = traceback.format_exc()[-2000:]
+        job["state"] = "error"
+
+
 # --------------------------------------------------------------- BO(최적 조건 찾기)
 def _run_bo_job(jid, p):
     """베이지안 최적화 1라운드: 저장된 모델(키)의 원자료 -> GP+EI 로 다음 실험
@@ -780,7 +910,7 @@ class Handler(BaseHTTPRequestHandler):
                         ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                          "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
                          "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed",
-                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening", "bo")
+                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening", "bo", "image_ready")
                         if k in job})
         elif u.path == "/api/doe/last":
             # 브라우저 재시작 후 재접속: 이 서버가 마지막으로 시작한 DOE 작업 상태.
@@ -792,7 +922,7 @@ class Handler(BaseHTTPRequestHandler):
                    ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                     "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
                     "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed",
-                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening", "bo")
+                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening", "bo", "image_ready")
                    if k in job}
             out["job"] = LAST_DOE_JID
             self._json(out)
@@ -809,6 +939,56 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/boot/status":
             # 부트(로딩) 화면이 본 서버 전환을 감지할 때 사용 — steps 없이 ready 만
             self._json({"ready": True})
+        elif u.path == "/api/cra/spec":
+            # 제품 CRA 스펙 조회 — data/cra/<제품명>.yaml (파일명=제품명 자동 바인딩)
+            prod = (parse_qs(u.query).get("product") or [""])[0].strip()
+            path = _cra_spec_path(prod)
+            cra_dir = os.path.join(APP_DIR, "data", "cra")
+            avail = sorted(fn[:-5] for fn in (os.listdir(cra_dir)
+                                              if os.path.isdir(cra_dir) else [])
+                           if fn.endswith(".yaml"))
+            if not prod or not os.path.isfile(path):
+                self._json({"found": False, "product": prod,
+                            "path": f"data/cra/{prod or '<제품명>'}.yaml",
+                            "available": avail})
+                return
+            try:
+                from ..sim.cra import load_cra_spec
+                sp = load_cra_spec(path)
+                self._json({"found": True, "product": prod,
+                            "path": f"data/cra/{prod}.yaml", "available": avail,
+                            "f_number": sp["f_number"],
+                            "ml_um_per_deg": sp["ml_um_per_deg"],
+                            "cf_um_per_deg": sp["cf_um_per_deg"],
+                            "cra_corner_deg": sp["module"][-1][1],
+                            "n_rows": len(sp["module"]),
+                            "sensor_same": sp["module"] == sp["sensor"]})
+            except Exception as e:
+                self._json({"found": False, "product": prod, "available": avail,
+                            "error": f"파일 파싱 실패: {e}"})
+        elif u.path == "/api/image/file":
+            q = parse_qs(u.query)
+            jid = (q.get("job") or [""])[0]
+            kind = (q.get("kind") or ["json"])[0]
+            job = JOBS.get(jid)
+            keymap = {"json": ("image", "application/json"),
+                      "png": ("png", "image/png"),
+                      "npz": ("npz", "application/octet-stream")}
+            k, ct = keymap.get(kind, keymap["json"])
+            if not job or k not in job:
+                self.send_response(404); self.end_headers(); return
+            self._file(job[k], ct)
+        elif u.path == "/api/image/last":
+            # 페이지 이동/재시작 후 마지막 이미지 잡 재접속
+            if not LAST_IMG_JID or LAST_IMG_JID not in JOBS:
+                self._json({"job": None}); return
+            job = JOBS[LAST_IMG_JID]
+            out = {k: job[k] for k in
+                   ("state", "progress", "note", "error", "elapsed_s",
+                    "doe_done", "doe_total", "image_ready", "device")
+                   if k in job}
+            out["job"] = LAST_IMG_JID
+            self._json(out)
         elif u.path == "/api/doe/cache":
             # 저장된 surrogate 목록 (DB) — 최신순 메타
             from ..sim import surrogate_cache as sc
@@ -981,6 +1161,7 @@ class Handler(BaseHTTPRequestHandler):
                      "downsample": "auto" if str(ds_req) == "auto" else max(1, int(ds_req)),
                      "quality": str(data.get("quality", "std")),
                      "theta": _num("theta", 0.0),
+                     "phi": _num("phi", 0.0),
                      "pol": str(data.get("pol", "avg"))}
             except (TypeError, ValueError) as e:
                 self._json({"error": f"파라미터 오류: {e}"}, 400); return
@@ -1046,6 +1227,40 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(_doe_estimate(data))
             except Exception as e:
                 self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+        elif u.path == "/api/image":
+            # 🌈 사광·이미지 시뮬 시작 — 필드 격자 × 원뿔 적분 × 파장
+            yaml_text = data.get("yaml") or ""
+            if not yaml_text.strip():
+                self._json({"error": "yaml 이 비었습니다"}, 400); return
+            try:
+                ng = max(9, int(data.get("nG", 101)))
+                ip = {"field_step": float(data.get("field_step", 0.2)),
+                      "region": str(data.get("region", "octant")),
+                      "lam0": float(data.get("lam0", 0.45)),
+                      "lam1": float(data.get("lam1", 0.65)),
+                      "n": max(1, min(8, int(data.get("n", 3)))),
+                      "nG": ng if ng % 2 else ng + 1,
+                      "downsample": max(1, int(data.get("downsample", 2))),
+                      "theta_samples": max(1, min(7, int(data.get("theta_samples", 3)))),
+                      "phi_samples": max(1, min(7, int(data.get("phi_samples", 3)))),
+                      "lateral_n": max(64, int(data.get("lateral_n", 256)))}
+                assert ip["field_step"] in (0.05, 0.1, 0.2), "field_step"
+                assert ip["region"] in ("octant", "full"), "region"
+            except (TypeError, ValueError, AssertionError) as e:
+                self._json({"error": f"파라미터 오류: {e}"}, 400); return
+            global LAST_IMG_JID
+            os.makedirs(JOBS_DIR, exist_ok=True)
+            jid = "img" + uuid.uuid4().hex[:9]
+            cfg_path = os.path.join(JOBS_DIR, jid + ".yaml")
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                f.write(yaml_text)
+            JOBS[jid] = {"state": "running", "progress": 0.0,
+                         "note": "구조/스펙 준비중…", "error": None, "cancel": False,
+                         "params": ip}
+            LAST_IMG_JID = jid
+            threading.Thread(target=_run_image_job, args=(jid, cfg_path, ip),
+                             daemon=True).start()
+            self._json({"job": jid})
         elif u.path == "/api/bo":
             # 🎯 최적 조건 찾기(BO) 시작 — 저장된 모델 키 + 유저 언어 목표
             try:

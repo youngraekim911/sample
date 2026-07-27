@@ -20,6 +20,123 @@ def cra_of_field(field, field_cra_deg):
     return float(np.interp(field, xs, tab))
 
 
+def _interp_table(field, table):
+    """table = [[field, cra_deg], ...] (비등간격 허용) -> 선형보간 CRA."""
+    t = np.asarray(table, float)
+    return float(np.interp(field, t[:, 0], t[:, 1]))
+
+
+def load_cra_spec(path):
+    """제품 CRA 스펙 yaml 로드 — 사내 제품 파일 형식을 그대로 지원.
+
+    형식(예):
+        project_id: 제품명
+        spec:
+          module_cra: {columns:[field, image_height_um, cra_deg], data:[[...],...]}
+          sensor_cra: *module_cra          # 다르면 별도 표
+          ml_shrink_ratio: 0.0188e-6       # [m/deg]
+          cf_shrink_ratio: 0.0085e-6
+          f_number: 2.08
+    module_cra = 빛의 실제 입사각(θ,φ 계산용), sensor_cra = ML/CF shift 크기용.
+    sensor 가 없으면 module 로 대체. 보간은 선형(np.interp — 단조 표에 안전;
+    poly6th 지정은 무시하고 선형 사용).
+    반환: {module:[[f,cra]..], sensor:[[f,cra]..], ml_um_per_deg, cf_um_per_deg,
+           f_number, product}
+    """
+    import yaml
+    with open(path, encoding="utf-8") as f:
+        doc = yaml.safe_load(f) or {}
+    sp = doc.get("spec") or doc                       # spec 없이 평평해도 허용
+
+    def table(node):
+        if node is None:
+            return None
+        cols = [str(c).strip() for c in (node.get("columns") or [])]
+        data = node.get("data") or []
+        fi = cols.index("field") if "field" in cols else 0
+        ci = cols.index("cra_deg") if "cra_deg" in cols else len(cols) - 1
+        return [[float(r[fi]), float(r[ci])] for r in data]
+
+    mod = table(sp.get("module_cra"))
+    if mod is None and sp.get("field_cra_deg"):       # 간이 형식(리스트)도 허용
+        tab = [float(v) for v in sp["field_cra_deg"]]
+        mod = [[i / (len(tab) - 1), v] for i, v in enumerate(tab)]
+    if not mod:
+        raise ValueError("module_cra 표가 없습니다 (columns/data 형식)")
+    sen = table(sp.get("sensor_cra")) or mod          # 없으면 module 공용
+
+    def ratio(*keys, default=0.0):
+        for k in keys:
+            if sp.get(k) is not None:
+                v = float(sp[k])
+                return v * 1e6 if abs(v) < 1e-3 else v   # m/deg -> µm/deg 자동 인식
+        return default
+    return {"product": str(doc.get("project_id", "")),
+            "module": mod, "sensor": sen,
+            "ml_um_per_deg": ratio("ml_shrink_ratio", "shrink_ml_um_per_deg"),
+            "cf_um_per_deg": ratio("cf_shrink_ratio", "shrink_cfgrid_um_per_deg"),
+            "f_number": float(sp.get("f_number", 2.0)),
+            "shift_sign": float(sp.get("shift_sign", 1.0))}
+
+
+def unit_qe_at_field(base_ir, spec, x_field, y_field, wavelengths_nm,
+                     nG=101, downsample=2, materials_dir=None,
+                     theta_samples=3, phi_samples=3,
+                     on_solve=None, cancel=None):
+    """센서 필드 (x,y) 한 지점의 unit QE — CRA shift + F# 원뿔 적분 + 편광 평균.
+
+    x∈[-0.8,0.8], y∈[-0.6,0.6] 정규화 좌표(코너 r=1). 흐름:
+      r=√(x²+y²) → module CRA(입사 θ)·sensor CRA(shift 크기) → ML/CF 를 빛 쪽으로
+      shift → calc_mra 원뿔점 (θ_i,φ_i,w_i) → 각 점 TE/TM RCWA → 가중합.
+    반환: {"cra_deg","azimuth_deg","shift_ml_um","shift_cf_um",
+           "pixels":{wl: npx×npx list}, "rgb":{wl:{R,G,B}}, "labels": npx×npx}
+    """
+    from .cone import calc_mra
+    from .simulator import RCWAPlaneWaveSimulator
+    from ..structure.blocks import apply_cra_shift
+
+    r = math.hypot(float(x_field), float(y_field))
+    az = math.degrees(math.atan2(float(y_field), float(x_field))) if r > 1e-12 else 0.0
+    cra_mod = _interp_table(r, spec["module"])        # 실제 입사각
+    cra_sen = _interp_table(r, spec["sensor"])        # shift 산출용
+    sign = float(spec.get("shift_sign", 1.0))
+    mag_ml = sign * float(spec["ml_um_per_deg"]) * cra_sen
+    mag_cf = sign * float(spec["cf_um_per_deg"]) * cra_sen
+    azr = math.radians(az)
+    ux, uy = -math.cos(azr), -math.sin(azr)           # 광원 쪽(전파 반대)으로 마중
+    ir_f = apply_cra_shift(base_ir, shift_ml_um=(mag_ml * ux, mag_ml * uy),
+                           shift_cfgrid_um=(mag_cf * ux, mag_cf * uy))
+    sim = RCWAPlaneWaveSimulator(ir_f, nG=nG, downsample=downsample,
+                                 materials_dir=materials_dir)
+    det = ir_f.detector
+    npx = int(round(math.sqrt(len(det.pixel_labels))))
+    labels = [[det.pixel_labels[rr * npx + cc] for cc in range(npx)]
+              for rr in range(npx)]
+
+    mra = calc_mra(cra_mod, az, theta_samples, phi_samples,
+                   f_number=float(spec.get("f_number", 2.0)))
+    out_pix, out_rgb = {}, {}
+    for w in wavelengths_nm:
+        acc = np.zeros((npx, npx))
+        rgb = {"R": 0.0, "G": 0.0, "B": 0.0}
+        for th, ph, wt in zip(mra["theta_deg"], mra["phi_deg"], mra["weight"]):
+            for pol in ((1.0, 0.0), (0.0, 1.0)):
+                if cancel and cancel():
+                    return None
+                o = sim.run(w / 1000.0, theta=th, phi=ph,
+                            pol_te=pol[0], pol_tm=pol[1])
+                acc += 0.5 * wt * np.asarray(o["QE_pixels"], float).reshape(npx, npx)
+                for L in "RGB":
+                    rgb[L] += 0.5 * wt * float(o["QE_rgb"].get(L, 0.0))
+                if on_solve:
+                    on_solve()
+        out_pix[int(w)] = [[round(float(v), 5) for v in row] for row in acc]
+        out_rgb[int(w)] = {L: round(rgb[L], 5) for L in "RGB"}
+    return {"cra_deg": round(cra_mod, 3), "azimuth_deg": round(az, 2),
+            "shift_ml_um": round(mag_ml, 4), "shift_cf_um": round(mag_cf, 4),
+            "pixels": out_pix, "rgb": out_rgb, "labels": labels}
+
+
 def field_qe_sweep(base_ir, cra_cfg, wavelengths, fields=None,
                    materials_dir=None, nG=161, downsample=2, verbose=True):
     """필드별 QE 스윕. base_ir 는 ir_from_wizard_cfg 산출(layer_tags 필수).
@@ -54,14 +171,21 @@ def field_qe_sweep(base_ir, cra_cfg, wavelengths, fields=None,
         ir_f = apply_cra_shift(base_ir, shift_ml_um=shift_ml, shift_cfgrid_um=shift_cf)
         sim = RCWAPlaneWaveSimulator(ir_f, nG=nG, downsample=downsample,
                                      materials_dir=materials_dir)
+        # F# 원뿔 적분 (theta/phi_samples 미지정=1×1 → 기존 단일각과 동일)
+        from .cone import calc_mra
+        mra = calc_mra(cra, math.degrees(az),
+                       int(cra_cfg.get("theta_samples", 1)),
+                       int(cra_cfg.get("phi_samples", 1)),
+                       f_number=float(cra_cfg.get("f_number", 2.0)))
         qe = {}
         for w in wavelengths:
             acc = {"R": 0.0, "G": 0.0, "B": 0.0}
-            for pol in ((1.0, 0.0), (0.0, 1.0)):         # 편광평균
-                o = sim.run(w / 1000.0, theta=cra, phi=math.degrees(az),
-                            pol_te=pol[0], pol_tm=pol[1])
-                for L in "RGB":
-                    acc[L] += 0.5 * o["QE_rgb"][L]
+            for th, ph, wt in zip(mra["theta_deg"], mra["phi_deg"], mra["weight"]):
+                for pol in ((1.0, 0.0), (0.0, 1.0)):     # 편광평균
+                    o = sim.run(w / 1000.0, theta=th, phi=ph,
+                                pol_te=pol[0], pol_tm=pol[1])
+                    for L in "RGB":
+                        acc[L] += 0.5 * wt * o["QE_rgb"][L]
             qe[w] = {L: round(acc[L], 4) for L in "RGB"}
         out[f] = {"cra_deg": round(cra, 2), "shift_ml_um": round(mag_ml, 4),
                   "shift_cf_um": round(mag_cf, 4), "qe": qe}

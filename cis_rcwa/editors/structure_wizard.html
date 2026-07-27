@@ -170,7 +170,7 @@
         <button class="wtile" id="simQE"><span class="ic">📈</span><div><div class="tt">QE 시뮬레이션</div><div class="td">파장별 양자효율(R/G/B) · RCWA</div></div></button>
         <button class="wtile" id="simDOE"><span class="ic">🧪</span><div><div class="tt">DOE · Surrogate 스윕</div><div class="td">설계축을 흔들어 반응모델(에뮬레이터) 학습 — 오래 걸림(GPU/야간)</div></div></button>
         <button class="wtile" id="simExplore"><span class="ic">🔭</span><div><div class="tt">모델 탐색</div><div class="td">학습된 모델 불러와 슬라이더로 즉석 QE — RCWA 없이 실시간</div></div></button>
-        <button class="wtile soon"><span class="ic">🌈</span><div><div class="tt">각도·편광 응답 <span class="wbadge">예정</span></div><div class="td">입사각/편광별 응답 (준비중)</div></div></button>
+        <button class="wtile" id="simImg"><span class="ic">🌈</span><div><div class="tt">사광·이미지 시뮬</div><div class="td">필드별 CRA + F# 원뿔 평균 → 센서 전면 QE 맵 (옥탄트 8× 절감)</div></div></button>
         <button class="wtile soon"><span class="ic">🔬</span><div><div class="tt">근접장 분포 <span class="wbadge">예정</span></div><div class="td">구조 내부 |E|² 필드 (준비중)</div></div></button>
       </div>
     </div>
@@ -372,6 +372,63 @@
     </div>
   </div>
   <div class="wfoot"><button class="btn ghost" id="doeBack">← 시뮬 선택</button><div class="spacer"></div></div>
+</div>
+
+<!-- ══════════ 페이지 3c: 사광·이미지 시뮬 ══════════ -->
+<div class="wpage" id="wpage-img">
+  <div class="wpad">
+    <div class="wcard" style="max-width:820px">
+      <h2>🌈 사광·이미지 시뮬 <span class="hint" style="font-weight:400;text-transform:none">— 센서 전면 QE 맵</span></h2>
+      <p class="sub">센서 위치(필드)마다 CRA 로 비스듬히 들어오는 빛을, 제품 CRA 스펙에 따라
+        <b>렌즈 shift 보정 + F# 원뿔 각도 평균</b>으로 계산해 전면 QE 이미지를 만듭니다.
+        1/8 옥탄트만 계산하고 대칭으로 확장합니다 (8× 절감).</p>
+      <div id="imgGuide" class="hint" style="display:none;white-space:pre-wrap;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px"></div>
+      <div id="imgSpec" style="padding:9px 11px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;margin-bottom:10px;font-size:12px">CRA 스펙 확인중…</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 시작 (µm)<input id="imgL0" type="number" step="0.01" value="0.45" style="width:76px"></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px">λ 끝 (µm)<input id="imgL1" type="number" step="0.01" value="0.65" style="width:76px"></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="파장 수 — 이미지는 비싸서 2~3개 권장">파장 개수<input id="imgN" type="number" step="1" min="1" max="8" value="3" style="width:56px"></label>
+        <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="표준=자동. 수동=nG/downsample 직접">품질
+          <select id="imgQual" style="width:120px"><option value="std" selected>표준</option><option value="manual">수동(고급)</option></select></label>
+        <details id="imgQAdv" style="display:none"><summary class="hint">고급</summary>
+          <div style="display:flex;gap:10px;align-items:flex-end;padding-top:6px">
+            <label class="hint" style="display:flex;flex-direction:column;gap:3px">nG<input id="imgNG" type="number" step="2" min="9" value="101" style="width:76px"></label>
+            <label class="hint" style="display:flex;flex-direction:column;gap:3px">downsample<input id="imgDS" type="number" step="1" min="1" value="2" style="width:56px"></label>
+          </div></details>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:9px">
+        <span class="hint">필드 격자:</span>
+        <button class="btn primary" id="imgFs2" title="1옥탄트 14필드 — 빠른 전면 지도">성긴 0.2 ★</button>
+        <button class="btn" id="imgFs1" title="1옥탄트 45필드 — 정밀 지도 (4배 느림)">촘촘 0.1</button>
+        <span style="width:1px;height:22px;background:var(--line)"></span>
+        <span class="hint">원뿔 평균:</span>
+        <button class="btn" id="imgC1" title="주광선 1점만 — 빠른 근사">끔 1×1</button>
+        <button class="btn primary" id="imgC3" title="F# 원뿔 9점 가중평균 — 권장">표준 3×3 ★</button>
+        <button class="btn" id="imgC5" title="25점 — 최고 정밀">정밀 5×5</button>
+        <button class="btn primary" id="imgRun" style="margin-left:auto">▶ 이미지 계산 시작</button>
+        <button class="btn" id="imgCancel" style="display:none">■ 중단</button>
+      </div>
+      <div class="hint" id="imgEst" style="margin-top:7px"></div>
+      <div id="imgProg" style="display:none;margin-top:10px">
+        <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:8px;height:12px;overflow:hidden">
+          <div id="imgBar" style="height:100%;width:0%;background:var(--accent);transition:width .4s"></div></div>
+        <div id="imgNote" class="hint" style="margin-top:5px">…</div>
+      </div>
+      <div id="imgDone" style="display:none;margin-top:12px">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <span class="hint" id="imgSummary"></span>
+          <div class="spacer" style="flex:1"></div>
+          <label class="hint">보기 <select id="imgWlSel" style="min-width:110px"></select></label>
+          <a class="btn ghost" id="imgDlPng" download="qe_image.png">⤓ PNG</a>
+          <a class="btn ghost" id="imgDlNpz" download="qe_image.npz">⤓ NPZ</a>
+          <a class="btn ghost" id="imgDlJson" download="qe_image.json">⤓ JSON</a>
+        </div>
+        <canvas id="imgCv" width="880" height="640" style="width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel)"></canvas>
+        <div class="hint" id="imgScale" style="margin-top:5px;font-family:var(--mono)"></div>
+      </div>
+    </div>
+  </div>
+  <div class="wfoot"><button class="btn ghost" id="imgBack">← 시뮬 선택</button><div class="spacer"></div></div>
 </div>
 
 <!-- ══════════ 페이지 4: 실행중 (로딩 게이지) ══════════ -->
@@ -1691,8 +1748,10 @@ function goPage(id){
   curPage=id; pageReached[id]=true;
   for(const p of PAGES){ const e=el(p.id); if(e)e.classList.toggle("on", p.id===id); }
   const dz=el("wpage-doe"); if(dz) dz.classList.toggle("on", id==="wpage-doe");   // 별칭 페이지
+  const iz=el("wpage-img"); if(iz) iz.classList.toggle("on", id==="wpage-img");   // 별칭 페이지
   if(id==="wpage-set"){ lastSetPage=id; qeEnterSettings(); }
   if(id==="wpage-doe"){ lastSetPage=id; doeEnterSettings(); }
+  if(id==="wpage-img"){ lastSetPage=id; imgEnterSettings(); }
   if(id==="wpage-build"){ renderStep(); renderViews(); }
   if(id==="wpage-result"){ drawQEChart(); qeTableFill();
     invBind(); invUpdateAvail(); if(DOE.surrogate&&INV.nodes.length) drawInvChart(); }
@@ -1700,11 +1759,11 @@ function goPage(id){
 }
 function renderNav(){
   const nav=el("wnav"); if(!nav)return; nav.innerHTML="";
-  const navCur=(curPage==="wpage-doe")?"wpage-set":curPage;    // DOE 설정도 '3 설정' 칩
+  const navCur=(curPage==="wpage-doe"||curPage==="wpage-img")?"wpage-set":curPage;  // DOE/이미지 설정도 '3 설정' 칩
   const ci=pageIdx(navCur);
   PAGES.forEach((p,i)=>{
     if(i>0) nav.appendChild(h("span",{class:"wsep"},["›"]));
-    const reached=!!pageReached[p.id]||(p.id==="wpage-set"&&pageReached["wpage-doe"]);
+    const reached=!!pageReached[p.id]||(p.id==="wpage-set"&&(pageReached["wpage-doe"]||pageReached["wpage-img"]));
     const chip=h("div",{class:"wstep"+(p.id===navCur?" on":(reached&&i<ci?" done":""))+(reached?"":" disabled")},
       [h("span",{class:"wn"},[p.n]), p.label]);
     if(reached) chip.onclick=()=>goPage(p.id==="wpage-set"?lastSetPage:p.id);
@@ -2237,13 +2296,169 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
   out.innerHTML=`<div style="font-weight:600;margin-bottom:6px">제안 구조 (현재 구조 기준 변화량 · 잔차 RMS=${r.residual_rms})</div>
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
+// ===== 🌈 사광·이미지 시뮬 — 필드격자 × CRA shift × F# 원뿔 → 센서 전면 QE 맵 =====
+const IMG={fs:0.2,cone:3,job:null,timer:null,running:false,res:null,spec:null};
+el("simImg").onclick=()=>goPage("wpage-img");
+el("imgBack").onclick=()=>goPage("wpage-sim");
+function imgFieldCount(step){ let n=0; const eps=1e-9;               // 1옥탄트(x≥y≥0)
+  for(let y=0;y<=0.6+eps;y+=step) for(let x=0;x<=0.8+eps;x+=step) if(x>=y-eps)n++;
+  return n; }
+function imgSetFs(v){ IMG.fs=v; el("imgFs2").classList.toggle("primary",v===0.2);
+  el("imgFs1").classList.toggle("primary",v===0.1); imgEstUpdate(); }
+function imgSetCone(v){ IMG.cone=v;
+  [["imgC1",1],["imgC3",3],["imgC5",5]].forEach(([id,c])=>el(id).classList.toggle("primary",c===v));
+  imgEstUpdate(); }
+el("imgFs2").onclick=()=>imgSetFs(0.2); el("imgFs1").onclick=()=>imgSetFs(0.1);
+el("imgC1").onclick=()=>imgSetCone(1); el("imgC3").onclick=()=>imgSetCone(3); el("imgC5").onclick=()=>imgSetCone(5);
+el("imgQual").onchange=()=>{ const m=el("imgQual").value==="manual";
+  el("imgQAdv").style.display=m?"block":"none"; el("imgQAdv").open=m; imgEstUpdate(); };
+["imgL0","imgL1","imgN","imgNG","imgDS"].forEach(id=>el(id).addEventListener("input",imgEstUpdate));
+function imgCond(){ const m=el("imgQual").value==="manual";           // 이미지 전용 품질 (QE/DOE 와 분리)
+  return { nG: m? Math.max(9,2*Math.floor((+el("imgNG").value||101)/2)+1) : 101,
+           downsample: m? Math.max(1,+el("imgDS").value||2) : 2 }; }
+function imgEstUpdate(){ const c=imgCond(), f=imgFieldCount(IMG.fs);
+  const n=Math.max(1,Math.min(8,+el("imgN").value||3));
+  const solves=f*n*IMG.cone*IMG.cone*2;
+  const t=solves*0.9*Math.pow(c.nG/101,2.2);                          // CPU 실측(≈0.9s/solve @nG101) 기준
+  el("imgEst").textContent=`옥탄트 필드 ${f}개 × λ${n} × 원뿔 ${IMG.cone}×${IMG.cone} × 편광2 = RCWA ${solves}회`
+    +` · 예상 ~${fmtSec(t)} (CPU 기준 · GPU면 단축 · 전체 이미지는 대칭 확장이라 8배 절약)`; }
+// 설정 페이지 진입 — 서버 확인 + 제품 CRA 스펙 상태 + 재접속
+async function imgEnterSettings(){
+  const g=el("imgGuide"), p=await qePing();
+  if(!p){ g.style.display="block"; el("imgRun").disabled=true;
+    g.textContent="RCWA 서버가 꺼져 있습니다. 터미널에서 아래 한 줄을 실행하세요:\n\n  cd cis_rcwa && python app.py";
+    el("imgSpec").textContent="서버 연결 후 제품 CRA 스펙을 확인합니다."; return; }
+  g.style.display="none"; el("imgRun").disabled=IMG.running;
+  imgEstUpdate(); await imgSpecCheck(); imgReattach();
+}
+async function imgSpecCheck(){
+  const box=el("imgSpec"); box.textContent="CRA 스펙 확인중…";
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/cra/spec?product="+encodeURIComponent((S.product||"").trim()))).json(); }
+  catch(e){ box.textContent="스펙 조회 실패: "+e.message; return; }
+  IMG.spec=r;
+  if(r.found){
+    box.innerHTML=`✅ <b>CRA 스펙 연결됨</b> — <span style="font-family:var(--mono)">${r.path}</span> &nbsp;`
+      +`<span class="hint">F# ${r.f_number} · 코너 CRA ${r.cra_corner_deg}° · shift ML ${(+r.ml_um_per_deg).toFixed(4)} / CF ${(+r.cf_um_per_deg).toFixed(4)} µm/deg`
+      +` · sensor_cra ${r.sensor_same?"= module 공용":"별도 표"}</span>`;
+    if(!IMG.running) el("imgRun").disabled=false;
+  } else {
+    const av=(r.available||[]).length?`<br><span class="hint">지금 있는 스펙: <b>${r.available.join(", ")}</b> — 상단 제품명을 이 중 하나로 맞추거나 새 yaml 을 추가하세요.</span>`:"";
+    box.innerHTML=`⚠ <b>제품 CRA 스펙 파일이 없습니다</b> — <span style="font-family:var(--mono)">${r.path}</span><br>`
+      +`<span class="hint">제품명(화면 상단 입력창)과 같은 이름의 yaml 을 <span style="font-family:var(--mono)">data/cra/</span> 폴더에 넣으면 자동 연결됩니다.`
+      +` 형식 예시: <span style="font-family:var(--mono)">data/cra/qcell_demo.yaml</span> (module_cra 표 + ml/cf_shrink_ratio + f_number)</span>${av}`
+      +(r.error?`<br><span style="color:#c9531a">${r.error}</span>`:"");
+    el("imgRun").disabled=true;
+  }
+}
+el("imgRun").onclick=async()=>{ if(IMG.running)return;
+  await fetchServerMaterials();                                       // run 직전 물질 최신화 (QE/DOE 와 동일 규약)
+  const miss=usedMats().filter(matMissing);
+  if(miss.length){ alert("❌ 물질 폴더에 없는 물질: "+miss.join(", ")); return; }
+  const lz=await lintStruct();
+  if(lz && lz.errors && lz.errors.length){ alert("❌ 구조 오류 (수정 후 실행):\n\n• "+lz.errors.join("\n• ")); return; }
+  if(lz && lz.warnings && lz.warnings.length && !confirm("⚠ 구조 경고:\n\n• "+lz.warnings.join("\n• ")+"\n\n그래도 실행할까요?")) return;
+  const c=imgCond();
+  const body={ yaml:structYAML(), field_step:IMG.fs, region:"octant",
+    lam0:+el("imgL0").value, lam1:+el("imgL1").value, n:+el("imgN").value||3,
+    nG:c.nG, downsample:c.downsample, theta_samples:IMG.cone, phi_samples:IMG.cone };
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/image",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
+  catch(e){ alert("서버 요청 실패: "+e.message); return; }
+  if(r.error){ alert("❌ "+r.error); return; }
+  imgAttach(r.job,"시작 — 구조/스펙 준비중…"); };
+function imgAttach(job,note){ IMG.job=job; IMG.running=true; IMG.res=null;
+  el("imgRun").disabled=true;
+  el("imgCancel").style.display=""; el("imgCancel").disabled=false; el("imgCancel").textContent="■ 중단";
+  el("imgProg").style.display=""; el("imgDone").style.display="none";
+  el("imgBar").style.width="0%"; el("imgNote").textContent=note||"상태 확인중…";
+  if(IMG.timer) clearInterval(IMG.timer);
+  IMG.timer=setInterval(imgPoll,1500); imgPoll(); }
+async function imgPoll(){
+  let s; try{ s=await(await fetch(qeApiBase()+"/api/doe/status?job="+IMG.job)).json(); }catch(e){ return; }
+  if(s && s.error && !s.state){ clearInterval(IMG.timer); IMG.running=false;
+    el("imgRun").disabled=false; el("imgCancel").style.display="none";
+    el("imgNote").textContent="작업을 찾을 수 없음 (서버 재시작?) — 다시 실행하세요."; return; }
+  el("imgBar").style.width=Math.round((s.progress||0)*100)+"%";
+  if(s.state==="running"){ el("imgNote").textContent=s.note||""; return; }
+  clearInterval(IMG.timer); IMG.running=false;
+  el("imgRun").disabled=false; el("imgCancel").style.display="none";
+  if(s.state==="error"){ el("imgNote").textContent="❌ "+(s.error||"오류"); return; }
+  if(!s.image_ready){ el("imgNote").textContent="중단됨 — 완성된 필드가 없어 이미지가 없습니다."; return; }
+  await imgShowDone(s); }
+async function imgShowDone(s){
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/image/file?job="+IMG.job+"&kind=json")).json(); }
+  catch(e){ el("imgNote").textContent="결과 로드 실패: "+e.message; return; }
+  IMG.res=r;
+  el("imgProg").style.display="none"; el("imgDone").style.display="";
+  const sel=el("imgWlSel"); sel.innerHTML="";
+  const om=document.createElement("option"); om.value="mean";
+  om.textContent=`평균 (${r.wavelengths_nm.length}λ)`; sel.appendChild(om);
+  r.wavelengths_nm.forEach(w=>{ const o=document.createElement("option");
+    o.value=String(w); o.textContent=w+" nm"; sel.appendChild(o); });
+  sel.onchange=imgDraw;
+  ["png","npz","json"].forEach(k=>{ const a=el("imgDl"+k[0].toUpperCase()+k.slice(1));
+    if(a) a.href=qeApiBase()+"/api/image/file?job="+IMG.job+"&kind="+k; });
+  el("imgSummary").textContent=((s&&s.state==="cancelled")?"중단(부분 조립) · ":"완료 · ")
+    +`필드 ${(s&&s.doe_done)||Object.keys(r.fields||{}).length}개 · λ ${r.wavelengths_nm.join("/")}nm`
+    +` · 원뿔 ${r.theta_samples}×${r.phi_samples} · F# ${r.spec?r.spec.f_number:"?"}`
+    +((s&&s.elapsed_s)?` · ${fmtSec(s.elapsed_s)}`:"");
+  imgDraw(); }
+// viridis 근사(5점 선형) — NaN(미계산 타일)=회색
+function imgViridis(t){ const P=[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]];
+  t=Math.max(0,Math.min(1,t)); const x=t*4, i=Math.min(3,Math.floor(x)), f=x-i, a=P[i], b=P[i+1];
+  return [a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f]; }
+function imgDraw(){
+  const r=IMG.res; if(!r) return;
+  const sel=el("imgWlSel").value;
+  const A=(sel==="mean")? r.mean : r.images[sel];
+  if(!A) return;
+  const H=A.length, W=A[0].length;
+  let mn=Infinity, mx=-Infinity;
+  for(const row of A) for(const v of row) if(v!=null){ if(v<mn)mn=v; if(v>mx)mx=v; }
+  if(!(mx>mn)) mx=mn+1e-9;
+  const off=document.createElement("canvas"); off.width=W; off.height=H;
+  const octx=off.getContext("2d"), im=octx.createImageData(W,H);
+  let k=0;
+  for(let i=0;i<H;i++) for(let j=0;j<W;j++){
+    const v=A[i][j];
+    if(v==null){ im.data[k++]=118; im.data[k++]=118; im.data[k++]=118; im.data[k++]=255; }
+    else{ const c=imgViridis((v-mn)/(mx-mn));
+      im.data[k++]=c[0]|0; im.data[k++]=c[1]|0; im.data[k++]=c[2]|0; im.data[k++]=255; } }
+  octx.putImageData(im,0,0);
+  const cv=el("imgCv"), ctx=cv.getContext("2d");
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.imageSmoothingEnabled=false;                                    // 픽셀 그대로 확대 (unit 경계 보존)
+  const sc=Math.min(cv.width/W, cv.height/H), dw=W*sc, dh=H*sc;
+  ctx.drawImage(off,(cv.width-dw)/2,(cv.height-dh)/2,dw,dh);
+  const m=r.meta||{};
+  el("imgScale").textContent=`${sel==="mean"?"평균":sel+" nm"} · QE ${mn.toFixed(3)} (보라) ~ ${mx.toFixed(3)} (노랑)`
+    +` · ${W}×${H} px = unit ${m.npx}px × 필드 ${m.unit_cols}×${m.unit_rows} · x∈[−0.8,0.8] y∈[−0.6,0.6] (코너 r=1)`; }
+el("imgCancel").onclick=()=>{ if(!IMG.job)return;
+  el("imgCancel").disabled=true; el("imgCancel").textContent="⏳ 중단중…";
+  el("imgNote").textContent="중단 요청됨 — 진행 중인 필드만 마무리하고, 완료된 필드까지 부분 조립합니다.";
+  fetch(qeApiBase()+"/api/doe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({job:IMG.job})}); };
+// 브라우저 재시작/페이지 이동 후에도 서버에서 돌던(끝난) 이미지 잡에 자동 재접속
+async function imgReattach(){
+  if(IMG.running||IMG.res||IMG._reatt) return;                       // _reatt: init/페이지진입 동시호출 가드
+  IMG._reatt=true;
+  try{
+    let s; try{ s=await(await fetch(qeApiBase()+"/api/image/last")).json(); }catch(e){ return; }
+    if(!s || !s.job) return;
+    IMG.job=s.job;
+    if(s.state==="running"){ imgAttach(s.job,"🔄 실행 중이던 이미지 계산에 재접속 — "+(s.note||"")); }
+    else if(s.image_ready){ await imgShowDone(s);
+      el("imgSummary").textContent="🔄 이전 결과 · "+el("imgSummary").textContent; }
+  } finally { IMG._reatt=false; }
+}
+
 // ============================ init ============================
-const WIZ_VERSION="v106";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v107";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)
 (function(){
-  const map={"#sim":"wpage-sim","#set":"wpage-set","#doe":"wpage-doe","#result":"wpage-result"};
+  const map={"#sim":"wpage-sim","#set":"wpage-set","#doe":"wpage-doe","#img":"wpage-img","#result":"wpage-result"};
   const tgt=map[location.hash];
   if(tgt){ ["wpage-start","wpage-build","wpage-sim"].forEach(id=>pageReached[id]=true);
     goPage(tgt);
@@ -2253,5 +2468,5 @@ renderStep(); goPage("wpage-start");           // 시작 페이지부터
 fetchServerMaterials().then(n=>{ if(n){ save(); renderStep(); renderViews(); } updateMatBadge(); });
 // 브라우저를 껐다 다시 열어도 이전 DOE/surrogate 를 자동 복구 → 2→3 을 다시 걷지 않고
 // 상단 5결과 탭에서 곧장 역설계/민감도 사용. 서버 켜져 있을 때만.
-(async()=>{ try{ if(await qePing()){ await doeReattach(); await qeReattach(); doeCacheRefresh(); } }catch(_){} })();
+(async()=>{ try{ if(await qePing()){ await doeReattach(); await qeReattach(); imgReattach(); doeCacheRefresh(); } }catch(_){} })();
 </script>
