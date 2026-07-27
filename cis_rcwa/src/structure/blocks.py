@@ -390,10 +390,12 @@ class MlBlock:
                 orient = sp.get("orient", "h")
                 qh = float(sp.get("height_um", 0) or 0)   # quad별 돔 두께 (0=전역값)
                 qn = float(sp.get("power", 0) or 0)        # quad별 superellipse 지수 (0=전역)
+                qdx = float(sp.get("dx_um", 0) or 0)       # quad별 위치 오프셋 (µm)
+                qdy = float(sp.get("dy_um", 0) or 0)
                 x0, y0 = qx * 2 * p, qy * 2 * p
                 cx, cy = x0 + p, y0 + p
                 add = lambda ccx, ccy, ax, ay: out.append(
-                    {"cx": ccx, "cy": ccy, "ax": ax * sc, "ay": ay * sc,
+                    {"cx": ccx + qdx, "cy": ccy + qdy, "ax": ax * sc, "ay": ay * sc,
                      **({"h": qh} if qh > 0 else {}),
                      **({"power": qn} if qn > 0 else {})})
                 if sh == "2x2":

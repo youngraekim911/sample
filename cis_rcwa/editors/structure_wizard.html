@@ -258,30 +258,31 @@
         <div id="doeMeterBody" class="hint" style="margin-top:6px;font-family:var(--mono);line-height:1.7">—</div>
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:10px">
-        <label class="hint" style="display:inline-flex;gap:5px;align-items:center" title="같은 구조·조건이면 저장된 surrogate 를 즉시 재사용(재계산 생략). 체크하면 무시하고 강제 재계산.">
+        <label class="hint" style="display:inline-flex;gap:5px;align-items:center" title="같은 구조·조건이면 저장된 모델을 즉시 재사용(재계산 생략). 체크하면 무시하고 강제 재계산.">
           <input type="checkbox" id="doeForce"> 캐시 무시(강제 재계산)</label>
-        <span class="hint">💾 저장된 surrogate(DB):</span>
-        <select id="doeCacheSel" class="hint" style="min-width:230px;max-width:340px"><option value="">— 없음 —</option></select>
-        <button class="btn ghost" id="doeCacheLoad" title="선택한 저장 결과를 바로 불러와 역설계/민감도에 사용 (계산 0회)">⤒ 불러오기</button>
-        <button class="btn ghost" id="doeCacheRefresh" title="목록 새로고침">↻</button>
+        <div class="spacer" style="flex:1"></div>
+        <button class="btn" id="doeLoadBtn" title="저장된 모델(DB)을 골라 바로 사용 — 계산 0회">💾 저장된 모델 불러오기</button>
+        <button class="btn ghost" id="doeDbBtn" title="모델 DB 폴더 위치 확인/변경 · 공유폴더 동기화">🗂️ DB 위치</button>
       </div>
-      <details id="doeDbBox" style="margin-top:10px">
-        <summary class="hint" style="cursor:pointer">🗂️ surrogate DB 위치 · 동기화</summary>
-        <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:8px;display:flex;flex-direction:column;gap:9px">
+      <div id="doeLoadPanel" style="display:none;margin-top:8px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px;max-height:220px;overflow:auto">
+        <div id="doeLoadList" class="hint">불러오는 중…</div>
+      </div>
+      <div id="doeDbPanel" style="display:none;margin-top:8px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px">
+        <div style="display:flex;flex-direction:column;gap:9px">
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <span class="hint" style="min-width:64px">DB 폴더</span>
             <input id="doeDbDir" class="hint" style="flex:1;min-width:280px;font-family:var(--mono)" placeholder="예) D:\\team\\surrogate_db  또는  /Volumes/share/sur_db">
-            <button class="btn ghost" id="doeDbSet" title="이 폴더를 surrogate DB 로 지정(영속). 공유 드라이브를 넣으면 팀이 같은 DB 사용">지정</button>
+            <button class="btn ghost" id="doeDbSet" title="이 폴더를 모델 DB 로 지정(영속). 공유 드라이브를 넣으면 팀이 같은 DB 사용">지정</button>
             <button class="btn ghost" id="doeDbReset" title="기본 폴더(out/surrogate_cache)로 되돌림">기본값</button>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <span class="hint" style="min-width:64px">동기화</span>
             <input id="doeDbShared" class="hint" style="flex:1;min-width:280px;font-family:var(--mono)" placeholder="공유 폴더 경로 (로컬 DB 와 양방향 병합)">
-            <button class="btn ghost" id="doeDbSync" title="공유 폴더와 서로 없는 surrogate 만 복사(양방향). 같은 key 는 내용 동일이라 충돌 없음">⇄ Sync</button>
+            <button class="btn ghost" id="doeDbSync" title="공유 폴더와 서로 없는 모델만 복사(양방향). 같은 key 는 내용 동일이라 충돌 없음">⇄ Sync</button>
           </div>
           <div id="doeDbNote" class="hint" style="font-family:var(--mono);color:var(--ink-faint)">DB 위치 확인중…</div>
         </div>
-      </details>
+      </div>
       <div id="doeProg" style="display:none;margin-top:12px">
         <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:8px;height:14px;overflow:hidden">
           <div id="doeBar" style="height:100%;width:0%;background:var(--accent,#4c8dff);transition:width .4s"></div></div>
@@ -336,24 +337,9 @@
 
     <div class="wcard" id="invCard" style="max-width:920px;margin-top:14px">
       <h2>🎯 역설계 — 목표 QE → 구조</h2>
-      <p class="sub">원하는 QE 곡선을 그리면(점 드래그) surrogate 반응모델을 거꾸로 풀어 가장 근접한 구조(4축 스텝)를 제안합니다.
-        <b>먼저 시뮬 페이지에서 DOE·Surrogate 스윕을 실행</b>해야 활성화됩니다.</p>
-      <div id="invNeedSur" class="hint" style="color:#c98a1a">⚠ surrogate 없음 — 시뮬 → 🧪 DOE·Surrogate 스윕을 먼저 실행하세요.</div>
-      <div id="invMain" style="display:none">
-        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-          <span class="hint">그릴 채널:</span>
-          <label class="hint" style="display:inline-flex;gap:4px;align-items:center"><input type="radio" name="invCh" value="R"> R</label>
-          <label class="hint" style="display:inline-flex;gap:4px;align-items:center"><input type="radio" name="invCh" value="G" checked> G</label>
-          <label class="hint" style="display:inline-flex;gap:4px;align-items:center"><input type="radio" name="invCh" value="B"> B</label>
-          <button class="btn ghost" id="invReset">↺ 현재 QE 로 초기화</button>
-          <div class="spacer"></div>
-          <button class="btn primary" id="invRun">🎯 역설계 실행</button>
-        </div>
-        <div style="position:relative">
-          <canvas id="invChart" width="820" height="300" style="width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel);cursor:crosshair;touch-action:none"></canvas>
-        </div>
-        <div id="invOut" class="hint" style="margin-top:12px"></div>
-      </div>
+      <p class="sub">역설계는 <b>🔭 모델 탐색</b> 페이지의 역설계 탭으로 옮겼습니다 —
+        모델을 불러와 목표 곡선을 그리면 구조를 즉석으로 찾고, 찾은 구조를 슬라이더로 바로 확인할 수 있습니다.</p>
+      <button class="btn primary" id="goExplorerInv">🔭 모델 탐색에서 역설계 열기</button>
     </div>
   </div>
   <div class="wfoot"><button class="btn ghost" id="resultBack">← 설정</button><div class="spacer"></div><button class="btn primary" id="resultRerun">↻ 다시 실행</button></div>
@@ -1634,7 +1620,8 @@ el("buildDone").onclick=()=>goPage("wpage-sim");
 el("simBack").onclick=()=>goPage("wpage-build");
 el("simQE").onclick=()=>goPage("wpage-set");
 el("simDOE").onclick=()=>{ goPage("wpage-set"); setTimeout(()=>el("doeCard").scrollIntoView({behavior:"smooth"}),80); };
-el("simExplore").onclick=()=>{ window.open(qeApiBase()+"/explorer","_blank"); };
+// 모델탐색은 3·4·5 단계가 필요 없는 별도 흐름 — 같은 탭에서 탐색 페이지로 전환
+el("simExplore").onclick=()=>{ location.href=qeApiBase()+"/explorer"; };
 el("setBack").onclick=()=>goPage("wpage-sim");
 
 // ===== DOE · Surrogate 스윕 =====
@@ -1662,7 +1649,13 @@ async function doeAxisLoad(){
 }
 function doeAxisRender(){
   const box=el("doeAxisList"); box.innerHTML="";
+  let lastG=null;
   DOE.axesCat.forEach(a=>{
+    const g=a.kind==="discrete"?"이산 (LHS 제외 · 별도 비교)":(a.group||"기타");
+    if(g!==lastG){ lastG=g;
+      const h=document.createElement("div");
+      h.style.cssText="grid-column:1/-1;margin:5px 0 1px;padding:3px 8px;background:var(--panel);border-left:3px solid var(--accent);border-radius:4px;font-size:11px;font-weight:700;color:var(--ink-dim)";
+      h.textContent=g; box.appendChild(h); }
     const row=document.createElement("label");
     row.style.cssText="display:flex;align-items:center;gap:6px;padding:3px 5px;border:1px solid var(--line);border-radius:6px;font-size:12px"
       +(a.kind==="discrete"?";opacity:.55":"");
@@ -1804,21 +1797,38 @@ function doeCacheLabel(e){ const d=e.created?new Date(e.created*1000):null;
   const when=d?`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`:"?";
   const ws=(e.wavelengths_nm||[]); const wl=ws.length?`${ws.length}λ ${ws[0]}–${ws[ws.length-1]}nm`:"";
   return `${e.product||"구조"} · ${e.mode||"?"} · nG${e.nG||"?"} · ${wl} · R²(G)=${e.r2_G_mid!=null?e.r2_G_mid:"?"} · ${when} · ${(e.key||"").slice(0,8)}`; }
-async function doeCacheRefresh(){ const sel=el("doeCacheSel"); if(!sel)return;
-  let r; try{ r=await(await fetch(qeApiBase()+"/api/doe/cache")).json(); }catch(e){ return; }
-  const items=(r&&r.items)||[]; sel.innerHTML=`<option value="">— ${items.length?items.length+"개 저장됨 (선택)":"없음"} —</option>`;
-  for(const e of items){ const o=document.createElement("option"); o.value=e.key; o.textContent=doeCacheLabel(e); sel.appendChild(o); } }
-async function doeCacheLoadSel(){ const k=el("doeCacheSel").value; if(!k){ alert("불러올 저장 항목을 선택하세요."); return; }
+async function doeCacheRefresh(){ const box=el("doeLoadList"); if(!box)return;
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/doe/cache")).json(); }
+  catch(e){ box.textContent="서버 미연결 — QE 서버(python app.py)를 켜세요."; return; }
+  const items=(r&&r.items)||[]; DOE.cacheItems=items;
+  if(!items.length){ box.textContent="저장된 모델 없음 — DOE Run 을 실행하면 여기에 쌓입니다."; return; }
+  box.innerHTML="";
+  for(const e of items){
+    const row=document.createElement("div");
+    row.style.cssText="display:flex;align-items:center;gap:8px;padding:5px 7px;border-bottom:1px dashed var(--line);cursor:pointer;border-radius:5px";
+    row.onmouseenter=()=>row.style.background="var(--panel)";
+    row.onmouseleave=()=>row.style.background="";
+    row.innerHTML=`<span style="flex:1;font-size:12px">${doeCacheLabel(e)}</span><span class="btn ghost" style="pointer-events:none">⤒ 불러오기</span>`;
+    row.onclick=()=>doeCacheLoadSel(e.key);
+    box.appendChild(row); } }
+async function doeCacheLoadSel(k){ if(!k)return;
   let sur; try{ sur=await(await fetch(qeApiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k))).json(); }
   catch(e){ alert("불러오기 실패: "+e.message); return; }
   if(sur&&sur.error){ alert("불러오기 실패: "+sur.error); return; }
   DOE.surrogate=sur; invUpdateAvail(); doeEnableDownstream();
+  el("doeLoadPanel").style.display="none";
   el("doeDone").style.display=""; el("doeProg").style.display="none";
-  el("doeSummary").textContent=`💾 저장된 surrogate 불러옴 (계산 0회) · key ${k.slice(0,8)}`;
+  el("doeSummary").textContent=`💾 저장된 모델 불러옴 (계산 0회) · key ${k.slice(0,8)}`;
   el("doeSur").style.display=""; el("doeSur").href=qeApiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k);
-  alert("불러왔습니다. 상단 5결과 탭이 활성화됐습니다 — 🎯 역설계 / 원인분석 민감도에서 바로 사용됩니다."); }
-if(el("doeCacheRefresh")) el("doeCacheRefresh").onclick=doeCacheRefresh;
-if(el("doeCacheLoad")) el("doeCacheLoad").onclick=doeCacheLoadSel;
+  alert("불러왔습니다. 상단 5결과 탭 활성화 · 🔭 모델 탐색에서도 이 모델을 쓸 수 있습니다."); }
+if(el("doeLoadBtn")) el("doeLoadBtn").onclick=async()=>{
+  const p=el("doeLoadPanel"), show=p.style.display==="none";
+  p.style.display=show?"":"none"; el("doeDbPanel").style.display="none";
+  if(show) await doeCacheRefresh(); };
+if(el("doeDbBtn")) el("doeDbBtn").onclick=()=>{
+  const p=el("doeDbPanel"), show=p.style.display==="none";
+  p.style.display=show?"":"none"; el("doeLoadPanel").style.display="none";
+  if(show) doeDbConfig(); };
 // ===== surrogate DB 위치 지정 / 동기화 =====
 async function doeDbConfig(){ const n=el("doeDbNote"); if(!n)return;
   let r; try{ r=await(await fetch(qeApiBase()+"/api/doe/cache/config")).json(); }catch(e){ n.textContent="서버 미연결"; return; }
@@ -1846,6 +1856,7 @@ if(el("doeDbSync")) el("doeDbSync").onclick=async()=>{
   n.textContent=`✓ Sync 완료 — 받음 ${r.pulled} · 보냄 ${r.pushed} · 로컬 총 ${r.total}개`;
   doeCacheRefresh();
 };
+if(el("goExplorerInv")) el("goExplorerInv").onclick=()=>{ location.href=qeApiBase()+"/explorer#inverse"; };
 el("resultBack").onclick=()=>goPage("wpage-set");
 el("resultRerun").onclick=()=>goPage("wpage-set");
 
@@ -1926,7 +1937,7 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v92";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v93";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 열릴 때 물질 폴더를 서버에서 새로 받아 folderLib 갱신 (localStorage 캐시 안 씀)

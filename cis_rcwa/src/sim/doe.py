@@ -166,6 +166,25 @@ def _apply_axis(st, key, d):
         ml = st["ml"]
         kk = "shift_x_um" if key.endswith("x_um") else "shift_y_um"
         ml[kk] = round(float(ml.get(kk, 0) or 0) + d, 5)
+    elif key[:4] == "ml_q" and key.endswith("_h_um"):    # ML quad별 돔 두께(µm)
+        a, b = int(key[4]), int(key[5])
+        ml = st["ml"]
+        q = ml["quads"][a][b]
+        base = float(q.get("height_um", 0) or 0) or float(ml.get("height_um", 0) or 0.4)
+        q["height_um"] = max(0.05, round(base + d, 5))
+    elif key[:4] == "ml_q" and key[-6:] in ("_dx_um", "_dy_um"):   # ML quad별 위치(µm)
+        a, b = int(key[4]), int(key[5])
+        q = st["ml"]["quads"][a][b]
+        kk = "dx_um" if key.endswith("_dx_um") else "dy_um"
+        q[kk] = round(float(q.get(kk, 0) or 0) + d, 5)
+    elif key[:3] == "cf_" and key.endswith("_chang_deg"):  # CF 색별 챔퍼 각도(°)
+        t = st["cf"][key[3]]
+        t["chamfer_angle"] = max(5.0, min(85.0,
+            round(float(t.get("chamfer_angle", 45) or 45) + d, 3)))
+    elif key == "dti_open_um":                           # DTI center open 크기(µm, x·y 동시)
+        dd = st.setdefault("dti", {})
+        for kk in ("center_gap_x_um", "center_gap_y_um"):
+            dd[kk] = max(0.02, round(float(dd.get(kk, 0.28) or 0.28) + d, 5))
 
 
 def apply_point(cfg, steps, axes=AXES_DEFAULT):
@@ -190,66 +209,88 @@ def _step_reco(center, frac, floor):
 def axis_catalog(cfg):
     """이 구조에서 흔들 수 있는 모든 축 + 중심값·추천 step 목록.
 
-    반환: [{key,label,unit,center,step,kind("continuous"/"discrete"),present,note}, ...]
+    반환: [{key,label,unit,center,step,group,kind("continuous"/"discrete"),present,note}, ...]
     step 은 중심값 기반 자동 추천(사용자가 UI 에서 수정 가능). ±2step=정상, ±3step=outlier.
+    group 은 구조 섹션(Si·DTI / BARL·ARL / Grid / CF / ML) — UI 시각 분류용.
     """
     st = (cfg.get("stack") or {})
     out = []
 
-    def add(key, label, unit, center, frac, floor, present=True, note=""):
-        out.append({"key": key, "label": label, "unit": unit,
+    def add(group, key, label, unit, center, frac, floor, note=""):
+        out.append({"key": key, "label": label, "unit": unit, "group": group,
                     "center": round(float(center or 0), 5),
                     "step": _step_reco(center, frac, floor),
-                    "kind": "continuous", "present": bool(present), "note": note})
+                    "kind": "continuous", "present": True, "note": note})
 
     si = st.get("si") or {}
-    add("si_um", "Si 두께", "um", si.get("thickness_um", 3.0), 0.08, 0.05)
+    add("Si·DTI", "si_um", "Si 두께", "um", si.get("thickness_um", 3.0), 0.08, 0.05)
     dti = st.get("dti") or {}
-    if dti and (dti.get("mode") or "").lower() not in ("", "none"):
-        add("dti_w_um", "DTI 폭", "um", dti.get("width_um", 0.09), 0.1, 0.005)
+    dti_on = dti and (dti.get("mode") or "").lower() not in ("", "none")
+    if dti_on:
+        add("Si·DTI", "dti_w_um", "DTI 폭", "um", dti.get("width_um", 0.09), 0.1, 0.005)
+        if "open" in str(dti.get("mode", "")) or dti.get("center_open"):
+            add("Si·DTI", "dti_open_um", "DTI center open", "um",
+                dti.get("center_gap_x_um", dti.get("center_gap_um", 0.28)), 0.1, 0.02)
     for i, L in enumerate(st.get("barl") or []):
-        add(f"barl{i}_um", f"BARL[{i}] {L.get('material','')} 두께", "um",
+        add("BARL·ARL", f"barl{i}_um", f"BARL[{i}] {L.get('material','')} 두께", "um",
             L.get("thickness_um", 0.05), 0.1, 0.005)
+    arl = st.get("arl_top") or {}
+    if arl:
+        add("BARL·ARL", "arltop_um", "ARL top 두께", "um",
+            arl.get("thickness_um", 0), 0.1, 0.005)
     g = st.get("grid") or {}
-    add("grid_w_um", "Grid 폭", "um", g.get("width_um", 0.15), 0.1, 0.01)
+    add("Grid", "grid_w_um", "Grid 폭", "um", g.get("width_um", 0.15), 0.1, 0.01)
     if g.get("coat_um"):
-        add("grid_coat_um", "Grid 측벽코팅", "um", g.get("coat_um", 0), 0.15, 0.005)
+        add("Grid", "grid_coat_um", "Grid 측벽코팅", "um", g.get("coat_um", 0), 0.15, 0.005)
     if float(g.get("deadzone_um", g.get("dz_um", 0)) or 0) > 0:
-        add("grid_dz_um", "Grid 교차점 deadzone", "um",
+        add("Grid", "grid_dz_um", "Grid 교차점 deadzone", "um",
             g.get("deadzone_um", g.get("dz_um", 0)), 0.2, 0.02)
     for i, L in enumerate(g.get("stack") or []):
-        add(f"gridstk{i}_um", f"Grid스택[{i}] {L.get('material','')} 두께", "um",
+        add("Grid", f"gridstk{i}_um", f"Grid스택[{i}] {L.get('material','')} 두께", "um",
             L.get("height_um", 0.1), 0.1, 0.01)
     cf = st.get("cf") or {}
     for cclr in "RGB":
         f = cf.get(cclr) or {}
-        add(f"cf_{cclr}_dA", f"CF {cclr} 두께", "A",
+        add("CF", f"cf_{cclr}_dA", f"CF {cclr} 두께", "A",
             float(f.get("thickness_um", 0.6)) * 1e4, 0.08, 150.0)
-        add(f"cf_{cclr}_curv_um", f"CF {cclr} 곡률", "um",
+        add("CF", f"cf_{cclr}_curv_um", f"CF {cclr} 곡률", "um",
             f.get("curvature_um", 0), 0.15, 0.02)
-        add(f"cf_{cclr}_cham_um", f"CF {cclr} 챔퍼", "um",
+        add("CF", f"cf_{cclr}_cham_um", f"CF {cclr} 챔퍼 reach", "um",
             f.get("chamfer_um", 0), 0.15, 0.02)
-        add(f"cf_{cclr}_scale", f"CF {cclr} 사이즈", "x",
+        add("CF", f"cf_{cclr}_chang_deg", f"CF {cclr} 챔퍼 각도", "deg",
+            f.get("chamfer_angle", 45), 0.0, 5.0)
+        add("CF", f"cf_{cclr}_scale", f"CF {cclr} 사이즈(가로세로)", "x",
             f.get("scale_x", 1.0), 0.05, 0.02)
-    arl = st.get("arl_top") or {}
-    if arl:
-        add("arltop_um", "ARL top 두께", "um", arl.get("thickness_um", 0), 0.1, 0.005)
     ml = st.get("ml") or {}
-    add("planar_um", "ML 평탄층", "um", ml.get("planar_um", 0.1), 0.1, 0.01)
-    add("ml_h_um", "ML 두께", "um", ml.get("height_um", 0.5), 0.08, 0.02)
-    add("ml_scale", "ML radius 배율", "x", 1.0, 0.0, 0.025)
-    # ML 위치(정렬/CRA shift) — 중심 0 이므로 피치 기반 step 추천
     _pp = float((cfg.get("grid") or {}).get("pixel_pitch_um", 1.0) or 1.0)
-    add("ml_shift_x_um", "ML 위치 X", "um", ml.get("shift_x_um", 0), 0.0, round(_pp * 0.04, 4))
-    add("ml_shift_y_um", "ML 위치 Y", "um", ml.get("shift_y_um", 0), 0.0, round(_pp * 0.04, 4))
+    add("ML", "planar_um", "ML 평탄층", "um", ml.get("planar_um", 0.1), 0.1, 0.01)
+    add("ML", "ml_h_um", "ML 두께(전역)", "um", ml.get("height_um", 0.5), 0.08, 0.02)
+    add("ML", "ml_scale", "ML radius 배율", "x", 1.0, 0.0, 0.025)
+    add("ML", "ml_shift_x_um", "ML 전체 위치 X", "um", ml.get("shift_x_um", 0),
+        0.0, round(_pp * 0.04, 4))
+    add("ML", "ml_shift_y_um", "ML 전체 위치 Y", "um", ml.get("shift_y_um", 0),
+        0.0, round(_pp * 0.04, 4))
+    # ML quad(2×2)별 개별 두께·위치 — quads 모드일 때만
+    quads = ml.get("quads")
+    if isinstance(quads, list) and len(quads) == 2 and not ml.get("lenses"):
+        gh = float(ml.get("height_um", 0) or 0.4)
+        for a in range(2):
+            for b in range(2):
+                q = (quads[a] or [{}, {}])[b] or {}
+                qh = float(q.get("height_um", 0) or 0) or gh
+                add("ML", f"ml_q{a}{b}_h_um", f"ML({a},{b}) 두께", "um", qh, 0.08, 0.02)
+                add("ML", f"ml_q{a}{b}_dx_um", f"ML({a},{b}) 위치 X", "um",
+                    q.get("dx_um", 0), 0.0, round(_pp * 0.04, 4))
+                add("ML", f"ml_q{a}{b}_dy_um", f"ML({a},{b}) 위치 Y", "um",
+                    q.get("dy_um", 0), 0.0, round(_pp * 0.04, 4))
 
     # 이산(카테고리) — LHS 로 못 흔듦, 후보별 별도 실행·비교
     if dti:
         out.append({"key": "dti_liner", "label": "DTI liner(물질)", "unit": "cat",
-                    "kind": "discrete", "present": True,
+                    "group": "Si·DTI", "kind": "discrete", "present": True,
                     "note": "이산 — 후보 물질별로 따로 돌려 비교(LHS 제외)"})
         out.append({"key": "dti_center_open", "label": "DTI center open(켬/끔)",
-                    "unit": "cat", "kind": "discrete", "present": True,
+                    "unit": "cat", "group": "Si·DTI", "kind": "discrete", "present": True,
                     "note": "이산 — 켬/끔 각각 돌려 비교(LHS 제외)"})
     return out
 
