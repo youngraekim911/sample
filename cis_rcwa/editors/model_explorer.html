@@ -1,0 +1,477 @@
+<meta charset="utf-8">
+<title>모델 탐색 — CIS Emulator Explorer</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{--bg:#0e1318;--panel:#161d24;--panel-2:#1b232b;--line:#26313b;--ink:#dbe6ee;--ink-dim:#8ea1af;--ink-faint:#5b6d7a;
+    --accent:#35d1c4;--accent-dim:#1f7a72;--amber:#f2c14e;--red:#e2624a;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--ui:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  @media (prefers-color-scheme: light){:root{--bg:#eef2f4;--panel:#fff;--panel-2:#f4f7f8;--line:#dbe3e8;--ink:#16222b;--ink-dim:#54646f;--ink-faint:#8a9aa5;--accent:#118a80;--accent-dim:#8fded7;--amber:#c9902a;--red:#c2492f;}}
+  :root[data-theme="dark"]{--bg:#0e1318;--panel:#161d24;--panel-2:#1b232b;--line:#26313b;--ink:#dbe6ee;--ink-dim:#8ea1af;--ink-faint:#5b6d7a;--accent:#35d1c4;--accent-dim:#1f7a72;--amber:#f2c14e;--red:#e2624a;}
+  :root[data-theme="light"]{--bg:#eef2f4;--panel:#fff;--panel-2:#f4f7f8;--line:#dbe3e8;--ink:#16222b;--ink-dim:#54646f;--ink-faint:#8a9aa5;--accent:#118a80;--accent-dim:#8fded7;--amber:#c9902a;--red:#c2492f;}
+  *{box-sizing:border-box} html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--ui)}
+  header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5;flex-wrap:wrap}
+  h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.2px}
+  .ver{color:var(--ink-faint);font:11px var(--mono)}
+  .btn{background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:6px 11px;font:13px var(--ui);cursor:pointer}
+  .btn:hover{border-color:var(--accent-dim)}
+  .btn.primary{background:var(--accent);color:#04211f;border-color:transparent;font-weight:600}
+  .btn.ghost{background:transparent}
+  select,input{background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:5px 8px;font:13px var(--ui)}
+  .hint{color:var(--ink-dim);font-size:12px}
+  .wrap{display:grid;grid-template-columns:330px 1fr 1fr;gap:12px;padding:12px;align-items:start}
+  @media(max-width:1100px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .card h2{font-size:13px;margin:0 0 8px;color:var(--accent);letter-spacing:.3px;text-transform:uppercase}
+  .axrow{padding:6px 0;border-bottom:1px dashed var(--line)}
+  .axrow:last-child{border-bottom:0}
+  .axtop{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .axname{font-size:12px}
+  .axval{font:11px var(--mono);color:var(--accent)}
+  input[type=range]{width:100%;accent-color:var(--accent);margin:2px 0 0}
+  canvas{max-width:100%;display:block;background:var(--panel-2);border:1px solid var(--line);border-radius:8px}
+  .badge{border:1px solid var(--line);border-radius:999px;padding:2px 9px;font:11px var(--mono);color:var(--ink-dim)}
+  .badge.ok{color:var(--accent);border-color:var(--accent-dim)}
+  .badge.warn{color:var(--amber);border-color:var(--amber)}
+  .qenum{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .qeb{flex:1;min-width:78px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+  .qeb b{display:block;font:17px var(--mono)}
+  .drop{border:2px dashed var(--line);border-radius:10px;padding:16px;text-align:center;color:var(--ink-dim);font-size:12px}
+  .drop.on{border-color:var(--accent);color:var(--accent)}
+  table{border-collapse:collapse;font-size:12px;width:100%}
+  td{padding:2px 6px 2px 0}
+</style>
+
+<header>
+  <h1>🔭 모델 탐색</h1><span class="ver" id="ver">v1</span>
+  <span class="hint">학습된 에뮬레이터로 <b>RCWA 없이</b> 즉석 QE</span>
+  <span style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <span class="badge" id="mdlBadge">모델 없음</span>
+    <span class="badge" id="cvBadge" style="display:none"></span>
+    <button class="btn ghost" id="themeBtn" title="라이트/다크">◐</button>
+    <a class="btn ghost" href="/" title="구조 위저드로">🧰 위저드</a>
+  </span>
+</header>
+
+<div class="wrap">
+  <!-- ① 모델 불러오기 + ② 조건 슬라이더 -->
+  <div style="display:flex;flex-direction:column;gap:12px">
+    <div class="card">
+      <h2>① 모델 불러오기</h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <select id="dbSel" style="flex:1;min-width:150px"><option value="">— 서버 DB —</option></select>
+        <button class="btn" id="dbLoad">불러오기</button>
+        <button class="btn ghost" id="dbRefresh" title="목록 새로고침">↻</button>
+      </div>
+      <div class="drop" id="drop" style="margin-top:8px">
+        📄 모델 JSON을 여기로 <b>드래그</b> — 또는 <label style="text-decoration:underline;cursor:pointer">파일선택<input type="file" id="file" accept=".json" hidden></label>
+        <div style="margin-top:3px;font-size:11px">서버 없이도 동작 (파일 하나로 완결)</div>
+      </div>
+      <div class="hint" id="mdlInfo" style="margin-top:8px">모델을 불러오면 아래 슬라이더가 생깁니다.</div>
+    </div>
+
+    <div class="card">
+      <h2>② 조건 조절 <span class="hint" style="text-transform:none">— 움직이면 즉시 반영</span></h2>
+      <div id="axBox"><div class="hint">— 모델 없음 —</div></div>
+      <div style="display:flex;gap:6px;margin-top:10px">
+        <button class="btn ghost" id="resetBtn">↺ 중심으로</button>
+        <button class="btn ghost" id="copyBtn">📋 현재 조건 복사</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 구조 미리보기 -->
+  <div class="card">
+    <h2>구조 <span class="hint" style="text-transform:none">— 조건에 실시간 반응</span></h2>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <button class="btn ghost" id="vTop">▦ 위에서(XY)</button>
+      <button class="btn ghost" id="vCut">▤ 단면(YZ)</button>
+      <span class="hint" id="vNote" style="margin-left:auto"></span>
+    </div>
+    <canvas id="cvTop" width="520" height="380"></canvas>
+    <canvas id="cvCut" width="520" height="380" style="display:none"></canvas>
+    <div class="hint" id="structNote" style="margin-top:8px"></div>
+  </div>
+
+  <!-- ③ QE 결과 -->
+  <div class="card">
+    <h2>③ QE 결과 <span class="hint" style="text-transform:none">— 에뮬레이터 즉석 예측</span></h2>
+    <canvas id="cvQE" width="520" height="330"></canvas>
+    <div class="qenum" id="qeNums"></div>
+    <div class="hint" id="qeNote" style="margin-top:8px"></div>
+    <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">📈 민감도 — 지금 위치에서 가장 크게 움직이는 노브</summary>
+      <div id="sensBox" style="margin-top:6px"></div></details>
+  </div>
+</div>
+
+<script>
+"use strict";
+const VER="explorer v1";
+document.getElementById("ver").textContent=VER;
+const el=id=>document.getElementById(id);
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+// 테마
+(function(){ const s=localStorage.getItem("mx_theme"); if(s)document.documentElement.setAttribute("data-theme",s);
+  el("themeBtn").onclick=()=>{ const cur=document.documentElement.getAttribute("data-theme");
+    const nx=cur==="dark"?"light":"dark"; document.documentElement.setAttribute("data-theme",nx);
+    localStorage.setItem("mx_theme",nx); redrawAll(); }; })();
+
+// ===================== 상태 =====================
+let EMU=null;          // 에뮬레이터 JSON
+let STEPS=[];          // 현재 축 스텝값 (모델 좌표)
+let VIEW="top";
+
+// ===================== 에뮬레이터 예측 (클라이언트) =====================
+// 서버 sim/emulator.py 와 동일 규약: x = step/2
+function featQuad(x){ const f=[1].concat(x).concat(x.map(v=>v*v));
+  for(let a=0;a<x.length;a++) for(let b=a+1;b<x.length;b++) f.push(x[a]*x[b]);
+  return f; }
+function featCubic(x){ return featQuad(x).concat(x.map(v=>v*v*v)); }
+function wlKey(map,wl){ const w=String(Math.round(wl)); if(w in map)return w;
+  const n=Math.round(wl); if(n in map)return n; return null; }
+function rbfPhi(r,eps,kernel){
+  if(kernel==="gaussian") return Math.exp(-(r/eps)*(r/eps));
+  if(kernel==="thinplate"){ const rr=r<1e-12?1e-12:r; return rr*rr*Math.log(rr); }
+  return Math.sqrt((r/eps)*(r/eps)+1); }
+function predict(emu, steps, wl, ch){
+  const x=steps.map(s=>s/2);
+  const mdl=emu.model||"quadratic";
+  if(mdl==="quadratic"||mdl==="cubic"){
+    const cmap=emu.coef[ch], k=wlKey(cmap,wl); if(k===null)return NaN;
+    const c=cmap[k], f=(mdl==="cubic")?featCubic(x):featQuad(x);
+    let s=0; for(let i=0;i<c.length;i++) s+=f[i]*c[i]; return s;
+  }
+  const rb=emu.rbf, X=emu.X, wmap=rb.weights[ch], k=wlKey(wmap,wl);
+  if(k===null)return NaN;
+  const w=wmap[k], mu=rb.mean[ch][k];
+  let s=mu;
+  for(let i=0;i<X.length;i++){ let d2=0; for(let j=0;j<x.length;j++){ const t=x[j]-X[i][j]; d2+=t*t; }
+    s+=w[i]*rbfPhi(Math.sqrt(d2), rb.eps, rb.kernel); }
+  return s; }
+function outOfBox(emu, steps){ const lo=emu.box.lo, hi=emu.box.hi;
+  return steps.map((s,i)=>{ const x=s/2; return x<lo[i]-1e-6||x>hi[i]+1e-6; }); }
+
+// ===================== 모델 로드 =====================
+function apiBase(){ return location.protocol.startsWith("http")? "" : "http://127.0.0.1:8787"; }
+async function dbRefresh(){ const sel=el("dbSel");
+  let r; try{ r=await(await fetch(apiBase()+"/api/doe/cache")).json(); }
+  catch(e){ sel.innerHTML='<option value="">— 서버 미연결 —</option>'; return; }
+  const items=(r&&r.items)||[];
+  sel.innerHTML=`<option value="">— ${items.length?items.length+"개 저장됨":"없음"} —</option>`;
+  items.forEach(e=>{ const o=document.createElement("option"); o.value=e.key;
+    const d=e.created?new Date(e.created*1000):null;
+    const when=d?`${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`:"";
+    o.textContent=`${e.product||"구조"} · ${e.mode||"?"}${e.model?"["+e.model+"]":""} · ${e.r2_cv_mean!=null?"CV "+e.r2_cv_mean:"R² "+(e.r2_G_mid??"?")} · ${when}`;
+    sel.appendChild(o); }); }
+async function dbLoad(){ const k=el("dbSel").value; if(!k){ alert("불러올 모델을 선택하세요."); return; }
+  let j; try{ j=await(await fetch(apiBase()+"/api/doe/cache/file?key="+encodeURIComponent(k))).json(); }
+  catch(e){ alert("불러오기 실패: "+e.message); return; }
+  if(j&&j.error){ alert("실패: "+j.error); return; }
+  setModel(j); }
+function setModel(j){
+  if(!j || !(j.axes&&(j.coef||j.rbf))){ alert("에뮬레이터 JSON 이 아닙니다 (axes + coef/rbf 필요)."); return; }
+  EMU=j;
+  if(!EMU.box){ const b=EMU.bound||2; EMU.box={lo:EMU.axes.map(()=>-b/2),hi:EMU.axes.map(()=>b/2)}; }
+  STEPS=EMU.axes.map(()=>0);
+  const m=EMU.metrics||{};
+  el("mdlBadge").textContent=`${EMU.model||"quadratic"} · ${EMU.axes.length}축 · ${EMU.wavelengths_nm.length}λ`;
+  el("mdlBadge").className="badge ok";
+  const cv=m.r2_cv_mean;
+  if(cv!=null){ const b=el("cvBadge"); b.style.display="";
+    b.textContent=`검증 CV R²=${cv}`;
+    b.className="badge "+(cv>=0.9?"ok":"warn"); }
+  el("mdlInfo").innerHTML=`샘플 ${EMU.n_samples||"?"}개로 학습`
+    +(m.r2_insample_mean!=null?` · 학습 R²=${m.r2_insample_mean}`:"")
+    +(cv!=null&&cv<0.9?`<br><span style="color:var(--amber)">⚠ CV R² 가 낮습니다 — 예측을 참고용으로만. 샘플을 늘려 재학습 권장.</span>`:"")
+    +(EMU.base_cfg?"":`<br><span style="color:var(--amber)">⚠ 구조가 동봉되지 않은 모델 — 구조 미리보기 없음(QE 예측은 정상)</span>`);
+  buildSliders(); redrawAll(); }
+el("dbRefresh").onclick=dbRefresh; el("dbLoad").onclick=dbLoad;
+el("file").onchange=e=>{ const f=e.target.files[0]; if(!f)return;
+  const rd=new FileReader(); rd.onload=()=>{ try{ setModel(JSON.parse(rd.result)); }catch(_){ alert("JSON 파싱 실패"); } }; rd.readAsText(f); };
+(function(){ const d=el("drop");
+  ["dragenter","dragover"].forEach(t=>d.addEventListener(t,e=>{e.preventDefault();d.classList.add("on");}));
+  ["dragleave","drop"].forEach(t=>d.addEventListener(t,e=>{e.preventDefault();d.classList.remove("on");}));
+  d.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(!f)return;
+    const rd=new FileReader(); rd.onload=()=>{ try{ setModel(JSON.parse(rd.result)); }catch(_){ alert("JSON 파싱 실패"); } }; rd.readAsText(f); }); })();
+
+// ===================== ② 슬라이더 =====================
+function buildSliders(){
+  const box=el("axBox"); box.innerHTML="";
+  EMU.axes.forEach((ax,i)=>{
+    const lo=EMU.box.lo[i]*2, hi=EMU.box.hi[i]*2;      // step 단위 범위
+    const row=document.createElement("div"); row.className="axrow";
+    row.innerHTML=`<div class="axtop"><span class="axname">${ax[1]}</span>`
+      +`<span class="axval" id="av${i}"></span></div>`
+      +`<input type="range" id="ar${i}" min="${lo}" max="${hi}" step="${(hi-lo)/200}" value="0">`;
+    box.appendChild(row);
+    const r=row.querySelector("input");
+    r.addEventListener("input",()=>{ STEPS[i]=+r.value; redrawAll(); });
+  });
+  updateAxLabels();
+}
+function updateAxLabels(){
+  EMU.axes.forEach((ax,i)=>{
+    const d=STEPS[i]*ax[2];                            // 실제 물리 변화량
+    const s=d>=0?"+":"";
+    const oob=outOfBox(EMU,STEPS)[i];
+    const e=el("av"+i); if(!e)return;
+    e.textContent=`${s}${(+d.toFixed(4))} ${ax[3]}  (${STEPS[i].toFixed(2)} step)`;
+    e.style.color=oob?css("--amber"):css("--accent");
+    const r=el("ar"+i); if(r) r.value=STEPS[i];
+  });
+}
+el("resetBtn").onclick=()=>{ if(!EMU)return; STEPS=EMU.axes.map(()=>0); redrawAll(); };
+el("copyBtn").onclick=()=>{ if(!EMU)return;
+  const txt=EMU.axes.map((ax,i)=>`${ax[1]}: ${STEPS[i]*ax[2]>=0?"+":""}${(+(STEPS[i]*ax[2]).toFixed(4))} ${ax[3]}`).join("\n");
+  navigator.clipboard?.writeText(txt); alert("현재 조건을 복사했습니다:\n\n"+txt); };
+
+// ===================== 구조 cfg 에 축 적용 (서버 _apply_axis 미러) =====================
+function applyAxes(){
+  if(!EMU||!EMU.base_cfg) return null;
+  const c=JSON.parse(JSON.stringify(EMU.base_cfg)), st=c.stack||{};
+  EMU.axes.forEach((ax,i)=>{
+    const d=STEPS[i]*ax[2], key=ax[0]; if(!d) return;
+    const cf=st.cf||{}, g=st.grid||{}, ml=st.ml||{};
+    if(key==="si_um"){ st.si=st.si||{}; st.si.thickness_um=Math.max(0.2,(+st.si.thickness_um||3)+d); }
+    else if(/^cf_[RGB]_dA$/.test(key)){ const t=cf[key[3]]; if(t) t.thickness_um=Math.max(0.05,(+t.thickness_um||0)+d*1e-4); }
+    else if(/^cf_[RGB]_curv_um$/.test(key)){ const t=cf[key[3]]; if(t) t.curvature_um=(+t.curvature_um||0)+d; }
+    else if(/^cf_[RGB]_cham_um$/.test(key)){ const t=cf[key[3]]; if(t) t.chamfer_um=Math.max(0,(+t.chamfer_um||0)+d); }
+    else if(/^cf_[RGB]_scale$/.test(key)){ const t=cf[key[3]]; if(t){ t.scale_x=Math.max(0.1,(+t.scale_x||1)+d); t.scale_y=Math.max(0.1,(+t.scale_y||1)+d); } }
+    else if(key==="grid_w_um"){ g.width_um=Math.max(0.02,(+g.width_um||0.15)+d); }
+    else if(key==="grid_coat_um"){ g.coat_um=Math.max(0,(+g.coat_um||0)+d); }
+    else if(key==="grid_dz_um"){ g.deadzone_um=Math.max(0,Math.min(0.25,(+g.deadzone_um||0)+d)); }
+    else if(/^gridstk\d+_um$/.test(key)){ const L=(g.stack||[])[+key.match(/\d+/)[0]]; if(L) L.height_um=Math.max(0.02,(+L.height_um||0)+d); }
+    else if(/^barl\d+_um$/.test(key)){ const L=(st.barl||[])[+key.match(/\d+/)[0]]; if(L) L.thickness_um=Math.max(0.005,(+L.thickness_um||0)+d); }
+    else if(key==="arltop_um"){ st.arl_top=st.arl_top||{}; st.arl_top.thickness_um=Math.max(0,(+st.arl_top.thickness_um||0)+d); }
+    else if(key==="dti_w_um"){ st.dti=st.dti||{}; st.dti.width_um=Math.max(0.01,(+st.dti.width_um||0.09)+d); }
+    else if(key==="planar_um"){ ml.planar_um=Math.max(0,(+ml.planar_um||0)+d); }
+    else if(key==="ml_h_um"){ ml.height_um=Math.max(0.05,(+ml.height_um||0)+d);
+      (ml.quads||[]).forEach(r=>r.forEach(q=>{ if(+q.height_um>0) q.height_um=Math.max(0.05,+q.height_um+d); })); }
+    else if(key==="ml_scale"){ (ml.quads||[]).forEach(r=>r.forEach(q=>{ q.scale=(+q.scale||1)+d; }));
+      (ml.lenses||[]).forEach(L=>{ if("scale" in L) L.scale=(+L.scale)+d; }); }
+    else if(key==="ml_shift_x_um"){ ml.shift_x_um=(+ml.shift_x_um||0)+d; }
+    else if(key==="ml_shift_y_um"){ ml.shift_y_um=(+ml.shift_y_um||0)+d; }
+  });
+  return c;
+}
+// ML 렌즈 목록 (blocks.MlBlock._lens_list 미러)
+function lensList(cfg){
+  const st=cfg.stack||{}, ml=st.ml||{}, p=+(cfg.grid||{}).pixel_pitch_um||1;
+  let out=[];
+  if(ml.lenses&&ml.lenses.length){ out=ml.lenses.map(L=>Object.assign({},L)); }
+  else{ const q=ml.quads||[[{shape:"1x1",scale:1},{shape:"1x1",scale:1}],[{shape:"1x1",scale:1},{shape:"1x1",scale:1}]];
+    for(let qy=0;qy<2;qy++) for(let qx=0;qx<2;qx++){
+      const sp=q[qy][qx]||{}, sc=+sp.scale||1, sh=sp.shape||"1x1", orient=sp.orient||"h";
+      const x0=qx*2*p, y0=qy*2*p, cx=x0+p, cy=y0+p;
+      const add=(ccx,ccy,ax,ay)=>out.push({cx:ccx,cy:ccy,ax:ax*sc,ay:ay*sc,h:+sp.height_um||0,power:+sp.power||0});
+      if(sh==="2x2") add(cx,cy,p,p);
+      else if(sh==="1x1"){ for(let a=0;a<2;a++) for(let b=0;b<2;b++) add(x0+(b+.5)*p,y0+(a+.5)*p,p/2,p/2); }
+      else{ const horiz=(sh==="2x1"&&orient==="h");
+        if(horiz){ for(let a=0;a<2;a++) add(cx,y0+(a+.5)*p,p,p/2); }
+        else{ for(let b=0;b<2;b++) add(x0+(b+.5)*p,cy,p/2,p); } } } }
+  const sx=+ml.shift_x_um||0, sy=+ml.shift_y_um||0;
+  if(sx||sy) out.forEach(L=>{ L.cx=+L.cx+sx; L.cy=+L.cy+sy; });
+  return out;
+}
+// ===================== 구조 그리기 =====================
+const CFCOL={R:"#e2624a",G:"#4fbf6a",B:"#4a8fe2"};
+function drawTop(){
+  const cv=el("cvTop"), ctx=cv.getContext("2d"); ctx.clearRect(0,0,cv.width,cv.height);
+  const cfg=applyAxes();
+  if(!cfg){ ctx.fillStyle=css("--ink-faint"); ctx.font="12px "+css("--ui"); ctx.textAlign="center";
+    ctx.fillText("구조 정보가 없는 모델입니다 (QE 예측은 정상)",cv.width/2,cv.height/2); return; }
+  const st=cfg.stack||{}, p=+(cfg.grid||{}).pixel_pitch_um||1, npx=+(cfg.grid||{}).n_pixels||2;
+  const span=p*npx, pad=26, S=Math.min(cv.width-2*pad,cv.height-2*pad)/span;
+  const X=u=>pad+u*S, Y=v=>pad+v*S;
+  const bayer=cfg.bayer||[["R","G"],["G","B"]];
+  // CF 셀 (scale 반영)
+  for(let r=0;r<npx;r++) for(let c=0;c<npx;c++){
+    const col=(bayer[r]||[])[c]||"G", f=(st.cf||{})[col]||{};
+    const sx=+f.scale_x||1, sy=+f.scale_y||1;
+    const cx=(c+0.5)*p, cy=(r+0.5)*p, hw=p/2*sx, hh=p/2*sy;
+    ctx.fillStyle=CFCOL[col]||"#888"; ctx.globalAlpha=.55;
+    ctx.fillRect(X(cx-hw),Y(cy-hh),hw*2*S,hh*2*S); ctx.globalAlpha=1;
+  }
+  // Grid 격벽 (폭) + 교차점 deadzone(8각 컷)
+  const g=st.grid||{}, gw=+g.width_um||0.15, dz=Math.min(0.25,+g.deadzone_um||0);
+  ctx.fillStyle=css("--ink-faint");
+  for(let i=0;i<=npx;i++){ ctx.fillRect(X(i*p-gw/2),Y(0),gw*S,span*S); ctx.fillRect(X(0),Y(i*p-gw/2),span*S,gw*S); }
+  if(dz>0){ ctx.fillStyle=css("--ink-dim");
+    for(let i=0;i<=npx;i++) for(let j=0;j<=npx;j++){
+      const ux=i*p, uy=j*p;   // 교차점: 코너 삼각형(대각 reach dz)
+      [[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([sxg,syg])=>{
+        ctx.beginPath();
+        ctx.moveTo(X(ux+sxg*gw/2),Y(uy+syg*gw/2));
+        ctx.lineTo(X(ux+sxg*(gw/2+dz)),Y(uy+syg*gw/2));
+        ctx.lineTo(X(ux+sxg*gw/2),Y(uy+syg*(gw/2+dz)));
+        ctx.closePath(); ctx.fill(); }); } }
+  // ML 풋프린트 (superellipse + 위치 shift)
+  const ml=st.ml||{}, gn=+ml.power||2;
+  ctx.strokeStyle=css("--accent"); ctx.lineWidth=1.8;
+  lensList(cfg).forEach(L=>{
+    const n=(+L.power||0)>0?+L.power:gn;
+    ctx.beginPath();
+    for(let t=0;t<=90;t++){ const th=t/90*2*Math.PI;
+      const ct=Math.cos(th), sn=Math.sin(th);
+      const rr=1/Math.pow(Math.pow(Math.abs(ct),n)+Math.pow(Math.abs(sn),n),1/n);
+      const x=+L.cx+rr*ct*(+L.ax), y=+L.cy+rr*sn*(+L.ay);
+      t?ctx.lineTo(X(x),Y(y)):ctx.moveTo(X(x),Y(y)); }
+    ctx.closePath(); ctx.stroke(); });
+  // 축/라벨
+  ctx.strokeStyle=css("--line"); ctx.strokeRect(X(0),Y(0),span*S,span*S);
+  ctx.fillStyle=css("--ink-faint"); ctx.font="10px "+css("--mono"); ctx.textAlign="left";
+  ctx.fillText(`피치 ${p}µm · ${npx}×${npx} · grid ${gw.toFixed(3)}µm`+(dz>0?` · DZ ${dz.toFixed(3)}µm`:""),pad,14);
+  const sxv=+ml.shift_x_um||0, syv=+ml.shift_y_um||0;
+  if(sxv||syv){ ctx.fillStyle=css("--accent");
+    ctx.fillText(`ML shift (${sxv.toFixed(3)}, ${syv.toFixed(3)})µm`,pad,cv.height-8); }
+}
+function drawCut(){
+  const cv=el("cvCut"), ctx=cv.getContext("2d"); ctx.clearRect(0,0,cv.width,cv.height);
+  const cfg=applyAxes();
+  if(!cfg){ ctx.fillStyle=css("--ink-faint"); ctx.font="12px "+css("--ui"); ctx.textAlign="center";
+    ctx.fillText("구조 정보가 없는 모델입니다 (QE 예측은 정상)",cv.width/2,cv.height/2); return; }
+  const st=cfg.stack||{}, p=+(cfg.grid||{}).pixel_pitch_um||1, npx=+(cfg.grid||{}).n_pixels||2;
+  const span=p*npx;
+  // 총 높이 = Si + BARL + max(grid, CF) + planar + ML
+  const si=+(st.si||{}).thickness_um||3;
+  const barl=(st.barl||[]).reduce((a,L)=>a+(+L.thickness_um||0),0);
+  const g=st.grid||{}, gH=(g.stack||[]).reduce((a,L)=>a+(+L.height_um||0),0);
+  const cfT=Math.max(...["R","G","B"].map(c=>+((st.cf||{})[c]||{}).thickness_um||0));
+  const ml=st.ml||{}, pl=+ml.planar_um||0, mh=+ml.height_um||0.4;
+  const tot=si+barl+Math.max(gH,cfT)+pl+mh;
+  const padL=64,padR=12,padT=14,padB=22;   // 좌측 라벨(Si/BARL/CF·Grid/평탄/ML) 공간
+  const W=cv.width-padL-padR, H=cv.height-padT-padB;
+  const SX=W/span, SY=H/tot;
+  const Xc=u=>padL+u*SX, Yc=z=>padT+(tot-z)*SY;    // z=0 바닥(Si 아래)
+  const band=(z0,z1,color,alpha)=>{ ctx.fillStyle=color; ctx.globalAlpha=alpha==null?1:alpha;
+    ctx.fillRect(padL,Yc(z1),W,(z1-z0)*SY); ctx.globalAlpha=1; };
+  let z=0;
+  band(z,z+si,"#3a4a58"); const siTop=z+si;                    // Si
+  ctx.fillStyle=css("--ink-faint"); ctx.font="10px "+css("--mono"); ctx.textAlign="right";
+  ctx.fillText(`Si ${si.toFixed(2)}`,padL-4,Yc(z+si/2));
+  // DTI (Si 안 세로 트렌치, 픽셀 경계)
+  const dti=st.dti||{}; const dw=+dti.width_um||0;
+  if(dw>0 && (dti.mode||"")!=="none"){ ctx.fillStyle="#22303c";
+    for(let i=0;i<=npx;i++) ctx.fillRect(Xc(i*p-dw/2),Yc(siTop),dw*SX,si*SY); }
+  z=siTop;
+  (st.barl||[]).forEach((L,i)=>{ const t=+L.thickness_um||0; if(t<=0)return;
+    band(z,z+t, i%2? "#5a6b7a":"#6d7f8e"); z+=t; });
+  if(barl>0){ ctx.fillStyle=css("--ink-faint"); ctx.textAlign="right";
+    ctx.fillText(`BARL ${barl.toFixed(3)}`,padL-4,Yc(siTop+barl/2)); }
+  const bandBase=z;
+  // CF (색별 두께 + chamfer 근사) — y 단면이므로 열(column) 색 사용
+  const bayer=cfg.bayer||[["R","G"],["G","B"]];
+  for(let c=0;c<npx;c++){
+    const col=(bayer[0]||[])[c]||"G", f=(st.cf||{})[col]||{};
+    const t=+f.thickness_um||0, ch=+f.chamfer_um||0, sx=+f.scale_x||1;
+    const x0=c*p+p/2*(1-sx), x1=(c+1)*p-p/2*(1-sx);
+    ctx.fillStyle=CFCOL[col]||"#888"; ctx.globalAlpha=.5;
+    if(ch>0){ const cang=+f.chamfer_angle||45, cut=ch*Math.tan(cang*Math.PI/180);
+      ctx.beginPath();
+      ctx.moveTo(Xc(x0),Yc(bandBase)); ctx.lineTo(Xc(x0),Yc(bandBase+t-cut));
+      ctx.lineTo(Xc(x0+ch),Yc(bandBase+t)); ctx.lineTo(Xc(x1-ch),Yc(bandBase+t));
+      ctx.lineTo(Xc(x1),Yc(bandBase+t-cut)); ctx.lineTo(Xc(x1),Yc(bandBase));
+      ctx.closePath(); ctx.fill();
+    } else ctx.fillRect(Xc(x0),Yc(bandBase+t),(x1-x0)*SX,t*SY);
+    ctx.globalAlpha=1; }
+  // Grid 격벽 (스택 층별)
+  const gw=+g.width_um||0.15;
+  let gz=bandBase;
+  (g.stack||[]).forEach((L,i)=>{ const t=+L.height_um||0; if(t<=0)return;
+    ctx.fillStyle=i===0?"#8d949b":"#aab2b9";
+    for(let i2=0;i2<=npx;i2++) ctx.fillRect(Xc(i2*p-gw/2),Yc(gz+t),gw*SX,t*SY);
+    gz+=t; });
+  ctx.fillStyle=css("--ink-faint"); ctx.textAlign="right";
+  ctx.fillText(`CF/Grid`,padL-4,Yc(bandBase+Math.max(gH,cfT)/2));
+  const topBand=bandBase+Math.max(gH,cfT);
+  // Planar
+  if(pl>0){ band(topBand,topBand+pl,"#7f8b96",.75);
+    ctx.fillStyle=css("--ink-faint"); ctx.textAlign="right";
+    ctx.fillText(`평탄 ${pl.toFixed(3)}`,padL-4,Yc(topBand+pl/2)); }
+  const mlBase=topBand+pl;
+  // ML 돔 (위치 shift 반영 — y=중앙 라인에서 자른 단면)
+  const gn=+ml.power||2, ycut=span/2;
+  ctx.fillStyle=css("--accent"); ctx.globalAlpha=.55; ctx.beginPath();
+  let started=false;
+  const NS=180;
+  for(let i=0;i<=NS;i++){
+    const x=i/NS*span; let sag=0;
+    lensList(cfg).forEach(L=>{
+      const n=(+L.power||0)>0?+L.power:gn;
+      const u=(x-(+L.cx))/(+L.ax), v=(ycut-(+L.cy))/(+L.ay);
+      const re=(Math.abs(n-2)<1e-9)?(u*u+v*v):(Math.pow(Math.abs(u),n)+Math.pow(Math.abs(v),n));
+      if(re<1){ const h=(+L.h>0?+L.h:mh); sag=Math.max(sag,h*Math.sqrt(Math.max(0,1-re))); } });
+    const X0=Xc(x), Y0=Yc(mlBase+sag);
+    started?ctx.lineTo(X0,Y0):(ctx.moveTo(X0,Y0),started=true); }
+  ctx.lineTo(Xc(span),Yc(mlBase)); ctx.lineTo(Xc(0),Yc(mlBase)); ctx.closePath(); ctx.fill(); ctx.globalAlpha=1;
+  ctx.fillStyle=css("--ink-faint"); ctx.textAlign="right"; ctx.fillText(`ML ${mh.toFixed(3)}`,padL-4,Yc(mlBase+mh/2));
+  // 프레임
+  ctx.strokeStyle=css("--line"); ctx.strokeRect(padL,padT,W,H);
+  ctx.textAlign="left"; ctx.fillStyle=css("--ink-faint");
+  ctx.fillText(`단면 y=${ycut.toFixed(2)}µm · 총높이 ${tot.toFixed(2)}µm`,padL,cv.height-6);
+}
+// ===================== ③ QE =====================
+function drawQE(){
+  const cv=el("cvQE"), ctx=cv.getContext("2d"); ctx.clearRect(0,0,cv.width,cv.height);
+  if(!EMU){ ctx.fillStyle=css("--ink-faint"); ctx.font="12px "+css("--ui"); ctx.textAlign="center";
+    ctx.fillText("① 에서 모델을 불러오세요",cv.width/2,cv.height/2); return; }
+  const ws=EMU.wavelengths_nm.map(Number).sort((a,b)=>a-b);
+  const pad={l:44,r:12,t:14,b:26}, W=cv.width-pad.l-pad.r, H=cv.height-pad.t-pad.b;
+  const w0=ws[0], w1=ws[ws.length-1];
+  const X=w=>pad.l+(w1>w0?(w-w0)/(w1-w0):0.5)*W, Y=v=>pad.t+(1-Math.min(1,Math.max(0,v)))*H;
+  ctx.strokeStyle=css("--line"); ctx.fillStyle=css("--ink-faint"); ctx.font="10px "+css("--mono");
+  for(let v=0;v<=1.001;v+=0.25){ const y=Y(v)+.5; ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(cv.width-pad.r,y); ctx.stroke();
+    ctx.textAlign="right"; ctx.fillText(v.toFixed(2),pad.l-5,y+3); }
+  ctx.textAlign="center";
+  ws.forEach((w,i)=>{ if(i%Math.ceil(ws.length/8)===0) ctx.fillText(w,X(w),cv.height-9); });
+  const cur={};
+  ["R","G","B"].forEach(ch=>{
+    ctx.strokeStyle=CFCOL[ch]; ctx.lineWidth=2.2; ctx.beginPath();
+    ws.forEach((w,i)=>{ const v=predict(EMU,STEPS,w,ch); const x=X(w),y=Y(v); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+    ctx.stroke();
+    ctx.fillStyle=CFCOL[ch]; ws.forEach(w=>{ ctx.beginPath(); ctx.arc(X(w),Y(predict(EMU,STEPS,w,ch)),2.4,0,7); ctx.fill(); });
+    // 피크값
+    let best=-1,bw=ws[0]; ws.forEach(w=>{ const v=predict(EMU,STEPS,w,ch); if(v>best){best=v;bw=w;} });
+    cur[ch]={peak:best,at:bw};
+  });
+  ctx.fillStyle=css("--ink-faint"); ctx.textAlign="left";
+  ctx.fillText("R/G/B 예측 QE (파장 nm)",pad.l,pad.t-3);
+  // 숫자 카드
+  el("qeNums").innerHTML=["R","G","B"].map(ch=>
+    `<div class="qeb"><span class="hint">${ch} peak</span><b style="color:${CFCOL[ch]}">${cur[ch].peak.toFixed(3)}</b>`
+    +`<span class="hint">@${cur[ch].at}nm</span></div>`).join("");
+  // 외삽 경고 + 신뢰도
+  const oob=outOfBox(EMU,STEPS), n=oob.filter(Boolean).length;
+  const cv2=(EMU.metrics||{}).r2_cv_mean;
+  let note=[];
+  if(n) note.push(`<span style="color:var(--amber)">⚠ ${n}개 축이 학습 범위 밖 — 외삽이라 예측 신뢰도 낮음</span>`);
+  if(cv2!=null) note.push(`검증 CV R²=${cv2}${cv2<0.9?" <span style='color:var(--amber)'>(낮음 — 참고용)</span>":""}`);
+  note.push(`RCWA 미실행 · 즉석 예측`);
+  el("qeNote").innerHTML=note.join(" · ");
+  drawSens();
+}
+function drawSens(){
+  if(!EMU){ el("sensBox").innerHTML=""; return; }
+  const ws=EMU.wavelengths_nm.map(Number).sort((a,b)=>a-b);
+  const wmid=ws[Math.floor(ws.length/2)], eps=0.1;
+  const rows=EMU.axes.map((ax,i)=>{
+    const sp=STEPS.slice(), sm=STEPS.slice(); sp[i]+=eps; sm[i]-=eps;
+    const d=(predict(EMU,sp,wmid,"G")-predict(EMU,sm,wmid,"G"))/(2*eps);
+    return {label:ax[1],d};
+  }).sort((a,b)=>Math.abs(b.d)-Math.abs(a.d));
+  const mx=Math.max(...rows.map(r=>Math.abs(r.d)),1e-9);
+  el("sensBox").innerHTML=`<div class="hint" style="margin-bottom:4px">${wmid}nm · G채널 · 1 step 당 ΔQE</div><table>`
+    +rows.map(r=>`<tr><td style="width:44%">${r.label}</td>
+      <td style="width:38%"><div style="height:7px;background:var(--panel-2);border-radius:4px">
+        <div style="height:100%;width:${Math.abs(r.d)/mx*100}%;background:${r.d>=0?css("--accent"):css("--red")};border-radius:4px"></div></div></td>
+      <td style="font-family:var(--mono);text-align:right">${r.d>=0?"+":""}${r.d.toFixed(4)}</td></tr>`).join("")
+    +"</table>";
+}
+// ===================== 렌더 =====================
+function redrawAll(){ if(EMU) updateAxLabels(); drawTop(); drawCut(); drawQE(); }
+function setView(v){ VIEW=v; el("cvTop").style.display=v==="top"?"":"none"; el("cvCut").style.display=v==="cut"?"":"none";
+  el("vTop").classList.toggle("primary",v==="top"); el("vCut").classList.toggle("primary",v==="cut"); redrawAll(); }
+el("vTop").onclick=()=>setView("top"); el("vCut").onclick=()=>setView("cut");
+setView("top");
+dbRefresh();
+</script>

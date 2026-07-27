@@ -168,7 +168,7 @@ def _mean_metric(m):
 
 # ---------------------------------------------------------------- 공개 API
 def fit_emulator(doe_result, model="auto", cv_folds=5,
-                 rbf_kernel="multiquadric", ridge=1e-3):
+                 rbf_kernel="multiquadric", ridge=1e-3, base_cfg=None):
     """DOE 결과 -> 넓은 공간 에뮬레이터(JSON dict) + 교차검증 지표.
 
     model: "quadratic"|"cubic"|"rbf"|"auto"(CV R²로 자동선택).
@@ -219,6 +219,10 @@ def fit_emulator(doe_result, model="auto", cv_folds=5,
         out["rbf"] = {kk: F["param"][kk] for kk in
                       ("kernel", "eps", "ridge", "weights", "mean")}
         out["X"] = [[round(float(v), 6) for v in row] for row in (Xsteps / 2.0)]
+    # 기준 구조를 함께 담아 '파일 하나로 완결' — 모델 탐색 페이지가 서버 없이도
+    # 구조 미리보기를 그리고, 슬라이더 변화를 실제 치수로 환산할 수 있다.
+    if base_cfg is not None:
+        out["base_cfg"] = base_cfg
     return out
 
 

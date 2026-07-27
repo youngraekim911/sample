@@ -355,17 +355,29 @@ class MlBlock:
     """
 
     def __init__(self, material, height_um=0.0, hr=0.55, quads=None, lenses=None,
-                 power=2.0):
+                 power=2.0, shift_x_um=0.0, shift_y_um=0.0):
         self.mat = material
         self.h = float(height_um or 0)
         self.hr = float(hr)
         self.quads = quads
         self.lenses = lenses
+        # ML 전체 평행이동 (µm) — 렌즈 중심을 통째로 옮긴다. CRA shift/정렬오차 모사 및
+        # 'ML 위치'를 DOE 설계축으로 흔들기 위한 노브. 0 이면 기존과 완전히 동일.
+        self.sx = float(shift_x_um or 0.0)
+        self.sy = float(shift_y_um or 0.0)
         # superellipse(Lamé) 지수: 2=원/타원(기존), >2=squircle(둥근 사각, gapless
         # 무간극 ML), →∞=사각, <2=오목. footprint 경계 |u|^n+|v|^n<1.
         self.power = float(power or 2.0)
 
     def _lens_list(self, ctx):
+        out = self._lens_list_raw(ctx)
+        if self.sx or self.sy:                    # ML 전체 평행이동 적용
+            for L in out:
+                L["cx"] = float(L["cx"]) + self.sx
+                L["cy"] = float(L["cy"]) + self.sy
+        return out
+
+    def _lens_list_raw(self, ctx):
         if self.lenses:
             return [dict(L) for L in self.lenses]
         p = ctx.p
@@ -565,7 +577,8 @@ def blocks_from_wizard_cfg(cfg, men_slices=8, taper_slices=8):
         PlanarBlock(ml["material"], ml.get("planar_um", 0)),
         MlBlock(ml["material"], height_um=ml.get("height_um", 0),
                 hr=ml.get("hr", 0.55), quads=ml.get("quads"),
-                lenses=ml.get("lenses"), power=ml.get("power", 2.0)),
+                lenses=ml.get("lenses"), power=ml.get("power", 2.0),
+                shift_x_um=ml.get("shift_x_um", 0), shift_y_um=ml.get("shift_y_um", 0)),
     ]
     arl = s.get("arl_top")
     if arl and float(arl.get("thickness_um", 0)) > 0:

@@ -168,7 +168,8 @@
       <p class="sub">현재 구조에 적용할 해석을 고르세요. (추후 다른 시뮬레이션이 여기에 추가됩니다)</p>
       <div class="wbig">
         <button class="wtile" id="simQE"><span class="ic">📈</span><div><div class="tt">QE 시뮬레이션</div><div class="td">파장별 양자효율(R/G/B) · RCWA</div></div></button>
-        <button class="wtile" id="simDOE"><span class="ic">🧪</span><div><div class="tt">DOE · Surrogate 스윕</div><div class="td">CF/평탄층/ML두께/radius 4축 흔들기 → 반응모델 추출</div></div></button>
+        <button class="wtile" id="simDOE"><span class="ic">🧪</span><div><div class="tt">DOE · Surrogate 스윕</div><div class="td">설계축을 흔들어 반응모델(에뮬레이터) 학습 — 오래 걸림(GPU/야간)</div></div></button>
+        <button class="wtile" id="simExplore"><span class="ic">🔭</span><div><div class="tt">모델 탐색</div><div class="td">학습된 모델 불러와 슬라이더로 즉석 QE — RCWA 없이 실시간</div></div></button>
         <button class="wtile soon"><span class="ic">🌈</span><div><div class="tt">각도·편광 응답 <span class="wbadge">예정</span></div><div class="td">입사각/편광별 응답 (준비중)</div></div></button>
         <button class="wtile soon"><span class="ic">🔬</span><div><div class="tt">근접장 분포 <span class="wbadge">예정</span></div><div class="td">구조 내부 |E|² 필드 (준비중)</div></div></button>
       </div>
@@ -1633,6 +1634,7 @@ el("buildDone").onclick=()=>goPage("wpage-sim");
 el("simBack").onclick=()=>goPage("wpage-build");
 el("simQE").onclick=()=>goPage("wpage-set");
 el("simDOE").onclick=()=>{ goPage("wpage-set"); setTimeout(()=>el("doeCard").scrollIntoView({behavior:"smooth"}),80); };
+el("simExplore").onclick=()=>{ window.open(qeApiBase()+"/explorer","_blank"); };
 el("setBack").onclick=()=>goPage("wpage-sim");
 
 // ===== DOE · Surrogate 스윕 =====

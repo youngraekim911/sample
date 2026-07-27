@@ -434,7 +434,8 @@ def _run_doe_job(jid, cfg_path, p):
         if not res.get("cancelled") and p["mode"] != "axis":
             if is_lhs:            # 넓은 공간 에뮬레이터(다중모델 + 교차검증 자동선택)
                 from ..sim.emulator import fit_emulator
-                sur = fit_emulator(res, model=p["model"], cv_folds=p["cv_folds"])
+                sur = fit_emulator(res, model=p["model"], cv_folds=p["cv_folds"],
+                                   base_cfg=cfg)      # 탐색 페이지용 기준 구조 동봉
                 job["model"] = sur["model"]
                 job["r2_cv_mean"] = sur["metrics"]["r2_cv_mean"]
                 job["r2_insample_mean"] = sur["metrics"]["r2_insample_mean"]
@@ -531,6 +532,10 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path in ("/", "/index.html", "/wizard"):
             self._file(os.path.join(ROOT, "editors", "structure_wizard.html"),
+                       "text/html; charset=utf-8")
+        elif u.path in ("/explorer", "/model", "/model_explorer.html"):
+            # 모델 탐색 — 학습된 에뮬레이터로 RCWA 없이 즉석 QE (front user 용)
+            self._file(os.path.join(ROOT, "editors", "model_explorer.html"),
                        "text/html; charset=utf-8")
         elif u.path == "/api/ping":
             self._json({"ok": True,

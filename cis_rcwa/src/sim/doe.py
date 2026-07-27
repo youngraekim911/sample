@@ -162,6 +162,10 @@ def _apply_axis(st, key, d):
         for L in (ml.get("lenses") or []):
             if "scale" in L:
                 L["scale"] = round(float(L["scale"]) + d, 5)
+    elif key in ("ml_shift_x_um", "ml_shift_y_um"):      # ML 전체 위치 이동(µm)
+        ml = st["ml"]
+        kk = "shift_x_um" if key.endswith("x_um") else "shift_y_um"
+        ml[kk] = round(float(ml.get(kk, 0) or 0) + d, 5)
 
 
 def apply_point(cfg, steps, axes=AXES_DEFAULT):
@@ -234,6 +238,10 @@ def axis_catalog(cfg):
     add("planar_um", "ML 평탄층", "um", ml.get("planar_um", 0.1), 0.1, 0.01)
     add("ml_h_um", "ML 두께", "um", ml.get("height_um", 0.5), 0.08, 0.02)
     add("ml_scale", "ML radius 배율", "x", 1.0, 0.0, 0.025)
+    # ML 위치(정렬/CRA shift) — 중심 0 이므로 피치 기반 step 추천
+    _pp = float((cfg.get("grid") or {}).get("pixel_pitch_um", 1.0) or 1.0)
+    add("ml_shift_x_um", "ML 위치 X", "um", ml.get("shift_x_um", 0), 0.0, round(_pp * 0.04, 4))
+    add("ml_shift_y_um", "ML 위치 Y", "um", ml.get("shift_y_um", 0), 0.0, round(_pp * 0.04, 4))
 
     # 이산(카테고리) — LHS 로 못 흔듦, 후보별 별도 실행·비교
     if dti:
