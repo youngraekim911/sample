@@ -2445,17 +2445,18 @@ async function imgShowDone(s){
 // bayer Gr/Gb) shrink 후 QE 편차 = (max−min)/mean. 기준 초과 시 디모자익 아티팩트.
 // 판정은 각 컬러의 on-band λ(그 컬러 QE 최대치의 50% 이상)에서만 — off-band 는
 // QE≈0 이라 상대 diff 가 의미없이 튀므로 제외 (서버가 계산, 여기선 표시만).
-const CH_HEX={R:"#e2624a",G:"#3fae62",B:"#4a8fe2"};
+const CH_HEX={R:"#e2624a",Gr:"#3fae62",Gb:"#2c8f53",G:"#3fae62",B:"#4a8fe2"};
+const CH_ORDER=["R","Gr","Gb","G","B"];      // CIS 표준 채널 순서 (G는 구버전 호환)
 function imgDiffSummary(d){
   const box=el("imgDiffSum"); if(!box) return;
   if(!d||!d.overall||!Object.keys(d.overall).length){ box.style.display="none"; return; }
   const thr=d.threshold_pct;
-  const order=["R","G","B"].filter(c=>d.overall[c]).concat(Object.keys(d.overall).filter(c=>!"RGB".includes(c)));
+  const order=CH_ORDER.filter(c=>d.overall[c]).concat(Object.keys(d.overall).filter(c=>!CH_ORDER.includes(c)));
   const chips=order.map(c=>{ const o=d.overall[c]; const ok=o.diff_pct<=thr;
     return `<span style="font-family:var(--mono);font-weight:600;color:${ok?"inherit":"#d9534f"}">`
       +`<span style="color:${CH_HEX[c]||"inherit"}">${c}</span> ${o.diff_pct.toFixed(1)}% ${ok?"✓":"⚠"}`
       +`</span> <span class="hint">(λ${o.wl} · 위치 ${o.field} · r=${o.r})</span>`; }).join(" &nbsp; ");
-  box.innerHTML=`<b>동컬러 픽셀 diff</b> <span class="hint">— 같은 색끼리 (max−min)/평균, 기준 ≤${thr}% · 각 컬러는 자기 대역 λ에서 판정</span><br>`
+  box.innerHTML=`<b>동컬러 픽셀 diff</b> <span class="hint">— 채널(R/Gr/Gb/B)별 같은 색 픽셀 (max−min)/평균, 기준 ≤${thr}% · 각 채널은 자기 대역 λ에서 판정</span><br>`
     +chips+` &nbsp; → <b style="color:${d.pass?"#2f9e4f":"#d9534f"}">${d.pass?"✓ 기준 만족":"⚠ 기준 초과 — shrink ratio 조정 필요"}</b>`;
   box.style.display="";
 }
@@ -2554,7 +2555,7 @@ async function imgReattach(){
 }
 
 // ============================ init ============================
-const WIZ_VERSION="v110";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v111";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)

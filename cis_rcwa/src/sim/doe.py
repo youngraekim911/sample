@@ -337,6 +337,15 @@ def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
         if okr and not all(bool(rp.get("obl")) == bool(oblique)
                            for rp in resume_points):
             okr = False
+        # diff 채널 구성이 다른(예: 구버전 G 통합 vs 신버전 Gr/Gb 분리) 저장분도 차단
+        if okr and oblique and cfg.get("bayer"):
+            from .octant import refine_channels
+            exp = {str(v) for row in refine_channels(cfg["bayer"]) for v in row}
+            for rp in resume_points:
+                keys = {c for m in (rp.get("diff") or {}).values() for c in m}
+                if keys and keys != exp:
+                    okr = False
+                    break
 
         def _norm_pt(rp):
             # JSON 왕복 시 파장 키가 str 로 바뀌므로 int 로 정규화 (새 점과 타입 통일)

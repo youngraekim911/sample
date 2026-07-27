@@ -75,15 +75,39 @@ def transform_unit(unit, labels, octant_index):
 
 
 # ------------------------------------------------------------- 동컬러 diff
-def unit_color_diff(arr, labels):
-    """unit QE 격자(npx×npx) → 같은 라벨 픽셀끼리 (max−min)/mean 편차.
+CH_ORDER = ("R", "Gr", "Gb", "G", "B")     # 표시 순서 (CIS 표준 채널)
 
-    사광 핵심 지표: shrink 후에도 남는 초점 틀어짐이 같은 색 픽셀들(tetra 2×2
-    quad, bayer Gr/Gb)에 서로 다른 QE 를 주는 정도. 스펙: diff_pct ≤ 30 권장.
-    반환: {label: {"min","max","mean","n","diff_pct"}}
+
+def refine_channels(labels):
+    """CFA 라벨 격자 → CIS 채널명 격자: G 를 Gr/Gb 로 분리.
+
+    표준 채널은 4개(R/Gr/Gb/B) — 같은 행에 R 이 있는 G 는 Gr, B 가 있는 G 는 Gb.
+    tetra(RRGG/GGBB)는 quad 단위, bayer 모자이크(RGRG/GBGB)는 픽셀 단위로 자동
+    분리된다. 행에 R/B 가 둘 다 있거나 둘 다 없으면 G 그대로 둔다.
+    """
+    L = np.asarray(labels, dtype=object)
+    out = L.copy()
+    for r in range(L.shape[0]):
+        row = {str(v) for v in L[r]}
+        for c in range(L.shape[1]):
+            if str(L[r][c]) == "G":
+                if "R" in row and "B" not in row:
+                    out[r][c] = "Gr"
+                elif "B" in row and "R" not in row:
+                    out[r][c] = "Gb"
+    return out
+
+
+def unit_color_diff(arr, labels):
+    """unit QE 격자(npx×npx) → 같은 채널 픽셀끼리 (max−min)/mean 편차.
+
+    사광 핵심 지표: shrink 후에도 남는 초점 틀어짐이 같은 색 픽셀들(채널당
+    4픽셀 quad)에 서로 다른 QE 를 주는 정도. 채널은 R/Gr/Gb/B 4개로 분리
+    (G 를 뭉치면 Gr↔Gb 차이와 quad 내 편차가 섞임). 스펙: diff_pct ≤ 30 권장.
+    반환: {채널: {"min","max","mean","n","diff_pct"}}
     """
     A = np.asarray(arr, float)
-    L = np.asarray(labels, dtype=object)
+    L = refine_channels(labels)
     out = {}
     for c in sorted({str(v) for v in L.flat}):
         v = A[L == c]

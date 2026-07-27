@@ -606,12 +606,14 @@ def _same_color_diff(units, labels, waves, threshold_pct=30.0):
     4개, bayer 는 Gr/Gb)이 서로 다른 QE 를 받는다. 이 채널내 편차가 크면 디모자익
     후 미로(maze)/격자 아티팩트가 생기므로 스펙: diff ≤ threshold(기본 30%).
 
-    diff_pct = (max−min)/mean × 100, 같은 라벨 픽셀끼리(필드·파장별).
-    컬러별 최종 판정은 on-band 파장(그 컬러 평균 QE 가 최대치의 50% 이상인 λ)
-    에서만 — off-band(예: 450nm 의 R)는 QE 자체가 0 근처라 상대 diff 가
-    의미없이 튀기 때문. 반환 dict 는 결과 JSON 에 그대로 실린다.
+    diff_pct = (max−min)/mean × 100, 채널(R/Gr/Gb/B — G 는 Gr/Gb 로 분리)별
+    같은 채널 픽셀끼리(필드·파장별). 컬러별 최종 판정은 on-band 파장(그 컬러
+    평균 QE 가 최대치의 50% 이상인 λ)에서만 — off-band(예: 450nm 의 R)는 QE
+    자체가 0 근처라 상대 diff 가 의미없이 튀기 때문. 반환 dict 는 결과 JSON
+    에 그대로 실린다.
     """
-    L = np.asarray(labels, dtype=object)
+    from ..sim.octant import refine_channels, unit_color_diff
+    L = refine_channels(labels)
     colors = sorted({str(v) for v in L.flat})
     # 컬러×파장 평균 QE (전 필드) → on-band 파장 집합
     cmean = {c: {} for c in colors}
@@ -629,7 +631,6 @@ def _same_color_diff(units, labels, waves, threshold_pct=30.0):
         ob = [w for w in cmean[c] if cmean[c][w] >= 0.5 * top]
         onband[c] = ob if ob else [int(w) for w in waves]
 
-    from ..sim.octant import unit_color_diff
     per_field, worst = {}, {}                        # worst[(wl,c)] = 최악 필드
     for (x, y), u in units.items():
         fkey = f"{x},{y}"
@@ -775,8 +776,11 @@ def _run_image_job(jid, cfg_path, p):
         job["state"] = "cancelled" if job["cancel"] else "done"
         dtxt = ""
         if diff.get("overall"):
-            parts = [f"{c} {diff['overall'][c]['diff_pct']:.0f}%"
-                     for c in sorted(diff["overall"])]
+            from ..sim.octant import CH_ORDER
+            ov = diff["overall"]
+            order = [c for c in CH_ORDER if c in ov] + \
+                    [c for c in sorted(ov) if c not in CH_ORDER]
+            parts = [f"{c} {ov[c]['diff_pct']:.0f}%" for c in order]
             dtxt = (" · 동컬러 diff " + " ".join(parts)
                     + (" ✓" if diff["pass"] else f" ⚠>{diff['threshold_pct']:.0f}%"))
         job["note"] = (f"{'중단(부분 조립)' if job['cancel'] else '완료'} · "

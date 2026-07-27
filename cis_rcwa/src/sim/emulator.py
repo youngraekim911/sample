@@ -183,13 +183,16 @@ def fit_emulator(doe_result, model="auto", cv_folds=5,
     Y = {ch: {w: np.array([p["qe"][w][ch] for p in pts], float) for w in ws}
          for ch in "RGB"}
     # ── 사광 채널: 점마다 obl(빗각 QE)·diff(동컬러 %)가 있으면 같은 모델로 학습.
-    #    oR/oG/oB = 대표 필드 빗각 QE, dR/dG/dB = 동컬러 diff% (0~100 그대로).
+    #    oR/oG/oB = 대표 필드 빗각 QE. diff 는 CIS 채널별(R/Gr/Gb/B — G 는
+    #    Gr/Gb 로 분리) dR/dGr/dGb/dB 로 각각 학습 (% 0~100 그대로).
     has_obl = bool(pts) and all(p.get("obl") and p.get("diff") for p in pts)
     if has_obl:
         for L in "RGB":
             Y["o" + L] = {w: np.array([p["obl"][w][L] for p in pts], float)
                           for w in ws}
-            Y["d" + L] = {w: np.array([float(p["diff"][w].get(L, 0.0))
+        dcols = sorted({c for p in pts for m in p["diff"].values() for c in m})
+        for c in dcols:
+            Y["d" + c] = {w: np.array([float(p["diff"][w].get(c, 0.0))
                                        for p in pts], float) for w in ws}
     k = Xsteps.shape[1]
 

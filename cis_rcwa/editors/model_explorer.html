@@ -128,7 +128,7 @@
 
 <script>
 "use strict";
-const VER="explorer v8";
+const VER="explorer v9";
 document.getElementById("ver").textContent=VER;
 const el=id=>document.getElementById(id);
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -657,34 +657,43 @@ function drawQE(){
 //    dX=동컬러 diff%(같은 색 픽셀 max−min/평균, 기준 ≤30%), oX=대표 필드 빗각 QE.
 //    diff 판정은 각 컬러의 on-band λ(모델 메타에 저장)에서만.
 function hasCh(e,ch){ return !!((e.coef&&e.coef[ch])||(e.rbf&&e.rbf.weights&&e.rbf.weights[ch])); }
+function hasAnyD(e){ return ["dR","dGr","dGb","dG","dB"].some(c=>hasCh(e,c)); }
 function oblMeta(){
   if(!EMU) return null;
   if(EMU.combo){                       // 결합: 모든 서브 모델이 사광 채널을 가질 때만
-    if(!EMU.sub.every(se=>se.oblique&&hasCh(se,"dG"))) return null;
+    if(!EMU.sub.every(se=>se.oblique&&hasAnyD(se))) return null;
     return EMU.sub[EMU.baseIdx].oblique;
   }
-  return (EMU.oblique&&hasCh(EMU,"dG"))?EMU.oblique:null;
+  return (EMU.oblique&&hasAnyD(EMU))?EMU.oblique:null;
+}
+// diff 채널 목록 — CIS 채널 4개(R/Gr/Gb/B) 순, 구버전(dG 통합) 모델도 그대로 표시
+const OBL_ORDER=["R","Gr","Gb","G","B"];
+const OBL_COL={R:null,Gr:null,Gb:"#2c8f53",G:null,B:null};   // 기본은 CFCOL[베이스색]
+function oblChannels(e){
+  const probe=e.combo? e.sub[e.baseIdx] : e;
+  return OBL_ORDER.filter(c=>hasCh(probe,"d"+c));
 }
 function drawObl(){
   const box=el("oblBox"), m=oblMeta();
   if(!m){ box.style.display="none"; return; }
   const thr=+m.threshold_pct||30;
-  const rows=["R","G","B"].map(ch=>{
-    const obs=((m.onband_nm&&m.onband_nm[ch])||EMU.wavelengths_nm).map(Number);
+  const rows=oblChannels(EMU).map(ch=>{
+    const base=ch[0];                  // Gr/Gb -> G (직광/빗각 QE·on-band 베이스 채널)
+    const obs=((m.onband_nm&&(m.onband_nm[ch]||m.onband_nm[base]))||EMU.wavelengths_nm).map(Number);
     let worst=null;                    // on-band λ 중 diff 최악을 대표로
     obs.forEach(w=>{ const d=predict(EMU,STEPS,w,"d"+ch);
       if(isFinite(d)&&(worst===null||d>worst.d)) worst={d:d,w:w}; });
     if(!worst) return "";
     const d=Math.max(0,worst.d), ok=d<=thr;
-    const q=predict(EMU,STEPS,worst.w,ch), o=predict(EMU,STEPS,worst.w,"o"+ch);
-    return `<tr><td style="color:${CFCOL[ch]};font-weight:700;padding-right:8px">${ch}</td>
+    const q=predict(EMU,STEPS,worst.w,base), o=predict(EMU,STEPS,worst.w,"o"+base);
+    return `<tr><td style="color:${OBL_COL[ch]||CFCOL[base]};font-weight:700;padding-right:8px">${ch}</td>
       <td style="font-family:var(--mono);padding-right:8px">diff <b style="color:${ok?"inherit":"var(--red)"}">${d.toFixed(1)}%</b> ${ok?"✓":"⚠"}</td>
       <td class="hint" style="font-family:var(--mono);padding-right:8px">@${worst.w}nm</td>
       <td class="hint" style="font-family:var(--mono)">빗각 QE ${o.toFixed(3)} <span style="opacity:.75">(직광 ${q.toFixed(3)})</span></td></tr>`;
   }).join("");
   const r=Math.hypot(+m.x_field||0.8, +m.y_field||0);
   box.innerHTML=`<b>🌈 사광 예측</b> <span class="hint">— 측정 위치 r=${r.toFixed(2)}`
-    +` · 동컬러 diff(같은 색 픽셀 편차) 기준 ≤${thr}% · 자기 대역 λ 중 최악값</span>`
+    +` · 채널(R/Gr/Gb/B)별 동컬러 diff 기준 ≤${thr}% · 자기 대역 λ 중 최악값</span>`
     +`<table style="margin-top:5px">${rows}</table>`;
   box.style.display="";
 }
