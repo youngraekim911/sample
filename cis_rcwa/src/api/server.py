@@ -18,6 +18,7 @@
 import os
 import sys
 import json
+import math
 import time
 import uuid
 import shutil
@@ -572,6 +573,73 @@ def _cra_spec_path(product):
     return os.path.join(APP_DIR, "data", "cra", str(product).strip() + ".yaml")
 
 
+def _same_color_diff(units, labels, waves, threshold_pct=30.0):
+    """동컬러 픽셀 간 diff — 사광의 핵심 판정 지표.
+
+    shrink 로 초점을 되돌려도 빗각 자체 때문에 같은 색 픽셀들(tetra 는 2×2 quad
+    4개, bayer 는 Gr/Gb)이 서로 다른 QE 를 받는다. 이 채널내 편차가 크면 디모자익
+    후 미로(maze)/격자 아티팩트가 생기므로 스펙: diff ≤ threshold(기본 30%).
+
+    diff_pct = (max−min)/mean × 100, 같은 라벨 픽셀끼리(필드·파장별).
+    컬러별 최종 판정은 on-band 파장(그 컬러 평균 QE 가 최대치의 50% 이상인 λ)
+    에서만 — off-band(예: 450nm 의 R)는 QE 자체가 0 근처라 상대 diff 가
+    의미없이 튀기 때문. 반환 dict 는 결과 JSON 에 그대로 실린다.
+    """
+    L = np.asarray(labels, dtype=object)
+    colors = sorted({str(v) for v in L.flat})
+    # 컬러×파장 평균 QE (전 필드) → on-band 파장 집합
+    cmean = {c: {} for c in colors}
+    for w in waves:
+        acc = {c: [] for c in colors}
+        for u in units.values():
+            arr = np.asarray(u["pixels"][int(w)], float)
+            for c in colors:
+                acc[c].append(float(arr[L == c].mean()))
+        for c in colors:
+            cmean[c][int(w)] = float(np.mean(acc[c]))
+    onband = {}
+    for c in colors:
+        top = max(cmean[c].values())
+        ob = [w for w in cmean[c] if cmean[c][w] >= 0.5 * top]
+        onband[c] = ob if ob else [int(w) for w in waves]
+
+    per_field, worst = {}, {}                        # worst[(wl,c)] = 최악 필드
+    for (x, y), u in units.items():
+        fkey = f"{x},{y}"
+        per_field[fkey] = {}
+        for w in waves:
+            arr = np.asarray(u["pixels"][int(w)], float)
+            d = {}
+            for c in colors:
+                v = arr[L == c]
+                mn, mx, mu = float(v.min()), float(v.max()), float(v.mean())
+                dp = (mx - mn) / mu * 100.0 if mu > 1e-12 else 0.0
+                d[c] = {"min": round(mn, 5), "max": round(mx, 5),
+                        "mean": round(mu, 5), "n": int(v.size),
+                        "diff_pct": round(dp, 2)}
+                k = (int(w), c)
+                if k not in worst or dp > worst[k]["diff_pct"]:
+                    worst[k] = {"diff_pct": round(dp, 2), "field": fkey,
+                                "r": round(math.hypot(x, y), 3)}
+            per_field[fkey][int(w)] = d
+    worst_wl = {}
+    for (w, c), rec in worst.items():
+        worst_wl.setdefault(str(w), {})[c] = rec
+    overall = {}                                     # 컬러별 최종(on-band 한정)
+    for c in colors:
+        for w in onband[c]:
+            rec = worst.get((int(w), c))
+            if rec and (c not in overall
+                        or rec["diff_pct"] > overall[c]["diff_pct"]):
+                overall[c] = dict(rec, wl=int(w))
+    return {"threshold_pct": float(threshold_pct),
+            "metric": "(max-min)/mean x100 · 같은 라벨 픽셀 · 필드/파장별",
+            "onband_nm": {c: sorted(onband[c]) for c in colors},
+            "per_field": per_field, "worst": worst_wl, "overall": overall,
+            "pass": bool(overall) and all(v["diff_pct"] <= threshold_pct
+                                          for v in overall.values())}
+
+
 def _run_image_job(jid, cfg_path, p):
     """센서 전면 QE 이미지: 옥탄트 필드 격자 → 필드별 (CRA shift + F# 원뿔 적분 +
     편광평균) unit QE → 8-fold 대칭 확장 조립 → json/png/npz 저장."""
@@ -638,6 +706,8 @@ def _run_image_job(jid, cfg_path, p):
             img, meta = oc.assemble_image(uw, p["field_step"], labels)
             images[int(w)] = img
         mean = np.nanmean(np.stack([images[int(w)] for w in waves]), axis=0)
+        diff = _same_color_diff(units, labels, waves,
+                                float(p.get("diff_threshold_pct", 30.0)))
 
         def j2(a):                                  # NaN -> None (JS JSON 호환)
             return [[(None if not np.isfinite(v) else round(float(v), 5))
@@ -653,7 +723,7 @@ def _run_image_job(jid, cfg_path, p):
                                        "rgb": units[(x, y)]["rgb"]}
                           for (x, y) in units},
                "images": {str(int(w)): j2(images[int(w)]) for w in waves},
-               "mean": j2(mean)}
+               "mean": j2(mean), "diff": diff}
         jp = os.path.join(JOBS_DIR, jid + "_image.json")
         with open(jp, "w", encoding="utf-8") as f:
             json.dump(res, f, ensure_ascii=False)
@@ -683,9 +753,15 @@ def _run_image_job(jid, cfg_path, p):
         mn, mx = float(np.nanmin(mean)), float(np.nanmax(mean))
         job["elapsed_s"] = round(time.time() - t0, 1)
         job["state"] = "cancelled" if job["cancel"] else "done"
+        dtxt = ""
+        if diff.get("overall"):
+            parts = [f"{c} {diff['overall'][c]['diff_pct']:.0f}%"
+                     for c in sorted(diff["overall"])]
+            dtxt = (" · 동컬러 diff " + " ".join(parts)
+                    + (" ✓" if diff["pass"] else f" ⚠>{diff['threshold_pct']:.0f}%"))
         job["note"] = (f"{'중단(부분 조립)' if job['cancel'] else '완료'} · "
-                       f"필드 {job['doe_done']}/{len(fields)} · QE {mn:.3f}~{mx:.3f} · "
-                       f"{job['elapsed_s']}s")
+                       f"필드 {job['doe_done']}/{len(fields)} · QE {mn:.3f}~{mx:.3f}"
+                       f"{dtxt} · {job['elapsed_s']}s")
     except Exception as e:
         job["error"] = f"{type(e).__name__}: {e}"
         job["trace"] = traceback.format_exc()[-2000:]
@@ -1243,7 +1319,9 @@ class Handler(BaseHTTPRequestHandler):
                       "downsample": max(1, int(data.get("downsample", 2))),
                       "theta_samples": max(1, min(7, int(data.get("theta_samples", 3)))),
                       "phi_samples": max(1, min(7, int(data.get("phi_samples", 3)))),
-                      "lateral_n": max(64, int(data.get("lateral_n", 256)))}
+                      "lateral_n": max(64, int(data.get("lateral_n", 256))),
+                      "diff_threshold_pct":
+                          max(1.0, float(data.get("diff_threshold_pct", 30.0)))}
                 assert ip["field_step"] in (0.05, 0.1, 0.2), "field_step"
                 assert ip["region"] in ("octant", "full"), "region"
             except (TypeError, ValueError, AssertionError) as e:

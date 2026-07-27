@@ -418,11 +418,13 @@
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
           <span class="hint" id="imgSummary"></span>
           <div class="spacer" style="flex:1"></div>
-          <label class="hint">보기 <select id="imgWlSel" style="min-width:110px"></select></label>
+          <label class="hint">보기 <select id="imgViewSel"><option value="qe" selected>QE 맵</option><option value="diff">동컬러 diff 맵</option></select></label>
+          <label class="hint">λ <select id="imgWlSel" style="min-width:100px"></select></label>
           <a class="btn ghost" id="imgDlPng" download="qe_image.png">⤓ PNG</a>
           <a class="btn ghost" id="imgDlNpz" download="qe_image.npz">⤓ NPZ</a>
           <a class="btn ghost" id="imgDlJson" download="qe_image.json">⤓ JSON</a>
         </div>
+        <div id="imgDiffSum" style="display:none;padding:8px 11px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;margin-bottom:8px;font-size:12px"></div>
         <canvas id="imgCv" width="880" height="640" style="width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel)"></canvas>
         <div class="hint" id="imgScale" style="margin-top:5px;font-family:var(--mono)"></div>
       </div>
@@ -2396,6 +2398,8 @@ async function imgShowDone(s){
   r.wavelengths_nm.forEach(w=>{ const o=document.createElement("option");
     o.value=String(w); o.textContent=w+" nm"; sel.appendChild(o); });
   sel.onchange=imgDraw;
+  el("imgViewSel").value="qe"; el("imgViewSel").onchange=imgDraw;
+  imgDiffSummary(r.diff);
   ["png","npz","json"].forEach(k=>{ const a=el("imgDl"+k[0].toUpperCase()+k.slice(1));
     if(a) a.href=qeApiBase()+"/api/image/file?job="+IMG.job+"&kind="+k; });
   el("imgSummary").textContent=((s&&s.state==="cancelled")?"중단(부분 조립) · ":"완료 · ")
@@ -2403,12 +2407,75 @@ async function imgShowDone(s){
     +` · 원뿔 ${r.theta_samples}×${r.phi_samples} · F# ${r.spec?r.spec.f_number:"?"}`
     +((s&&s.elapsed_s)?` · ${fmtSec(s.elapsed_s)}`:"");
   imgDraw(); }
+// ── 동컬러 diff — 사광의 핵심 판정: 같은 색 픽셀끼리(tetra 2×2 quad 4개,
+// bayer Gr/Gb) shrink 후 QE 편차 = (max−min)/mean. 기준 초과 시 디모자익 아티팩트.
+// 판정은 각 컬러의 on-band λ(그 컬러 QE 최대치의 50% 이상)에서만 — off-band 는
+// QE≈0 이라 상대 diff 가 의미없이 튀므로 제외 (서버가 계산, 여기선 표시만).
+const CH_HEX={R:"#e2624a",G:"#3fae62",B:"#4a8fe2"};
+function imgDiffSummary(d){
+  const box=el("imgDiffSum"); if(!box) return;
+  if(!d||!d.overall||!Object.keys(d.overall).length){ box.style.display="none"; return; }
+  const thr=d.threshold_pct;
+  const order=["R","G","B"].filter(c=>d.overall[c]).concat(Object.keys(d.overall).filter(c=>!"RGB".includes(c)));
+  const chips=order.map(c=>{ const o=d.overall[c]; const ok=o.diff_pct<=thr;
+    return `<span style="font-family:var(--mono);font-weight:600;color:${ok?"inherit":"#d9534f"}">`
+      +`<span style="color:${CH_HEX[c]||"inherit"}">${c}</span> ${o.diff_pct.toFixed(1)}% ${ok?"✓":"⚠"}`
+      +`</span> <span class="hint">(λ${o.wl} · 필드 ${o.field} · r=${o.r})</span>`; }).join(" &nbsp; ");
+  box.innerHTML=`<b>동컬러 픽셀 diff</b> <span class="hint">— 같은 색끼리 (max−min)/평균, 기준 ≤${thr}% · 각 컬러는 자기 대역 λ에서 판정</span><br>`
+    +chips+` &nbsp; → <b style="color:${d.pass?"#2f9e4f":"#d9534f"}">${d.pass?"✓ 기준 만족":"⚠ 기준 초과 — shrink ratio 조정 필요"}</b>`;
+  box.style.display="";
+}
 // viridis 근사(5점 선형) — NaN(미계산 타일)=회색
 function imgViridis(t){ const P=[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]];
   t=Math.max(0,Math.min(1,t)); const x=t*4, i=Math.min(3,Math.floor(x)), f=x-i, a=P[i], b=P[i+1];
   return [a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f]; }
+// diff 색 스케일: 0=초록 → 기준 60% 노랑 → 기준=빨강 → 초과 진빨강
+function imgDiffColor(v,thr){ const t=v/thr;
+  const L=(a,b,f)=>[a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f];
+  const g=[63,150,80], y=[225,180,45], r=[214,64,52], dr=[140,18,28];
+  if(t<0.6) return L(g,y,t/0.6);
+  if(t<1.0) return L(y,r,(t-0.6)/0.4);
+  return L(r,dr,Math.min(1,(t-1)/0.5)); }
+// 필드별 diff 맵 — 셀=필드(unit). 값: 선택 λ(평균=각 컬러 on-band 전체)에서
+// on-band 컬러들의 diff 최대값. 옥탄트 대칭으로 전면 채움(diff 는 D4 불변).
+function imgDrawDiff(){
+  const r=IMG.res, d=r&&r.diff; if(!d||!d.per_field) return;
+  const sel=el("imgWlSel").value, thr=d.threshold_pct, m=r.meta, step=r.field_step;
+  const rows=m.unit_rows, cols=m.unit_cols;
+  const grid=Array.from({length:rows},()=>Array(cols).fill(null));
+  const put=(xf,yf,val)=>{ if(xf<-0.81||xf>0.81||yf<-0.61||yf>0.61) return;
+    const c=Math.round((0.8+xf)/step), rr=Math.round((0.6-yf)/step);
+    if(rr>=0&&rr<rows&&c>=0&&c<cols) grid[rr][c]=val; };
+  let worstCell=0;
+  for(const fkey in d.per_field){
+    const [x,y]=fkey.split(",").map(Number);
+    let best=null;                                     // 이 필드의 지배 컬러/값
+    for(const c in d.onband_nm){
+      const wls=(sel==="mean")? d.onband_nm[c] : (d.onband_nm[c].includes(+sel)?[+sel]:[]);
+      for(const w of wls){ const rec=(d.per_field[fkey][String(w)]||{})[c];
+        if(rec && (!best||rec.diff_pct>best.v)) best={v:rec.diff_pct,c:c}; } }
+    if(!best) continue;
+    worstCell=Math.max(worstCell,best.v);
+    [[x,y],[y,x],[-y,x],[-x,y],[-x,-y],[-y,-x],[y,-x],[x,-y]].forEach(([a,b])=>put(a,b,best));
+  }
+  const cv=el("imgCv"), ctx=cv.getContext("2d");
+  ctx.clearRect(0,0,cv.width,cv.height);
+  const sc=Math.min(cv.width/cols, cv.height/rows), ox=(cv.width-cols*sc)/2, oy=(cv.height-rows*sc)/2;
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  for(let i=0;i<rows;i++) for(let j=0;j<cols;j++){
+    const v=grid[i][j], X=ox+j*sc, Y=oy+i*sc;
+    if(v==null){ ctx.fillStyle="rgba(128,128,128,.25)"; ctx.fillRect(X+1,Y+1,sc-2,sc-2); continue; }
+    const col=imgDiffColor(v.v,thr);
+    ctx.fillStyle=`rgb(${col[0]|0},${col[1]|0},${col[2]|0})`;
+    ctx.fillRect(X+1,Y+1,sc-2,sc-2);
+    if(sc>34){ ctx.fillStyle="#fff"; ctx.font=`600 ${Math.min(15,sc*0.24)|0}px var(--mono,monospace)`;
+      ctx.fillText(`${v.c} ${v.v.toFixed(0)}%`, X+sc/2, Y+sc/2); } }
+  el("imgScale").textContent=`동컬러 diff 맵 · 셀=필드(그 필드의 최악 컬러 표시) · 초록 0% → 빨강 ${thr}%(기준) 이상`
+    +` · ${sel==="mean"?"각 컬러 on-band 전체 λ":"λ "+sel+"nm (on-band 컬러만)"} · 최악 ${worstCell.toFixed(1)}%`;
+}
 function imgDraw(){
   const r=IMG.res; if(!r) return;
+  if(el("imgViewSel").value==="diff"){ imgDrawDiff(); return; }
   const sel=el("imgWlSel").value;
   const A=(sel==="mean")? r.mean : r.images[sel];
   if(!A) return;
@@ -2453,7 +2520,7 @@ async function imgReattach(){
 }
 
 // ============================ init ============================
-const WIZ_VERSION="v107";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v108";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)
