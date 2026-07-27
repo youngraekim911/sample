@@ -471,6 +471,12 @@ def _run_doe_job(jid, cfg_path, p):
         with open(csv_path, "w", encoding="utf-8") as f:
             f.write(doe_mod.doe_csv(res))
         job["csv"] = csv_path
+        if p["mode"] == "axis" and not res.get("cancelled"):
+            # 스크리닝의 산출물 = '노브 중요도 랭킹' (모델/캐시 없음 — 화면에 표시)
+            try:
+                job["screening"] = doe_mod.screening_from_axis(res)
+            except Exception:
+                pass
         if not res.get("cancelled") and p["mode"] != "axis":
             if is_lhs:            # 넓은 공간 에뮬레이터(다중모델 + 교차검증 자동선택)
                 from ..sim.emulator import fit_emulator
@@ -652,7 +658,7 @@ class Handler(BaseHTTPRequestHandler):
                         ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                          "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
                          "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed",
-                         "ckpt_n", "ckpt_dir", "ckpt_error")
+                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening")
                         if k in job})
         elif u.path == "/api/doe/last":
             # 브라우저 재시작 후 재접속: 이 서버가 마지막으로 시작한 DOE 작업 상태.
@@ -664,7 +670,7 @@ class Handler(BaseHTTPRequestHandler):
                    ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                     "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
                     "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed",
-                         "ckpt_n", "ckpt_dir", "ckpt_error")
+                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening")
                    if k in job}
             out["job"] = LAST_DOE_JID
             self._json(out)

@@ -241,7 +241,7 @@
         <label class="hint" style="display:flex;flex-direction:column;gap:3px">방식
           <select id="doeMode" style="width:300px">
             <option value="lhs" selected>★ 예측 모델 만들기 — 넓은 범위 학습+신뢰도 검증 (권장)</option>
-            <option value="axis">빠른 스크리닝 — 어떤 노브가 중요한지만 (25회)</option>
+            <option value="axis">빠른 스크리닝 — 노브 중요도 순위만 (노브당 4회, 모델 없음)</option>
             <option value="surrogate">국소 정밀 모델 — 현재값 근처만 (85회)</option>
             <option value="full">전수조사 — 전 조합 (전문가·GPU)</option>
           </select></label>
@@ -330,6 +330,7 @@
       </div>
       <div id="doeDone" style="display:none;margin-top:12px">
         <span class="hint" id="doeSummary"></span>
+        <div id="doeScreen" style="display:none;margin-top:10px;padding:10px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px"></div>
         <div style="display:flex;gap:9px;margin-top:8px;flex-wrap:wrap">
           <a class="btn primary" id="doeExplore" style="display:none">🔭 결과 보기 — 모델 탐색에서 열기</a>
           <a class="btn" id="doeCsv" download="doe.csv">⤓ CSV (원자료)</a>
@@ -1717,11 +1718,13 @@ const DOE={running:false,timer:null,job:null,surrogate:null};
 const DEFAULT_AXES=["cf_R_dA","cf_G_dA","cf_B_dA","planar_um","ml_h_um","ml_scale"];
 DOE.axesCat=[]; DOE.axisSel=new Set(DEFAULT_AXES); DOE.axisStep={}; DOE.perWl=null;
 function doeModeSync(){
-  const lhs=el("doeMode").value==="lhs";
+  const mode=el("doeMode").value, lhs=mode==="lhs";
+  const needAxes=lhs||mode==="axis";              // 스크리닝도 '어떤 노브를 흔들지' 고름
   el("doeLhsRow").style.display = lhs?"flex":"none";
-  el("doeAxisBox").style.display = lhs?"block":"none";
+  el("doeAxisBox").style.display = needAxes?"block":"none";
   el("doeMeter").style.display = lhs?"block":"none";
-  if(lhs){ if(!DOE.axesCat.length) doeAxisLoad(); else doeMeterUpdate(); }
+  if(needAxes && !DOE.axesCat.length) doeAxisLoad();
+  else if(lhs) doeMeterUpdate();
 }
 el("doeMode").onchange=doeModeSync;
 async function doeAxisLoad(){
@@ -1840,6 +1843,33 @@ doeModeSync();
 function doeFmtSec(s){ s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600),m=Math.floor(s%3600/60); return (h?h+"시간 ":"")+(m?m+"분 ":"")+(s%60)+"초"; }
 function doeCvLabel(cv){ if(cv==null) return "?";
   return cv>=0.9?"높음 ✓":cv>=0.7?"보통 — 샘플 늘리면 좋아짐":"낮음 ⚠ 참고용 (샘플 늘려 재실행 권장)"; }
+// 스크리닝 결과 — 노브 중요도 랭킹 (모델을 만들지 않는 대신 이 순위가 산출물)
+function doeScreenRender(rows){
+  const box=el("doeScreen"); if(!box) return;
+  if(!rows||!rows.length){ box.style.display="none"; box.innerHTML=""; return; }
+  const mx=Math.max(...rows.map(r=>r.score),1e-9);
+  const CH_COL={R:"#e2624a",G:"#4fbf6a",B:"#4a8fe2"};
+  const html=rows.map((r,i)=>{
+    const chs=["R","G","B"].map(ch=>{ const d=r["d_"+ch];
+      return `<span style="color:${CH_COL[ch]};font-family:var(--mono)">${ch}${d>=0?"+":""}${d}</span>`; }).join(" ");
+    return `<tr><td class="hint" style="padding:2px 6px 2px 0">${i+1}</td>
+      <td style="padding:2px 8px 2px 0">${r.label}</td>
+      <td style="width:32%"><div style="height:8px;background:var(--panel);border-radius:4px">
+        <div style="height:100%;width:${Math.max(3,r.score/mx*100)}%;background:var(--accent);border-radius:4px"></div></div></td>
+      <td style="padding:2px 0 2px 8px;font-size:11px">${chs}</td></tr>`; }).join("");
+  box.innerHTML=`<div style="font-weight:600;margin-bottom:2px">🔍 스크리닝 결과 — QE 를 크게 움직이는 노브 순위</div>
+    <div class="hint" style="margin-bottom:7px">±1폭당 ΔQE 최대(파장 전체 중). 스크리닝은 <b>모델을 만들지 않아</b> 라이브러리에 저장되지 않습니다 —
+      아래 버튼으로 중요 노브만 골라 <b>예측 모델 만들기</b>로 이어가세요.</div>
+    <table style="font-size:12px;width:100%;border-collapse:collapse">${html}</table>
+    <button class="btn primary" id="doeScreenPick" style="margin-top:9px">⬆ 상위 ${Math.min(6,rows.length)}개 노브만 선택 → ★ 예측 모델 만들기</button>`;
+  box.style.display="";
+  el("doeScreenPick").onclick=()=>{
+    const top=rows.slice(0,6).map(r=>r.axis);
+    DOE.axisSel=new Set(top);
+    el("doeMode").value="lhs"; doeModeSync(); doeAxisRender();
+    box.scrollIntoView({behavior:"smooth"});
+  };
+}
 el("doeRun").onclick=async()=>{ if(DOE.running)return;
   await fetchServerMaterials();                                  // 물질 최신화 (run 과 동일 규약)
   const miss=usedMats().filter(matMissing);
@@ -1850,9 +1880,9 @@ el("doeRun").onclick=async()=>{ if(DOE.running)return;
     nG: manual? +el("doeNG").value : 151, downsample: manual? +el("doeDS").value : 2,
     force: el("doeForce")&&el("doeForce").checked };
   if(body.mode==="lhs"){ body.nsamples=+el("doeNsamples").value||80; body.bound=+el("doeBound").value||2;
-    body.model=el("doeModel").value; body.cv_folds=+el("doeCvFolds").value||5;
-    const ax=selectedAxes(); if(ax.length){ body.axes=ax;
-      if(ax.length<1){ alert("축을 1개 이상 선택하세요"); return; } } }
+    body.model=el("doeModel").value; body.cv_folds=+el("doeCvFolds").value||5; }
+  if(body.mode==="lhs"||body.mode==="axis"){       // 선택한 노브를 스크리닝에도 적용
+    const ax=selectedAxes(); if(ax.length) body.axes=ax; }
   let r; try{ r=await (await fetch("/api/doe",{method:"POST",body:JSON.stringify(body)})).json(); }
   catch(e){ alert("요청 실패: "+e.message); return; }
   if(!r.job){ alert("오류: "+(r.error||"?")); return; }
@@ -1880,6 +1910,7 @@ async function doePoll(){
   // 실측 파장당 시간 저장 → 다음 용량계량기 추정 정확도↑ (경과 / (완료조건 × 파장))
   if(s.elapsed_s>0 && s.doe_done>0 && !s.cached){ const nwl=+el("doeN").value||16;
     DOE.perWl=s.elapsed_s/(s.doe_done*nwl); }
+  doeScreenRender(s.screening);                  // 스크리닝이면 노브 중요도 랭킹 표시
   el("doeSummary").textContent=(s.state==="cancelled"?"중단됨 · ":"완료 · ")
     +`${s.doe_done}/${s.doe_total}${s.model?"샘플":"조건"} · ${doeFmtSec(s.elapsed_s||0)}`
     +(s.model?` · 모델 신뢰도 ${doeCvLabel(s.r2_cv_mean)} (CV R²=${s.r2_cv_mean})`
@@ -1911,6 +1942,12 @@ async function doeReattach(){
   if(s.state==="running"){
     doeAttach(s.job, s.doe_total, "🔄 실행 중이던 작업에 재접속 — "+(s.note||""));
     doeEnableDownstream();
+  } else if(s.state==="done" && s.screening){          // 스크리닝 결과 복구
+    DOE.job=s.job;
+    el("doeProg").style.display="none"; el("doeDone").style.display="";
+    el("doeSummary").textContent="🔄 이전 스크리닝 결과 · "+(s.note||"");
+    el("doeCsv").href=qeApiBase()+"/api/doe/file?job="+s.job+"&kind=csv";
+    doeScreenRender(s.screening);
   } else if((s.state==="done"||s.state==="cancelled") && s.r2_G_mid!=null){
     DOE.job=s.job;
     el("doeProg").style.display="none"; el("doeDone").style.display="";
@@ -2097,7 +2134,7 @@ async function invRun(){ if(!DOE.surrogate){ alert("surrogate 가 없습니다 �
     <table style="font-size:12px">${ps}</table>
     <div class="hint" style="margin-top:6px">점선 = 이 구조의 예측 QE. 실선(목표)과 겹칠수록 재현 정확. 스텝은 DOE 4축 정의 기준 실변화량입니다.</div>${edge}`; }
 // ============================ init ============================
-const WIZ_VERSION="v104";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v105";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)

@@ -378,6 +378,49 @@ def run_doe(cfg, wavelengths_nm, mode="surrogate", nG=151, downsample=2,
     return out
 
 
+def screening_from_axis(res):
+    """axis(스크리닝) 결과 -> 노브 중요도 랭킹.
+
+    각 축의 ±1스텝 중심차분 ΔQE 를 파장 전체에서 훑어, 채널별 최대(부호 유지)와
+    종합 점수(=채널 최대의 절대값 최대)를 계산. 점수 내림차순 정렬.
+    반환: [{axis,label,unit,step,d_R,wl_R,d_G,wl_G,d_B,wl_B,score}, ...]
+    """
+    axes = res["axes"]
+    pts = res["points"]
+    ws = [int(w) for w in res["wavelengths_nm"]]
+    k = len(axes)
+
+    def qe_at(steps):
+        for p in pts:
+            if len(p["steps"]) == k and all(abs(float(a) - float(b)) < 1e-9
+                                            for a, b in zip(p["steps"], steps)):
+                return p["qe"]
+        return None
+
+    rows = []
+    for i, ax in enumerate(axes):
+        sp, sm = [0] * k, [0] * k
+        sp[i], sm[i] = 1, -1
+        qp, qm = qe_at(sp), qe_at(sm)
+        if not qp or not qm:
+            continue
+        ent = {"axis": ax[0], "label": ax[1], "unit": ax[3], "step": ax[2]}
+        best = 0.0
+        for ch in "RGB":
+            dmax, wat = 0.0, ws[0]
+            for w in ws:
+                d = (float(qp[w][ch]) - float(qm[w][ch])) / 2.0
+                if abs(d) > abs(dmax):
+                    dmax, wat = d, w
+            ent["d_" + ch] = round(dmax, 5)
+            ent["wl_" + ch] = wat
+            best = max(best, abs(dmax))
+        ent["score"] = round(best, 5)
+        rows.append(ent)
+    rows.sort(key=lambda r: -r["score"])
+    return rows
+
+
 # ------------------------------------------------------------------ surrogate
 def _feat(x):
     """x(k,) 정규화 스텝(-1..1) -> 2차 특징 (1 + 2k + C(k,2))개.
