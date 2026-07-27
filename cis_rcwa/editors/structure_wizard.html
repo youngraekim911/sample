@@ -1633,8 +1633,12 @@ el("buildDone").onclick=()=>goPage("wpage-sim");
 el("simBack").onclick=()=>goPage("wpage-build");
 el("simQE").onclick=()=>goPage("wpage-set");
 el("simDOE").onclick=()=>{ goPage("wpage-set"); setTimeout(()=>el("doeCard").scrollIntoView({behavior:"smooth"}),80); };
-// lhs(넓은 에뮬레이터) 모드일 때만 전용 파라미터 행 표시
-// ── 설계축 선택 + 용량 계량기 ──
+el("setBack").onclick=()=>goPage("wpage-sim");
+
+// ===== DOE · Surrogate 스윕 =====
+const DOE={running:false,timer:null,job:null,surrogate:null};
+// ── 설계축 선택 + 용량 계량기 (lhs 모드 전용 UI) ──
+// 주의: DOE 를 쓰므로 반드시 위 const DOE 선언 뒤에 와야 함 (TDZ 오류로 스크립트 전체 중단)
 const DEFAULT_AXES=["cf_R_dA","cf_G_dA","cf_B_dA","planar_um","ml_h_um","ml_scale"];
 DOE.axesCat=[]; DOE.axisSel=new Set(DEFAULT_AXES); DOE.axisStep={}; DOE.perWl=null;
 function doeModeSync(){
@@ -1708,10 +1712,6 @@ function doeMeterUpdate(){ if(el("doeMode").value!=="lhs")return;
 }
 ["doeN","doeNsamples","doeModel","doeBound"].forEach(id=>{ const x=el(id); if(x){ x.addEventListener("input",doeMeterUpdate); x.addEventListener("change",doeMeterUpdate); } });
 doeModeSync();
-el("setBack").onclick=()=>goPage("wpage-sim");
-
-// ===== DOE · Surrogate 스윕 =====
-const DOE={running:false,timer:null,job:null,surrogate:null};
 function doeFmtSec(s){ s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600),m=Math.floor(s%3600/60); return (h?h+"시간 ":"")+(m?m+"분 ":"")+(s%60)+"초"; }
 el("doeRun").onclick=async()=>{ if(DOE.running)return;
   await fetchServerMaterials();                                  // 물질 최신화 (run 과 동일 규약)
