@@ -433,15 +433,33 @@ def _run_doe_job(jid, cfg_path, p):
                                    f"개 조건 재사용")
         ck_meta = {"mode": p["mode"], "product": str(cfg.get("product", "")),
                    "total": total}
-        on_point = ((lambda out: sc.save_checkpoint(_cache_dir(), key, out, ck_meta))
-                    if key else None)
+
+        def on_point_fn(out):
+            # 저장 성공/실패를 job 에 기록 — 진행 문구가 '실제 상태'를 말하게 한다
+            cdir = _cache_dir()
+            try:
+                sc.save_checkpoint(cdir, key, out, ck_meta)
+                job["ckpt_n"] = len(out["points"])
+                job["ckpt_dir"] = cdir
+                job.pop("ckpt_error", None)
+            except Exception as e:
+                job["ckpt_error"] = f"{type(e).__name__}: {e}"
+        on_point = on_point_fn if key else None
 
         def prog(done, tot, eta, point):
             job["doe_done"] = done
             job["progress"] = done / tot
             job["eta_s"] = round(eta)
+            if job.get("ckpt_error"):
+                ck = f" · ⚠ 중간저장 실패: {job['ckpt_error'][:60]}"
+            elif job.get("ckpt_n"):
+                ck = f" · 💾 {job['ckpt_n']}개 저장됨 → {job.get('ckpt_dir','')}"
+            elif not key:
+                ck = " · (이 모드는 중간저장 없음)"
+            else:
+                ck = ""
             job["note"] = (f"[{dev}] {done}/{tot} 조건 · 남은시간 ~{int(eta//60)}분"
-                           f"{int(eta % 60)}초 · 현재 {list(point)} · 💾 중간저장됨")
+                           f"{int(eta % 60)}초 · 현재 {list(point)}" + ck)
 
         res = doe_mod.run_doe(cfg, waves, mode=p["mode"], nG=p["nG"],
                               downsample=p["downsample"], lateral_n=p.get("lateral_n", 256),
@@ -496,8 +514,14 @@ def _run_doe_job(jid, cfg_path, p):
         partial_note = ""
         if res.get("cancelled") and key:
             npts = len(res.get("points") or [])
-            partial_note = (f" · 💾 {npts}개 조건 중간 저장됨 — 같은 조건으로 다시 "
-                            f"Run 하면 이어서 계산")
+            if job.get("ckpt_error"):
+                partial_note = f" · ⚠ 중간저장 실패: {job['ckpt_error'][:80]}"
+            elif job.get("ckpt_n"):
+                partial_note = (f" · 💾 {job['ckpt_n']}개 조건 저장됨 "
+                                f"({job.get('ckpt_dir','')}) — 같은 조건으로 다시 "
+                                f"Run 하면 이어서 계산")
+            else:
+                partial_note = " · (완료된 조건이 없어 중간저장 없음)"
             if is_lhs and npts >= max(10, len(axes) + 2):
                 try:                                   # 완료분만으로도 임시 모델 제공
                     from ..sim.emulator import fit_emulator
@@ -627,7 +651,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({k: job[k] for k in
                         ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                          "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
-                         "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed")
+                         "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed",
+                         "ckpt_n", "ckpt_dir", "ckpt_error")
                         if k in job})
         elif u.path == "/api/doe/last":
             # 브라우저 재시작 후 재접속: 이 서버가 마지막으로 시작한 DOE 작업 상태.
@@ -638,7 +663,8 @@ class Handler(BaseHTTPRequestHandler):
             out = {k: job[k] for k in
                    ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                     "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
-                    "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed")
+                    "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed",
+                         "ckpt_n", "ckpt_dir", "ckpt_error")
                    if k in job}
             out["job"] = LAST_DOE_JID
             self._json(out)
