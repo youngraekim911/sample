@@ -1595,12 +1595,26 @@ def _seed_user_assets():
         return
     for sub in ("data", "conf"):
         src, dst = os.path.join(ASSET_ROOT, sub), os.path.join(APP_DIR, sub)
-        if os.path.isdir(src) and not os.path.isdir(dst):
+        if not os.path.isdir(src):
+            continue
+        if not os.path.isdir(dst):
             try:
                 shutil.copytree(src, dst)
                 print(f"[cis-rcwa] 초기 자원 복사: {dst}")
             except Exception as e:
                 print(f"[cis-rcwa] 자원 복사 경고({sub}): {e}")
+            continue
+        # 구버전 exe 를 새 exe 로 교체한 경우: 번들에 '새로 생긴 하위 폴더'만
+        # 채워준다 (예: v107+ 의 data/cra 예시). 이미 있는 사용자 파일/폴더는
+        # 절대 덮어쓰지 않음.
+        for name in os.listdir(src):
+            s2, d2 = os.path.join(src, name), os.path.join(dst, name)
+            if os.path.isdir(s2) and not os.path.exists(d2):
+                try:
+                    shutil.copytree(s2, d2)
+                    print(f"[cis-rcwa] 신규 자원 복사: {d2}")
+                except Exception as e:
+                    print(f"[cis-rcwa] 자원 복사 경고({sub}/{name}): {e}")
 
 
 def serve(port=8787, open_browser=True):
