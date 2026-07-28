@@ -465,6 +465,23 @@
         <div id="qeTable" style="max-height:220px;overflow:auto;font:11px/1.7 var(--mono);margin-top:6px"></div></details>
       <div style="margin-top:14px"><button class="btn ghost" id="qeCsv" disabled>⤓ CSV</button></div>
 
+      <div id="efPanel" style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
+        <h3 style="margin:0 0 4px">🔦 E-Field 초점 프로파일 <span class="hint" style="font-weight:400">— XZ 단면 |E|² (초점면 확인)</span></h3>
+        <p class="hint" style="margin:0 0 10px">ML 이 빛을 어디에 모으는지 — 픽셀 행 중심으로 자른 단면 컬러맵 (TE/TM 평균, 직광).
+          흰 실선 = <b>Si 표면</b>, 점선 = 층 경계. 밝은 곳이 초점입니다.</p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="쉼표로 구분 (최대 6개)">λ (nm)<input id="efWl" type="text" value="450, 525, 600" style="width:150px"></label>
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="이 픽셀 행의 중심 y 로 단면을 자릅니다">픽셀 행<select id="efRow" style="width:110px"></select></label>
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px">보기 구간
+            <select id="efZoom" style="width:150px"><option value="pd" selected>PD 상단 (CF→Si 상부)</option><option value="si">Si 내부 (초점 영역)</option><option value="full">전체 스택</option></select></label>
+          <button class="btn primary" id="efRun">▶ E-Field 계산</button>
+          <button class="btn" id="efCancel" style="display:none">■ 중단</button>
+          <a class="btn ghost" id="efDlPng" style="display:none" download="efield.png">⤓ PNG</a>
+          <span class="hint" id="efNote"></span>
+        </div>
+        <div id="efBox" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+      </div>
+
       <div id="attrPanel" style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
         <h3 style="margin:0 0 4px">🔬 원인분석 — QE 에너지 귀속</h3>
         <p class="hint" style="margin:0 0 10px">그래프의 <b>점(파장)을 클릭</b>하면 입사광 1.0 이 어디로 갔는지<br>
@@ -1775,7 +1792,8 @@ function goPage(id){
   if(id==="wpage-img"){ lastSetPage=id; imgEnterSettings(); }
   if(id==="wpage-build"){ renderStep(); renderViews(); }
   if(id==="wpage-result"){ drawQEChart(); qeTableFill();
-    invBind(); invUpdateAvail(); if(DOE.surrogate&&INV.nodes.length) drawInvChart(); }
+    invBind(); invUpdateAvail(); if(DOE.surrogate&&INV.nodes.length) drawInvChart();
+    if(typeof efRowFill==="function"){ efRowFill(); efReattach(); } }
   renderNav(); window.scrollTo(0,0);
 }
 function renderNav(){
@@ -2578,8 +2596,118 @@ async function imgReattach(){
   } finally { IMG._reatt=false; }
 }
 
+// ===== 🔦 E-Field 초점 프로파일 — XZ 단면 |E|² (파장별) =====
+const EF={job:null,timer:null,running:false,res:null};
+function efRowFill(){ const sel=el("efRow"); if(!sel) return;
+  const np=+S.grid.n_pixels||4, cur=+sel.value||1; sel.innerHTML="";
+  for(let r=1;r<=np;r++){ const o=document.createElement("option"); o.value=r;
+    const lab=(S.bayer&&S.bayer[r-1])?` (${S.bayer[r-1].join("")})`:"";
+    o.textContent=`행 ${r}${lab}`; sel.appendChild(o); }
+  sel.value=Math.min(cur,np); }
+el("efRun").onclick=async()=>{ if(EF.running)return;
+  const ws=el("efWl").value.split(/[,\s]+/).map(Number).filter(v=>v>=200&&v<=1200).slice(0,6);
+  if(!ws.length){ alert("λ 를 쉼표로 입력하세요 (예: 450, 525, 600)"); return; }
+  await fetchServerMaterials();
+  const miss=usedMats().filter(matMissing);
+  if(miss.length){ alert("❌ 물질 폴더에 없는 물질: "+miss.join(", ")); return; }
+  const body={ yaml:structYAML(), wavelengths_nm:ws, row:+el("efRow").value||1,
+    nG:(el("qeQual")&&el("qeQual").value==="manual")? +el("qeNG").value||101 : 101, downsample:2 };
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/efield",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
+  catch(e){ alert("서버 요청 실패: "+e.message); return; }
+  if(r.error){ alert("❌ "+r.error); return; }
+  EF.job=r.job; EF.running=true; EF.res=null;
+  el("efRun").disabled=true; el("efCancel").style.display=""; el("efDlPng").style.display="none";
+  el("efNote").textContent="시작…"; el("efBox").innerHTML="";
+  if(EF.timer)clearInterval(EF.timer); EF.timer=setInterval(efPoll,1200); efPoll(); };
+el("efCancel").onclick=()=>{ if(!EF.job)return;
+  el("efNote").textContent="중단 요청됨 — 진행 중 파장만 마무리";
+  fetch(qeApiBase()+"/api/doe/cancel",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({job:EF.job})}); };
+async function efPoll(){
+  let s; try{ s=await(await fetch(qeApiBase()+"/api/doe/status?job="+EF.job)).json(); }catch(e){ return; }
+  if(s&&s.error&&!s.state){ clearInterval(EF.timer); EF.running=false;
+    el("efRun").disabled=false; el("efCancel").style.display="none";
+    el("efNote").textContent="작업을 찾을 수 없음 (서버 재시작?)"; return; }
+  if(s.state==="running"){ el("efNote").textContent=s.note||""; return; }
+  clearInterval(EF.timer); EF.running=false;
+  el("efRun").disabled=false; el("efCancel").style.display="none";
+  if(s.state==="error"){ el("efNote").textContent="❌ "+(s.error||"오류"); return; }
+  if(!s.efield_ready){ el("efNote").textContent="중단됨 — 완료된 파장이 없습니다."; return; }
+  let r; try{ r=await(await fetch(qeApiBase()+"/api/efield/file?job="+EF.job+"&kind=json")).json(); }
+  catch(e){ el("efNote").textContent="결과 로드 실패: "+e.message; return; }
+  EF.res=r;
+  el("efDlPng").style.display=""; el("efDlPng").href=qeApiBase()+"/api/efield/file?job="+EF.job+"&kind=png";
+  el("efNote").textContent=(s.state==="cancelled"?"중단(부분) · ":"완료 · ")
+    +`행 ${r.row} · ${fmtSec(s.elapsed_s||0)}`;
+  el("efZoom").onchange=efDraw; efDraw(); }
+// inferno 근사(6점 선형) — 초점(밝은 곳)이 노랑-흰색으로 도드라짐
+function efInferno(t){ const P=[[0,0,4],[40,11,84],[120,28,109],[188,55,84],[236,121,36],[251,213,118]];
+  t=Math.max(0,Math.min(1,t)); const x=t*5, i=Math.min(4,Math.floor(x)), f=x-i, a=P[i], b=P[i+1];
+  return [a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f]; }
+function efDraw(){
+  const r=EF.res; if(!r) return;
+  const box=el("efBox"); box.innerHTML="";
+  const zm=el("efZoom").value;
+  r.wavelengths_nm.forEach(w=>{
+    const m=r.maps[String(w)]; if(!m) return;
+    const z=m.z_um, X=m.x_um.length, si=(m.boundaries.find(b=>/si/i.test(b.tag))||{}).z_um;
+    // 보기 구간: PD 상단 = CF 시작(cf_grid)부터 Si 표면 아래 +1.8µm (초점 영역)
+    let z0=0, z1=m.total_um;
+    if(zm==="pd"){ const cf=(m.boundaries.find(b=>/cf/i.test(b.tag))||{}).z_um;
+      z0=(cf!=null?cf:0); z1=Math.min(m.total_um,(si!=null?si:z1)+1.8); }
+    else if(zm==="si"&&si!=null){ z0=Math.max(0,si-0.15); z1=Math.min(m.total_um,si+2.6); }
+    const rows=[]; for(let i=0;i<z.length;i++) if(z[i]>=z0&&z[i]<=z1) rows.push(i);
+    if(!rows.length) return;
+    // 구간 내 재정규화 (전체 max 가 ML 정상파에 가려 Si 초점이 안 보이는 것 방지)
+    let mx=0; rows.forEach(i=>m.I[i].forEach(v=>{ if(v>mx)mx=v; })); mx=mx||1;
+    const off=document.createElement("canvas"); off.width=X; off.height=rows.length;
+    const octx=off.getContext("2d"), im=octx.createImageData(X,rows.length);
+    let k=0;
+    rows.forEach(i=>{ for(let j=0;j<X;j++){ const c=efInferno(Math.sqrt(m.I[i][j]/mx));   // γ=0.5 — 약한 필드도 보이게
+      im.data[k++]=c[0]|0; im.data[k++]=c[1]|0; im.data[k++]=c[2]|0; im.data[k++]=255; } });
+    octx.putImageData(im,0,0);
+    const wrap=document.createElement("div"); wrap.style.cssText="flex:1;min-width:230px;max-width:330px";
+    const cv=document.createElement("canvas"); cv.width=300; cv.height=440;
+    cv.style.cssText="width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel)";
+    const ctx=cv.getContext("2d");
+    ctx.imageSmoothingEnabled=true;
+    const padT=20,padB=16,padL=2,padR=2, W=cv.width-padL-padR, H=cv.height-padT-padB;
+    ctx.drawImage(off,padL,padT,W,H);
+    const zPix=zz=>padT+(zz-z0)/(z1-z0)*H;
+    m.boundaries.forEach(b=>{ if(b.z_um<z0||b.z_um>z1) return;
+      const isSi=/si/i.test(b.tag), y=zPix(b.z_um);
+      ctx.strokeStyle=isSi?"#fff":"rgba(255,255,255,.55)"; ctx.lineWidth=isSi?1.6:0.8;
+      ctx.setLineDash(isSi?[]:[3,3]);
+      ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(padL+W,y); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle=isSi?"#fff":"rgba(255,255,255,.75)"; ctx.font="10px "+
+        (getComputedStyle(document.documentElement).getPropertyValue("--mono")||"monospace");
+      ctx.textAlign="left"; ctx.fillText(b.tag,padL+3,y-3); });
+    ctx.fillStyle="var(--ink)"; ctx.font="600 12px system-ui"; ctx.textAlign="center";
+    ctx.fillStyle=getComputedStyle(document.body).color;
+    ctx.fillText(`${w} nm`,cv.width/2,13);
+    // Si 내 초점 깊이 (그 파장의 최대 강도 z, Si 내부만)
+    let fz=null,fv=0;
+    if(si!=null) rows.forEach(i=>{ if(z[i]>=si){ const v=Math.max(...m.I[i]); if(v>fv){fv=v;fz=z[i];} } });
+    const cap=document.createElement("div"); cap.className="hint";
+    cap.style.cssText="margin-top:3px;font-family:var(--mono);font-size:11px";
+    cap.textContent=(fz!=null)?`Si 내 최대 |E|² 깊이: Si 표면 +${(fz-si).toFixed(2)}µm`:"";
+    wrap.appendChild(cv); wrap.appendChild(cap); box.appendChild(wrap);
+  });
+}
+async function efReattach(){
+  if(EF.running||EF.res) return;
+  let s; try{ s=await(await fetch(qeApiBase()+"/api/efield/last")).json(); }catch(e){ return; }
+  if(!s||!s.job) return;
+  EF.job=s.job;
+  if(s.state==="running"){ EF.running=true; el("efRun").disabled=true; el("efCancel").style.display="";
+    el("efNote").textContent="🔄 실행 중이던 계산에 재접속"; if(EF.timer)clearInterval(EF.timer);
+    EF.timer=setInterval(efPoll,1200); efPoll(); }
+  else if(s.efield_ready){ efPoll(); }
+}
+
 // ============================ init ============================
-const WIZ_VERSION="v113";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v114";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)

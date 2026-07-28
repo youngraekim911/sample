@@ -792,6 +792,88 @@ def _run_image_job(jid, cfg_path, p):
         job["state"] = "error"
 
 
+# --------------------------------------------------------------- E-Field 단면
+LAST_EF_JID = None
+
+
+def _run_efield_job(jid, cfg_path, p):
+    """XZ 단면 |E|² (파장별) — ML→Si 초점면 시각화. json + png 저장."""
+    job = JOBS[jid]
+    try:
+        from ..config.loader import load_config
+        from ..sim.simulator import RCWAPlaneWaveSimulator
+        from ..structure.blocks import ir_from_wizard_cfg
+        cfg = load_config(cfg_path)
+        RCWAPlaneWaveSimulator._auto_model_defaults(cfg)
+        sim = RCWAPlaneWaveSimulator(
+            ir_from_wizard_cfg(cfg, p.get("lateral_n", 256)),
+            nG=p["nG"], downsample=p["downsample"], materials_dir=_materials_dir())
+        dev = "cuda(GPU)" if torch.cuda.is_available() else "cpu"
+        job["device"] = dev
+        waves = p["wavelengths_nm"]
+        job["doe_total"] = len(waves)
+        job["doe_done"] = 0
+        t0 = time.time()
+        maps = {}
+        for wi, w in enumerate(waves):
+            if job["cancel"]:
+                break
+            job["note"] = f"[{dev}] λ {w}nm 계산중… ({wi+1}/{len(waves)})"
+            r = sim.efield_xz(w / 1000.0, row=p["row"], Ny=96, Nx=144,
+                              nz_per_um=p.get("nz_per_um", 24),
+                              cancel=lambda: job["cancel"])
+            if r is None:
+                break
+            maps[int(w)] = r
+            job["doe_done"] = wi + 1
+            job["progress"] = (wi + 1) / len(waves)
+        if not maps:
+            raise ValueError("계산된 파장이 없습니다 (시작 직후 중단됨)")
+        res = {"wavelengths_nm": sorted(maps), "row": p["row"],
+               "product": str(cfg.get("product", "")),
+               "maps": {str(k): v for k, v in maps.items()}}
+        jp = os.path.join(JOBS_DIR, jid + "_efield.json")
+        with open(jp, "w", encoding="utf-8") as f:
+            json.dump(res, f, ensure_ascii=False)
+        job["efield"] = jp
+        try:                                        # png (λ별 패널)
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            ws = sorted(maps)
+            fig, axes = plt.subplots(1, len(ws), figsize=(3.1 * len(ws), 5.6),
+                                     sharey=True)
+            axes = np.atleast_1d(axes)
+            for ax, w in zip(axes, ws):
+                m = maps[w]
+                I = np.asarray(m["I"])
+                ax.imshow(I, aspect="auto", cmap="inferno", origin="upper",
+                          extent=[0, m["span_um"], m["total_um"], 0])
+                for b in m["boundaries"]:
+                    si = "si" in str(b["tag"]).lower()
+                    ax.axhline(b["z_um"], color="w", lw=0.9 if si else 0.5,
+                               ls="-" if si else ":", alpha=0.9 if si else 0.6)
+                ax.set_title(f"{w} nm", fontsize=10)
+                ax.set_xlabel("x (um)")
+            axes[0].set_ylabel("z from top (um)")
+            fig.suptitle(f"|E|^2 XZ cut - pixel row {p['row']}", fontsize=11)
+            pp = os.path.join(JOBS_DIR, jid + "_efield.png")
+            fig.savefig(pp, dpi=120, bbox_inches="tight")
+            plt.close(fig)
+            job["png"] = pp
+        except Exception:
+            pass
+        job["efield_ready"] = True
+        job["elapsed_s"] = round(time.time() - t0, 1)
+        job["state"] = "cancelled" if job["cancel"] else "done"
+        job["note"] = (f"{'중단(부분)' if job['cancel'] else '완료'} · "
+                       f"λ {len(maps)}개 · 행 {p['row']} · {job['elapsed_s']}s")
+    except Exception as e:
+        job["error"] = f"{type(e).__name__}: {e}"
+        job["trace"] = traceback.format_exc()[-2000:]
+        job["state"] = "error"
+
+
 # --------------------------------------------------------------- BO(최적 조건 찾기)
 def _run_bo_job(jid, p):
     """베이지안 최적화 1라운드: 저장된 모델(키)의 원자료 -> GP+EI 로 다음 실험
@@ -1047,7 +1129,8 @@ class Handler(BaseHTTPRequestHandler):
                         ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                          "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
                          "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed",
-                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening", "bo", "image_ready")
+                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening", "bo", "image_ready",
+                         "efield_ready")
                         if k in job})
         elif u.path == "/api/doe/last":
             # 브라우저 재시작 후 재접속: 이 서버가 마지막으로 시작한 DOE 작업 상태.
@@ -1059,7 +1142,8 @@ class Handler(BaseHTTPRequestHandler):
                    ("state", "progress", "note", "error", "eta_s", "elapsed_s",
                     "doe_done", "doe_total", "r2_G_mid", "cached", "cache_key", "device",
                     "model", "r2_cv_mean", "r2_insample_mean", "per_model_cv", "naxes", "resumed",
-                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening", "bo", "image_ready")
+                         "ckpt_n", "ckpt_dir", "ckpt_error", "screening", "bo", "image_ready",
+                         "efield_ready")
                    if k in job}
             out["job"] = LAST_DOE_JID
             self._json(out)
@@ -1115,6 +1199,27 @@ class Handler(BaseHTTPRequestHandler):
             if not job or k not in job:
                 self.send_response(404); self.end_headers(); return
             self._file(job[k], ct)
+        elif u.path == "/api/efield/file":
+            q = parse_qs(u.query)
+            jid = (q.get("job") or [""])[0]
+            kind = (q.get("kind") or ["json"])[0]
+            job = JOBS.get(jid)
+            k, ct = (("png", "image/png") if kind == "png"
+                     else ("efield", "application/json"))
+            if not job or k not in job:
+                self.send_response(404); self.end_headers(); return
+            self._file(job[k], ct)
+        elif u.path == "/api/efield/last":
+            # 페이지 이동 후 마지막 E-field 잡 재접속
+            if not LAST_EF_JID or LAST_EF_JID not in JOBS:
+                self._json({"job": None}); return
+            job = JOBS[LAST_EF_JID]
+            out = {k: job[k] for k in
+                   ("state", "progress", "note", "error", "elapsed_s",
+                    "doe_done", "doe_total", "efield_ready", "device")
+                   if k in job}
+            out["job"] = LAST_EF_JID
+            self._json(out)
         elif u.path == "/api/image/last":
             # 페이지 이동/재시작 후 마지막 이미지 잡 재접속
             if not LAST_IMG_JID or LAST_IMG_JID not in JOBS:
@@ -1405,6 +1510,37 @@ class Handler(BaseHTTPRequestHandler):
                          "params": ip}
             LAST_IMG_JID = jid
             threading.Thread(target=_run_image_job, args=(jid, cfg_path, ip),
+                             daemon=True).start()
+            self._json({"job": jid})
+        elif u.path == "/api/efield":
+            # 🔦 E-Field 초점 프로파일 — 파장별 XZ 단면 |E|² (TE/TM 평균)
+            yaml_text = data.get("yaml") or ""
+            if not yaml_text.strip():
+                self._json({"error": "yaml 이 비었습니다"}, 400); return
+            try:
+                ws = [int(v) for v in (data.get("wavelengths_nm")
+                                       or [450, 525, 600])][:6]
+                assert ws and all(200 <= w <= 1200 for w in ws), "wavelengths_nm"
+                ng = max(9, int(data.get("nG", 101)))
+                ep = {"wavelengths_nm": ws,
+                      "row": max(1, int(data.get("row", 1))),
+                      "nG": ng if ng % 2 else ng + 1,
+                      "downsample": max(1, int(data.get("downsample", 2))),
+                      "lateral_n": max(64, int(data.get("lateral_n", 256))),
+                      "nz_per_um": max(8, min(64, int(data.get("nz_per_um", 24))))}
+            except (TypeError, ValueError, AssertionError) as e:
+                self._json({"error": f"파라미터 오류: {e}"}, 400); return
+            global LAST_EF_JID
+            os.makedirs(JOBS_DIR, exist_ok=True)
+            jid = "ef" + uuid.uuid4().hex[:9]
+            cfg_path = os.path.join(JOBS_DIR, jid + ".yaml")
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                f.write(yaml_text)
+            JOBS[jid] = {"state": "running", "progress": 0.0,
+                         "note": "구조 준비중…", "error": None, "cancel": False,
+                         "params": ep}
+            LAST_EF_JID = jid
+            threading.Thread(target=_run_efield_job, args=(jid, cfg_path, ep),
                              daemon=True).start()
             self._json({"job": jid})
         elif u.path == "/api/bo":

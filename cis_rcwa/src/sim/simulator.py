@@ -318,6 +318,61 @@ class RCWAPlaneWaveSimulator:
                 "QE_deep": float(T_deep)}
 
     # ------------------------------------------------------------- 진단
+    def efield_xz(self, wavelength, row=1, Ny=128, Nx=128, nz_per_um=24,
+                  theta=0.0, phi=0.0, cancel=None):
+        """XZ 단면 |E|² 맵 (TE/TM 평균) — ML→Si 초점면(focal plane) 시각화.
+
+        row: 1..npx 픽셀 행 — 그 행 중심 y 로 자른 단면. 전 층(스택 최상단부터
+        Si 바닥까지)을 층별 내부 필드 재구성(layer_internal_fields)으로 샘플.
+        반환: {"x_um":[Nx], "z_um":[nz], "I":[nz][Nx] (max=1 정규화),
+               "boundaries":[{"z_um","tag"}...](태그 바뀌는 경계만),
+               "row_labels":[그 행의 CFA 채널...], "span_um", "total_um"}
+        주의: 접선 성분 |Ex|²+|Ey|² (Ez 제외) — 초점 위치/모양 시각화 목적.
+        """
+        det = self.ir.detector
+        npx = int(round(np.sqrt(len(det.pixel_labels)))) if det else 2
+        row = max(1, min(npx, int(row)))
+        iy = min(Ny - 1, int(round((row - 0.5) / npx * Ny)))
+        acc = None
+        zs, bounds, total = [], [], 0.0
+        for pol in ((1.0, 0.0), (0.0, 1.0)):
+            if cancel and cancel():
+                return None
+            o = self.run(wavelength, theta=theta, phi=phi,
+                         pol_te=pol[0], pol_tm=pol[1], pixel_qe="diag")
+            sv = o["_solver"]
+            sv.absorption_profile()                  # _node_ab/_flux_calib 준비
+            rows_I, zc = [], []
+            z0, bl, prev = 0.0, [], None
+            for i, (_m2d, th) in enumerate(self.layer_stack):
+                if cancel and cancel():
+                    return None
+                tag = (self.ir.layer_tags[i]
+                       if self.ir.layer_tags and i < len(self.ir.layer_tags) else "")
+                if tag != prev:                      # 블록 경계만 기록 (ML/CF/BARL/Si…)
+                    bl.append({"z_um": round(z0, 4), "tag": tag})
+                    prev = tag
+                nz = max(2, int(round(float(th) * nz_per_um)))
+                zf = [(k + 0.5) / nz for k in range(nz)]
+                sl = sv.layer_internal_fields(i, zf, Ny, Nx)
+                for k, dslice in enumerate(sl):
+                    rows_I.append(dslice["E2"][iy].detach().cpu().numpy().real)
+                    zc.append(z0 + zf[k] * float(th))
+                z0 += float(th)
+            I = np.asarray(rows_I, float)
+            acc = I if acc is None else acc + I
+            zs, bounds, total = zc, bl, z0
+        acc *= 0.5
+        mx = float(acc.max()) or 1.0
+        labels = [det.pixel_labels[(row - 1) * npx + c] for c in range(npx)] \
+            if det else []
+        return {"x_um": [round(j * self.span / Nx, 4) for j in range(Nx)],
+                "z_um": [round(z, 4) for z in zs],
+                "I": [[round(float(v) / mx, 5) for v in r] for r in acc],
+                "boundaries": bounds, "row_labels": labels,
+                "span_um": round(float(self.span), 4),
+                "total_um": round(total, 4), "row": row, "peak_raw": round(mx, 5)}
+
     def diagnose(self, wavelength, theta=0.0):
         """물질 n,k 점검 + 경계 투과(T) 워터폴 — 전부 IR 기반.
 
