@@ -171,7 +171,7 @@
         <button class="wtile" id="simDOE"><span class="ic">🧪</span><div><div class="tt">DOE · Surrogate 스윕</div><div class="td">설계축을 흔들어 반응모델(에뮬레이터) 학습 — 오래 걸림(GPU/야간)</div></div></button>
         <button class="wtile" id="simExplore"><span class="ic">🔭</span><div><div class="tt">모델 탐색</div><div class="td">학습된 모델 불러와 슬라이더로 즉석 QE — RCWA 없이 실시간</div></div></button>
         <button class="wtile" id="simImg"><span class="ic">🌈</span><div><div class="tt">사광·이미지 시뮬</div><div class="td">필드별 CRA + F# 원뿔 평균 → 센서 전면 QE 맵 (옥탄트 8× 절감)</div></div></button>
-        <button class="wtile soon"><span class="ic">🔬</span><div><div class="tt">근접장 분포 <span class="wbadge">예정</span></div><div class="td">구조 내부 |E|² 필드 (준비중)</div></div></button>
+        <button class="wtile" id="simEF"><span class="ic">🔦</span><div><div class="tt">E-Field 분포</div><div class="td">구조 내부 |E|² — Si 초점면 XY 평면도 + 깊이 단면 XZ (초점이 2×2 중심에 오는지)</div></div></button>
       </div>
     </div>
   </div>
@@ -438,6 +438,38 @@
   <div class="wfoot"><button class="btn ghost" id="imgBack">← 시뮬 선택</button><div class="spacer"></div></div>
 </div>
 
+
+<!-- ══════════ 페이지 3d: E-Field 분포 ══════════ -->
+<div class="wpage" id="wpage-ef">
+  <div class="wpad">
+    <div class="wcard" style="max-width:1000px">
+      <div id="efGuide" class="hint" style="display:none;white-space:pre-wrap;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px"></div>
+      <div id="efPanel">
+        <h2>🔦 E-Field 분포 <span class="hint" style="font-weight:400;text-transform:none">— 구조 내부 |E|² · 초점면 확인</span></h2>
+        <p class="hint" style="margin:0 0 10px">ML→CF→BARL 을 지난 빛이 어디에 꽂히는지 (TE/TM 평균, 직광).
+          <b>평면 XY</b> = BARL–Si 경계면 바로 아래 4×4 픽셀 평면도 — 초점이 각 <b>2×2 중심</b>에 오는지 확인.
+          <b>단면 XZ</b> = 픽셀 행 중심 깊이 단면 (흰 실선 = Si 표면). 밝은 곳이 초점입니다.</p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="쉼표로 구분 (최대 6개)">λ (nm)<input id="efWl" type="text" value="450, 525, 600" style="width:150px"></label>
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="이 픽셀 행의 중심 y 로 단면을 자릅니다">픽셀 행<select id="efRow" style="width:110px"></select></label>
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="XY = BARL–Si 경계면(초점면) 평면도 — 초점이 2×2 중심에 꽂히는지 확인">표시
+            <select id="efView" style="width:170px"><option value="xy" selected>평면 XY (Si 초점면)</option><option value="xz">단면 XZ</option></select></label>
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px">보기 구간(XZ)
+            <select id="efZoom" style="width:150px"><option value="pd" selected>PD 상단 (CF→Si 상부)</option><option value="si">Si 내부 (초점 영역)</option><option value="full">전체 스택</option></select></label>
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="XY 평면을 Si 표면에서 얼마나 아래에서 자를지 (변경 시 재계산)">Si 아래 깊이(µm)
+            <input id="efOff" type="number" step="0.05" min="0" max="3" value="0.05" style="width:88px"></label>
+          <button class="btn primary" id="efRun">▶ E-Field 계산</button>
+          <button class="btn" id="efCancel" style="display:none">■ 중단</button>
+          <a class="btn ghost" id="efDlPng" style="display:none" download="efield.png">⤓ PNG</a>
+          <span class="hint" id="efNote"></span>
+        </div>
+        <div id="efBox" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+      </div>
+    </div>
+  </div>
+  <div class="wfoot"><button class="btn ghost" id="efBack">← 시뮬 선택</button><div class="spacer"></div></div>
+</div>
+
 <!-- ══════════ 페이지 4: 실행중 (로딩 게이지) ══════════ -->
 <div class="wpage" id="wpage-run">
   <div class="wpad">
@@ -464,28 +496,6 @@
       <details style="margin-top:10px"><summary class="hint" style="cursor:pointer">결과 표 (표로 보기)</summary>
         <div id="qeTable" style="max-height:220px;overflow:auto;font:11px/1.7 var(--mono);margin-top:6px"></div></details>
       <div style="margin-top:14px"><button class="btn ghost" id="qeCsv" disabled>⤓ CSV</button></div>
-
-      <div id="efPanel" style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
-        <h3 style="margin:0 0 4px">🔦 E-Field 초점 프로파일 <span class="hint" style="font-weight:400">— XZ 단면 |E|² (초점면 확인)</span></h3>
-        <p class="hint" style="margin:0 0 10px">ML→CF→BARL 을 지난 빛이 어디에 꽂히는지 (TE/TM 평균, 직광).
-          <b>평면 XY</b> = BARL–Si 경계면 바로 아래 4×4 픽셀 평면도 — 초점이 각 <b>2×2 중심</b>에 오는지 확인.
-          <b>단면 XZ</b> = 픽셀 행 중심 깊이 단면 (흰 실선 = Si 표면). 밝은 곳이 초점입니다.</p>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
-          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="쉼표로 구분 (최대 6개)">λ (nm)<input id="efWl" type="text" value="450, 525, 600" style="width:150px"></label>
-          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="이 픽셀 행의 중심 y 로 단면을 자릅니다">픽셀 행<select id="efRow" style="width:110px"></select></label>
-          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="XY = BARL–Si 경계면(초점면) 평면도 — 초점이 2×2 중심에 꽂히는지 확인">표시
-            <select id="efView" style="width:170px"><option value="xy" selected>평면 XY (Si 초점면)</option><option value="xz">단면 XZ</option></select></label>
-          <label class="hint" style="display:flex;flex-direction:column;gap:3px">보기 구간(XZ)
-            <select id="efZoom" style="width:150px"><option value="pd" selected>PD 상단 (CF→Si 상부)</option><option value="si">Si 내부 (초점 영역)</option><option value="full">전체 스택</option></select></label>
-          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="XY 평면을 Si 표면에서 얼마나 아래에서 자를지 (변경 시 재계산)">Si 아래 깊이(µm)
-            <input id="efOff" type="number" step="0.05" min="0" max="3" value="0.05" style="width:88px"></label>
-          <button class="btn primary" id="efRun">▶ E-Field 계산</button>
-          <button class="btn" id="efCancel" style="display:none">■ 중단</button>
-          <a class="btn ghost" id="efDlPng" style="display:none" download="efield.png">⤓ PNG</a>
-          <span class="hint" id="efNote"></span>
-        </div>
-        <div id="efBox" style="display:flex;gap:10px;flex-wrap:wrap"></div>
-      </div>
 
       <div id="attrPanel" style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
         <h3 style="margin:0 0 4px">🔬 원인분석 — QE 에너지 귀속</h3>
@@ -1792,22 +1802,24 @@ function goPage(id){
   for(const p of PAGES){ const e=el(p.id); if(e)e.classList.toggle("on", p.id===id); }
   const dz=el("wpage-doe"); if(dz) dz.classList.toggle("on", id==="wpage-doe");   // 별칭 페이지
   const iz=el("wpage-img"); if(iz) iz.classList.toggle("on", id==="wpage-img");   // 별칭 페이지
+  const ez=el("wpage-ef"); if(ez) ez.classList.toggle("on", id==="wpage-ef");     // 별칭 페이지
   if(id==="wpage-set"){ lastSetPage=id; qeEnterSettings(); }
   if(id==="wpage-doe"){ lastSetPage=id; doeEnterSettings(); }
   if(id==="wpage-img"){ lastSetPage=id; imgEnterSettings(); }
+  if(id==="wpage-ef"){ lastSetPage=id; efEnterSettings(); }
   if(id==="wpage-build"){ renderStep(); renderViews(); }
   if(id==="wpage-result"){ drawQEChart(); qeTableFill();
     invBind(); invUpdateAvail(); if(DOE.surrogate&&INV.nodes.length) drawInvChart();
-    if(typeof efRowFill==="function"){ efRowFill(); efReattach(); } }
+ }
   renderNav(); window.scrollTo(0,0);
 }
 function renderNav(){
   const nav=el("wnav"); if(!nav)return; nav.innerHTML="";
-  const navCur=(curPage==="wpage-doe"||curPage==="wpage-img")?"wpage-set":curPage;  // DOE/이미지 설정도 '3 설정' 칩
+  const navCur=(curPage==="wpage-doe"||curPage==="wpage-img"||curPage==="wpage-ef")?"wpage-set":curPage;  // DOE/이미지/E-Field 도 '3 설정' 칩
   const ci=pageIdx(navCur);
   PAGES.forEach((p,i)=>{
     if(i>0) nav.appendChild(h("span",{class:"wsep"},["›"]));
-    const reached=!!pageReached[p.id]||(p.id==="wpage-set"&&(pageReached["wpage-doe"]||pageReached["wpage-img"]));
+    const reached=!!pageReached[p.id]||(p.id==="wpage-set"&&(pageReached["wpage-doe"]||pageReached["wpage-img"]||pageReached["wpage-ef"]));
     const chip=h("div",{class:"wstep"+(p.id===navCur?" on":(reached&&i<ci?" done":""))+(reached?"":" disabled")},
       [h("span",{class:"wn"},[p.n]), p.label]);
     if(reached) chip.onclick=()=>goPage(p.id==="wpage-set"?lastSetPage:p.id);
@@ -2601,8 +2613,17 @@ async function imgReattach(){
   } finally { IMG._reatt=false; }
 }
 
-// ===== 🔦 E-Field 초점 프로파일 — XZ 단면 |E|² (파장별) =====
+// ===== 🔦 E-Field 분포 — Si 초점면 XY + 깊이 단면 XZ (전용 페이지) =====
 const EF={job:null,timer:null,running:false,res:null};
+el("simEF").onclick=()=>goPage("wpage-ef");
+el("efBack").onclick=()=>goPage("wpage-sim");
+async function efEnterSettings(){
+  const g=el("efGuide"), p=await qePing();
+  if(!p){ g.style.display="block"; el("efRun").disabled=true;
+    g.textContent="RCWA 서버가 꺼져 있습니다. 터미널에서 아래 한 줄을 실행하세요:\n\n  cd cis_rcwa && python app.py"; return; }
+  g.style.display="none"; el("efRun").disabled=EF.running;
+  efRowFill(); efReattach();
+}
 function efRowFill(){ const sel=el("efRow"); if(!sel) return;
   const np=+S.grid.n_pixels||4, cur=+sel.value||1; sel.innerHTML="";
   for(let r=1;r<=np;r++){ const o=document.createElement("option"); o.value=r;
@@ -2779,12 +2800,12 @@ async function efReattach(){
 }
 
 // ============================ init ============================
-const WIZ_VERSION="v115";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v116";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)
 (function(){
-  const map={"#sim":"wpage-sim","#set":"wpage-set","#doe":"wpage-doe","#img":"wpage-img","#result":"wpage-result"};
+  const map={"#sim":"wpage-sim","#set":"wpage-set","#doe":"wpage-doe","#img":"wpage-img","#ef":"wpage-ef","#result":"wpage-result"};
   const tgt=map[location.hash];
   if(tgt){ ["wpage-start","wpage-build","wpage-sim"].forEach(id=>pageReached[id]=true);
     goPage(tgt);
