@@ -805,9 +805,40 @@ def _run_efield_job(jid, cfg_path, p):
         from ..structure.blocks import ir_from_wizard_cfg
         cfg = load_config(cfg_path)
         RCWAPlaneWaveSimulator._auto_model_defaults(cfg)
+        ir = ir_from_wizard_cfg(cfg, p.get("lateral_n", 256))
+        # ── 사광(빗각) 입사: 각도 직접 또는 '센서 위치'(CRA 스펙 + 렌즈 shift) ──
+        theta, phi = float(p.get("theta", 0.0)), float(p.get("phi", 0.0))
+        obl_meta = {"theta_deg": round(theta, 2), "phi_deg": round(phi, 2)}
+        if p.get("field_mode"):
+            from ..sim import cra as cra_mod
+            from ..structure.blocks import apply_cra_shift
+            product = str(cfg.get("product", "")).strip()
+            spath = _cra_spec_path(product)
+            if not os.path.isfile(spath):
+                raise ValueError(f"센서 위치 모드에는 CRA 스펙이 필요합니다: "
+                                 f"data/cra/{product}.yaml 이 없습니다")
+            spec = cra_mod.load_cra_spec(spath)
+            xf, yf = float(p.get("x_field", 0.0)), float(p.get("y_field", 0.0))
+            r = math.hypot(xf, yf)
+            az = math.degrees(math.atan2(yf, xf)) if r > 1e-12 else 0.0
+            cm = cra_mod._interp_table(r, spec["module"])
+            cs = cra_mod._interp_table(r, spec["sensor"])
+            sign = float(spec.get("shift_sign", 1.0))
+            mml = sign * float(spec["ml_um_per_deg"]) * cs
+            mcf = sign * float(spec["cf_um_per_deg"]) * cs
+            azr = math.radians(az)
+            ux, uy = -math.cos(azr), -math.sin(azr)
+            ir = apply_cra_shift(ir, shift_ml_um=(mml * ux, mml * uy),
+                                 shift_cfgrid_um=(mcf * ux, mcf * uy))
+            theta, phi = cm, az
+            obl_meta = {"theta_deg": round(cm, 2), "phi_deg": round(az, 2),
+                        "field": {"x": xf, "y": yf, "r": round(r, 3),
+                                  "cra_deg": round(cm, 2),
+                                  "shift_ml_um": round(mml, 4),
+                                  "shift_cf_um": round(mcf, 4)}}
         sim = RCWAPlaneWaveSimulator(
-            ir_from_wizard_cfg(cfg, p.get("lateral_n", 256)),
-            nG=p["nG"], downsample=p["downsample"], materials_dir=_materials_dir())
+            ir, nG=p["nG"], downsample=p["downsample"],
+            materials_dir=_materials_dir())
         dev = "cuda(GPU)" if torch.cuda.is_available() else "cpu"
         job["device"] = dev
         waves = p["wavelengths_nm"]
@@ -821,6 +852,7 @@ def _run_efield_job(jid, cfg_path, p):
             job["note"] = f"[{dev}] λ {w}nm 계산중… ({wi+1}/{len(waves)})"
             r = sim.efield_xz(w / 1000.0, row=p["row"], Ny=96, Nx=144,
                               nz_per_um=p.get("nz_per_um", 24),
+                              theta=theta, phi=phi,
                               xy_offset_um=p.get("xy_offset_um", 0.05),
                               cancel=lambda: job["cancel"])
             if r is None:
@@ -832,6 +864,7 @@ def _run_efield_job(jid, cfg_path, p):
             raise ValueError("계산된 파장이 없습니다 (시작 직후 중단됨)")
         res = {"wavelengths_nm": sorted(maps), "row": p["row"],
                "product": str(cfg.get("product", "")),
+               "oblique": obl_meta,
                "maps": {str(k): v for k, v in maps.items()}}
         jp = os.path.join(JOBS_DIR, jid + "_efield.json")
         with open(jp, "w", encoding="utf-8") as f:
@@ -1545,7 +1578,12 @@ class Handler(BaseHTTPRequestHandler):
                       "lateral_n": max(64, int(data.get("lateral_n", 256))),
                       "nz_per_um": max(8, min(64, int(data.get("nz_per_um", 24)))),
                       "xy_offset_um":
-                          max(0.0, min(3.0, float(data.get("xy_offset_um", 0.05))))}
+                          max(0.0, min(3.0, float(data.get("xy_offset_um", 0.05)))),
+                      "theta": max(0.0, min(60.0, float(data.get("theta", 0.0)))),
+                      "phi": float(data.get("phi", 0.0)) % 360.0,
+                      "field_mode": bool(data.get("field_mode", False)),
+                      "x_field": max(-0.8, min(0.8, float(data.get("x_field", 0.0)))),
+                      "y_field": max(-0.6, min(0.6, float(data.get("y_field", 0.0))))}
             except (TypeError, ValueError, AssertionError) as e:
                 self._json({"error": f"파라미터 오류: {e}"}, 400); return
             global LAST_EF_JID

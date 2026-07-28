@@ -55,7 +55,17 @@ def load_cra_spec(path):
         data = node.get("data") or []
         fi = cols.index("field") if "field" in cols else 0
         ci = cols.index("cra_deg") if "cra_deg" in cols else len(cols) - 1
-        return [[float(r[fi]), float(r[ci])] for r in data]
+        rows = [[float(r[fi]), float(r[ci])] for r in data]
+        # field 가 촘촘(0.02 간격 등)하거나 행이 많아도/순서가 섞여도 안전:
+        # np.interp 는 오름차순 필수 → 정렬 + 중복 field 는 마지막 값 사용
+        rows.sort(key=lambda r: r[0])
+        dedup = []
+        for f, c in rows:
+            if dedup and abs(dedup[-1][0] - f) < 1e-12:
+                dedup[-1][1] = c
+            else:
+                dedup.append([f, c])
+        return dedup
 
     mod = table(sp.get("module_cra"))
     if mod is None and sp.get("field_cra_deg"):       # 간이 형식(리스트)도 허용

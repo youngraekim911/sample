@@ -449,7 +449,17 @@
         <p class="hint" style="margin:0 0 10px">ML→CF→BARL 을 지난 빛이 어디에 꽂히는지 (TE/TM 평균, 직광).
           <b>평면 XY</b> = BARL–Si 경계면 바로 아래 4×4 픽셀 평면도 — 초점이 각 <b>2×2 중심</b>에 오는지 확인.
           <b>단면 XZ</b> = 픽셀 행 중심 깊이 단면 (흰 실선 = Si 표면). 밝은 곳이 초점입니다.</p>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+        <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px">
+          <div>
+            <div class="hint" style="margin-bottom:4px">💡 광원 위치 — ☀ 를 드래그 (가운데 = 수직 입사)</div>
+            <canvas id="efPad" width="200" height="156" style="border:1px solid var(--line);border-radius:8px;background:var(--panel-2);cursor:grab;touch-action:none"></canvas>
+            <div class="hint" id="efPadInfo" style="font-family:var(--mono);font-size:11px;margin-top:3px">수직 입사 (직광)</div>
+            <label class="hint" style="display:inline-flex;gap:5px;align-items:center;margin-top:5px"
+              title="켜면: 그 센서 위치의 제품 CRA 로 입사각을 정하고 ML/CF 렌즈 shift(shrink)도 구조에 적용 — 보정 후 초점이 중심으로 돌아오는지 확인. 끄면: 각도만 기울임(구조 그대로)">
+              <input type="checkbox" id="efCra"> 제품 CRA 스펙 연동 (렌즈 shift 포함)</label>
+            <span class="hint" id="efCraStat" style="font-size:11px;display:block"></span>
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
           <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="쉼표로 구분 (최대 6개)">λ (nm)<input id="efWl" type="text" value="450, 525, 600" style="width:150px"></label>
           <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="이 픽셀 행의 중심 y 로 단면을 자릅니다">픽셀 행<select id="efRow" style="width:110px"></select></label>
           <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="XY = BARL–Si 경계면(초점면) 평면도 — 초점이 2×2 중심에 꽂히는지 확인">표시
@@ -462,6 +472,7 @@
           <button class="btn" id="efCancel" style="display:none">■ 중단</button>
           <a class="btn ghost" id="efDlPng" style="display:none" download="efield.png">⤓ PNG</a>
           <span class="hint" id="efNote"></span>
+          </div>
         </div>
         <div id="efBox" style="display:flex;gap:10px;flex-wrap:wrap"></div>
       </div>
@@ -2622,8 +2633,69 @@ async function efEnterSettings(){
   if(!p){ g.style.display="block"; el("efRun").disabled=true;
     g.textContent="RCWA 서버가 꺼져 있습니다. 터미널에서 아래 한 줄을 실행하세요:\n\n  cd cis_rcwa && python app.py"; return; }
   g.style.display="none"; el("efRun").disabled=EF.running;
-  efRowFill(); efReattach();
+  efRowFill(); efSpecCheck(); efPadDraw(); efReattach();
 }
+// ── 💡 광원 위치 패드: ☀=센서 위치. 가운데=수직 입사, 바깥=사광(CRA↑).
+//    CRA 연동 ON: 그 위치의 제품 CRA 각도 + ML/CF shift 를 구조에 적용.
+//    OFF: 각도만 (θ = r×코너각 선형근사, 구조 그대로).
+const EFP={x:0,y:0,corner:30,spec:false};
+async function efSpecCheck(){
+  const st=el("efCraStat");
+  let r=null; try{ r=await(await fetch(qeApiBase()+"/api/cra/spec?product="+encodeURIComponent((S.product||"").trim()))).json(); }catch(_){}
+  if(r&&r.found){ EFP.spec=true; EFP.corner=+r.cra_corner_deg||30;
+    el("efCra").disabled=false;
+    st.textContent=`✓ ${r.path} · 코너 CRA ${r.cra_corner_deg}°`; }
+  else{ EFP.spec=false; el("efCra").checked=false; el("efCra").disabled=true;
+    st.innerHTML=`<span style="color:#c9531a">스펙 없음(${(r&&r.path)||"data/cra/…"}) — 각도만 모드로 동작</span>`; }
+  efPadInfo(); }
+function efPadGeom(){ const cv=el("efPad");
+  const w=cv.width,h=cv.height,pad=14;
+  return {cv,w,h,pad,ox:w/2,oy:h/2,sx:(w/2-pad)/0.8,sy:(h/2-pad)/0.6}; }
+function efPadDraw(){
+  const g=efPadGeom(), ctx=g.cv.getContext("2d");
+  ctx.clearRect(0,0,g.w,g.h);
+  const X=x=>g.ox+x*g.sx, Y=y=>g.oy-y*g.sy;
+  // 센서 외곽(4:3) + r 가이드 타원 + 십자
+  ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue("--line")||"#888";
+  ctx.lineWidth=1; ctx.strokeRect(X(-0.8),Y(0.6),1.6*g.sx,1.2*g.sy);
+  [0.33,0.66,1.0].forEach(rr=>{ ctx.beginPath();
+    ctx.setLineDash([3,3]); ctx.ellipse(g.ox,g.oy,rr*0.8*g.sx,rr*0.6*g.sy,0,0,7); ctx.stroke(); ctx.setLineDash([]); });
+  ctx.beginPath(); ctx.moveTo(X(-0.8),g.oy); ctx.lineTo(X(0.8),g.oy);
+  ctx.moveTo(g.ox,Y(0.6)); ctx.lineTo(g.ox,Y(-0.6)); ctx.stroke();
+  // 중심→☀ 선 + ☀
+  const px=X(EFP.x), py=Y(EFP.y);
+  ctx.strokeStyle="#f2c14e"; ctx.lineWidth=1.6;
+  ctx.beginPath(); ctx.moveTo(g.ox,g.oy); ctx.lineTo(px,py); ctx.stroke();
+  ctx.font="16px system-ui"; ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText("☀",px,py-1);
+  ctx.font="9px var(--mono,monospace)"; ctx.fillStyle="rgba(128,128,128,.9)";
+  ctx.textAlign="left"; ctx.fillText("중심",g.ox+3,g.oy+8);
+  ctx.textAlign="right"; ctx.fillText("코너 r=1",X(0.8)-2,Y(0.6)+9);
+}
+function efPadInfo(){
+  const rn=Math.hypot(EFP.x,EFP.y);                 // r (코너=1)
+  const az=(rn<1e-9)?0:Math.atan2(EFP.y,EFP.x)*180/Math.PI;
+  const cra=rn*EFP.corner;                          // 선형 근사 — 정확값은 계산 후 표시
+  if(rn<0.02){ el("efPadInfo").textContent="수직 입사 (직광)"; return; }
+  const mode=el("efCra").checked?"CRA 스펙+shift":"각도만";
+  el("efPadInfo").textContent=`위치 (${EFP.x.toFixed(2)}, ${EFP.y.toFixed(2)}) · r=${rn.toFixed(2)}`
+    +` · θ≈${cra.toFixed(1)}° · 방위 ${az.toFixed(0)}° · ${mode}`;
+}
+(function(){
+  const cv=el("efPad"); if(!cv) return;
+  let drag=false;
+  const setFrom=e=>{ const g=efPadGeom(), rc=cv.getBoundingClientRect();
+    const mx=(e.clientX-rc.left)*g.w/rc.width, my=(e.clientY-rc.top)*g.h/rc.height;
+    let x=(mx-g.ox)/g.sx, y=-(my-g.oy)/g.sy;
+    x=Math.max(-0.8,Math.min(0.8,x)); y=Math.max(-0.6,Math.min(0.6,y));
+    if(Math.hypot(x,y)<0.05){ x=0; y=0; }        // 중심 스냅(직광)
+    EFP.x=+x.toFixed(2); EFP.y=+y.toFixed(2);
+    efPadDraw(); efPadInfo(); };
+  cv.addEventListener("pointerdown",e=>{ drag=true; cv.setPointerCapture(e.pointerId); setFrom(e); });
+  cv.addEventListener("pointermove",e=>{ if(drag) setFrom(e); });
+  ["pointerup","pointercancel"].forEach(t=>cv.addEventListener(t,()=>{ drag=false; }));
+  el("efCra").addEventListener("change",efPadInfo);
+})();
 function efRowFill(){ const sel=el("efRow"); if(!sel) return;
   const np=+S.grid.n_pixels||4, cur=+sel.value||1; sel.innerHTML="";
   for(let r=1;r<=np;r++){ const o=document.createElement("option"); o.value=r;
@@ -2636,9 +2708,14 @@ el("efRun").onclick=async()=>{ if(EF.running)return;
   await fetchServerMaterials();
   const miss=usedMats().filter(matMissing);
   if(miss.length){ alert("❌ 물질 폴더에 없는 물질: "+miss.join(", ")); return; }
+  const rn=Math.hypot(EFP.x,EFP.y);
   const body={ yaml:structYAML(), wavelengths_nm:ws, row:+el("efRow").value||1,
     xy_offset_um:+el("efOff").value||0.05,
     nG:(el("qeQual")&&el("qeQual").value==="manual")? +el("qeNG").value||101 : 101, downsample:2 };
+  if(rn>=0.02){
+    if(el("efCra").checked){ body.field_mode=true; body.x_field=EFP.x; body.y_field=EFP.y; }
+    else{ body.theta=rn*EFP.corner; body.phi=Math.atan2(EFP.y,EFP.x)*180/Math.PI; }
+  }
   let r; try{ r=await(await fetch(qeApiBase()+"/api/efield",{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
   catch(e){ alert("서버 요청 실패: "+e.message); return; }
@@ -2665,8 +2742,12 @@ async function efPoll(){
   catch(e){ el("efNote").textContent="결과 로드 실패: "+e.message; return; }
   EF.res=r;
   el("efDlPng").style.display=""; el("efDlPng").href=qeApiBase()+"/api/efield/file?job="+EF.job+"&kind=png";
+  let otxt="";
+  const ob=r.oblique||{};
+  if(ob.field) otxt=` · 사광: 위치(${ob.field.x},${ob.field.y}) CRA ${ob.field.cra_deg}° · ML shift ${ob.field.shift_ml_um}µm 적용`;
+  else if((+ob.theta_deg||0)>0.01) otxt=` · 사광: θ=${ob.theta_deg}° φ=${ob.phi_deg}°`;
   el("efNote").textContent=(s.state==="cancelled"?"중단(부분) · ":"완료 · ")
-    +`행 ${r.row} · ${fmtSec(s.elapsed_s||0)}`;
+    +`행 ${r.row} · ${fmtSec(s.elapsed_s||0)}`+otxt;
   el("efZoom").onchange=efDraw; el("efView").onchange=efDraw; efDraw(); }
 // inferno 근사(6점 선형) — 초점(밝은 곳)이 노랑-흰색으로 도드라짐
 function efInferno(t){ const P=[[0,0,4],[40,11,84],[120,28,109],[188,55,84],[236,121,36],[251,213,118]];
@@ -2800,7 +2881,7 @@ async function efReattach(){
 }
 
 // ============================ init ============================
-const WIZ_VERSION="v116";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v117";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)
