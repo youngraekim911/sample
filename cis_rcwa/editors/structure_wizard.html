@@ -467,13 +467,18 @@
 
       <div id="efPanel" style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
         <h3 style="margin:0 0 4px">🔦 E-Field 초점 프로파일 <span class="hint" style="font-weight:400">— XZ 단면 |E|² (초점면 확인)</span></h3>
-        <p class="hint" style="margin:0 0 10px">ML 이 빛을 어디에 모으는지 — 픽셀 행 중심으로 자른 단면 컬러맵 (TE/TM 평균, 직광).
-          흰 실선 = <b>Si 표면</b>, 점선 = 층 경계. 밝은 곳이 초점입니다.</p>
+        <p class="hint" style="margin:0 0 10px">ML→CF→BARL 을 지난 빛이 어디에 꽂히는지 (TE/TM 평균, 직광).
+          <b>평면 XY</b> = BARL–Si 경계면 바로 아래 4×4 픽셀 평면도 — 초점이 각 <b>2×2 중심</b>에 오는지 확인.
+          <b>단면 XZ</b> = 픽셀 행 중심 깊이 단면 (흰 실선 = Si 표면). 밝은 곳이 초점입니다.</p>
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
           <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="쉼표로 구분 (최대 6개)">λ (nm)<input id="efWl" type="text" value="450, 525, 600" style="width:150px"></label>
           <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="이 픽셀 행의 중심 y 로 단면을 자릅니다">픽셀 행<select id="efRow" style="width:110px"></select></label>
-          <label class="hint" style="display:flex;flex-direction:column;gap:3px">보기 구간
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="XY = BARL–Si 경계면(초점면) 평면도 — 초점이 2×2 중심에 꽂히는지 확인">표시
+            <select id="efView" style="width:170px"><option value="xy" selected>평면 XY (Si 초점면)</option><option value="xz">단면 XZ</option></select></label>
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px">보기 구간(XZ)
             <select id="efZoom" style="width:150px"><option value="pd" selected>PD 상단 (CF→Si 상부)</option><option value="si">Si 내부 (초점 영역)</option><option value="full">전체 스택</option></select></label>
+          <label class="hint" style="display:flex;flex-direction:column;gap:3px" title="XY 평면을 Si 표면에서 얼마나 아래에서 자를지 (변경 시 재계산)">Si 아래 깊이(µm)
+            <input id="efOff" type="number" step="0.05" min="0" max="3" value="0.05" style="width:88px"></label>
           <button class="btn primary" id="efRun">▶ E-Field 계산</button>
           <button class="btn" id="efCancel" style="display:none">■ 중단</button>
           <a class="btn ghost" id="efDlPng" style="display:none" download="efield.png">⤓ PNG</a>
@@ -2611,6 +2616,7 @@ el("efRun").onclick=async()=>{ if(EF.running)return;
   const miss=usedMats().filter(matMissing);
   if(miss.length){ alert("❌ 물질 폴더에 없는 물질: "+miss.join(", ")); return; }
   const body={ yaml:structYAML(), wavelengths_nm:ws, row:+el("efRow").value||1,
+    xy_offset_um:+el("efOff").value||0.05,
     nG:(el("qeQual")&&el("qeQual").value==="manual")? +el("qeNG").value||101 : 101, downsample:2 };
   let r; try{ r=await(await fetch(qeApiBase()+"/api/efield",{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json(); }
@@ -2640,13 +2646,79 @@ async function efPoll(){
   el("efDlPng").style.display=""; el("efDlPng").href=qeApiBase()+"/api/efield/file?job="+EF.job+"&kind=png";
   el("efNote").textContent=(s.state==="cancelled"?"중단(부분) · ":"완료 · ")
     +`행 ${r.row} · ${fmtSec(s.elapsed_s||0)}`;
-  el("efZoom").onchange=efDraw; efDraw(); }
+  el("efZoom").onchange=efDraw; el("efView").onchange=efDraw; efDraw(); }
 // inferno 근사(6점 선형) — 초점(밝은 곳)이 노랑-흰색으로 도드라짐
 function efInferno(t){ const P=[[0,0,4],[40,11,84],[120,28,109],[188,55,84],[236,121,36],[251,213,118]];
   t=Math.max(0,Math.min(1,t)); const x=t*5, i=Math.min(4,Math.floor(x)), f=x-i, a=P[i], b=P[i+1];
   return [a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f]; }
+// XY 평면(초점면) — 4×4 픽셀 위 초점 위치. quad(2×2) 격자 + 중심 십자 오버레이,
+// quad 별 피크↔중심 오프셋을 계산해 '중심에 꽂히는지'를 숫자로 판정.
+function efDrawXY(){
+  const r=EF.res; if(!r) return;
+  const box=el("efBox"); box.innerHTML="";
+  r.wavelengths_nm.forEach(w=>{
+    const m=r.maps[String(w)]; if(!m||!m.xy) return;
+    const n=m.xy.n, I=m.xy.I, sp=m.span_um, npx=(m.bayer||[]).length||4;
+    const off=document.createElement("canvas"); off.width=n; off.height=n;
+    const octx=off.getContext("2d"), im=octx.createImageData(n,n);
+    let k=0;
+    for(let i=0;i<n;i++) for(let j=0;j<n;j++){ const c=efInferno(Math.sqrt(I[i][j]));
+      im.data[k++]=c[0]|0; im.data[k++]=c[1]|0; im.data[k++]=c[2]|0; im.data[k++]=255; }
+    octx.putImageData(im,0,0);
+    const wrap=document.createElement("div"); wrap.style.cssText="flex:1;min-width:240px;max-width:340px";
+    const cv=document.createElement("canvas"); cv.width=320; cv.height=344;
+    cv.style.cssText="width:100%;border:1px solid var(--line);border-radius:8px;background:var(--panel)";
+    const ctx=cv.getContext("2d"), padT=20, S=(cv.width)/sp;
+    ctx.imageSmoothingEnabled=true;
+    ctx.drawImage(off,0,padT,cv.width,cv.width);
+    const X=u=>u*S, Y=v=>padT+v*S;
+    // 픽셀(얇게)·quad(굵게) 격자 + CFA 라벨
+    for(let i=0;i<=npx;i++){ const q=(i%2===0);
+      ctx.strokeStyle=q?"rgba(255,255,255,.85)":"rgba(255,255,255,.35)"; ctx.lineWidth=q?1.4:0.6;
+      ctx.beginPath(); ctx.moveTo(X(i*sp/npx),Y(0)); ctx.lineTo(X(i*sp/npx),Y(sp)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(X(0),Y(i*sp/npx)); ctx.lineTo(X(sp),Y(i*sp/npx)); ctx.stroke(); }
+    if(m.bayer){ ctx.font="10px var(--mono,monospace)"; ctx.textAlign="left";
+      for(let rr=0;rr<npx;rr++) for(let cc=0;cc<npx;cc++){
+        ctx.fillStyle="rgba(255,255,255,.8)";
+        ctx.fillText(m.bayer[rr][cc],X(cc*sp/npx)+3,Y(rr*sp/npx)+11); } }
+    // quad 중심 십자 + 초점 무게중심(centroid) 마커 — 초점은 링/도넛형이라
+    // argmax(링 위 한 점)가 아니라 강도 무게중심이 '어디에 꽂히는지'의 답이다.
+    const qn=npx/2, quads=[];
+    for(let qr=0;qr<qn;qr++) for(let qc=0;qc<qn;qc++){
+      const cx=(qc+0.5)*sp/qn, cy=(qr+0.5)*sp/qn;
+      ctx.strokeStyle="rgba(255,255,255,.9)"; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(X(cx)-6,Y(cy)); ctx.lineTo(X(cx)+6,Y(cy));
+      ctx.moveTo(X(cx),Y(cy)-6); ctx.lineTo(X(cx),Y(cy)+6); ctx.stroke();
+      const i0=Math.floor(qr*n/qn), i1=Math.floor((qr+1)*n/qn);
+      const j0=Math.floor(qc*n/qn), j1=Math.floor((qc+1)*n/qn);
+      let sw=0,sx=0,sy=0;
+      for(let i=i0;i<i1;i++) for(let j=j0;j<j1;j++){ const v=I[i][j];
+        sw+=v; sx+=v*(j+0.5); sy+=v*(i+0.5); }
+      const px=(sx/Math.max(sw,1e-9))*sp/n, py=(sy/Math.max(sw,1e-9))*sp/n;
+      ctx.strokeStyle="#35d1c4"; ctx.lineWidth=1.6;
+      ctx.beginPath(); ctx.arc(X(px),Y(py),5,0,7); ctx.stroke();
+      const lab=(m.bayer&&m.bayer[qr*2]&&m.bayer[qr*2][qc*2])||"";
+      quads.push({off:Math.hypot(px-cx,py-cy), sum:sw, lab}); }
+    ctx.fillStyle=getComputedStyle(document.body).color; ctx.font="600 12px system-ui"; ctx.textAlign="center";
+    ctx.fillText(`${w} nm · XY @ Si +${m.xy.offset_um}µm`,cv.width/2,13);
+    // 판정은 그 λ 가 실제 꽂히는(가장 밝은) quad 기준 — 어두운 quad 는 노이즈성
+    const bright=quads.reduce((a,b)=>b.sum>a.sum?b:a,quads[0]);
+    const tol=sp/npx*0.15;
+    const cap=document.createElement("div"); cap.className="hint";
+    cap.style.cssText="margin-top:3px;font-family:var(--mono);font-size:11px";
+    cap.textContent=`○=초점 무게중심, +=quad 중심 · 최대밝기 quad(${bright.lab}): 중심 오프셋 ${bright.off.toFixed(3)}µm`
+      +(bright.off<=tol?" ✓ 중심 정렬":" ⚠ 중심에서 벗어남");
+    wrap.appendChild(cv); wrap.appendChild(cap); box.appendChild(wrap);
+  });
+}
 function efDraw(){
   const r=EF.res; if(!r) return;
+  if(el("efView").value==="xy"){
+    const any=r.wavelengths_nm.some(w=>r.maps[String(w)]&&r.maps[String(w)].xy);
+    if(any){ efDrawXY(); return; }
+    el("efNote").textContent+=" · (이 결과엔 XY 평면이 없습니다 — 다시 계산하세요)";
+    el("efView").value="xz";
+  }
   const box=el("efBox"); box.innerHTML="";
   const zm=el("efZoom").value;
   r.wavelengths_nm.forEach(w=>{
@@ -2707,7 +2779,7 @@ async function efReattach(){
 }
 
 // ============================ init ============================
-const WIZ_VERSION="v114";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
+const WIZ_VERSION="v115";                       // 화면 좌상단 표시 — 캐시/구버전 확인용
 el("wizVer").textContent=WIZ_VERSION;
 renderStep(); goPage("wpage-start");           // 시작 페이지부터
 // 해시 딥링크: 모델 탐색 등 다른 페이지에서 특정 단계로 바로 진입 (#sim/#set/#doe/#result)

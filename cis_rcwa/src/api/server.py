@@ -821,6 +821,7 @@ def _run_efield_job(jid, cfg_path, p):
             job["note"] = f"[{dev}] λ {w}nm 계산중… ({wi+1}/{len(waves)})"
             r = sim.efield_xz(w / 1000.0, row=p["row"], Ny=96, Nx=144,
                               nz_per_um=p.get("nz_per_um", 24),
+                              xy_offset_um=p.get("xy_offset_um", 0.05),
                               cancel=lambda: job["cancel"])
             if r is None:
                 break
@@ -841,22 +842,37 @@ def _run_efield_job(jid, cfg_path, p):
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
             ws = sorted(maps)
-            fig, axes = plt.subplots(1, len(ws), figsize=(3.1 * len(ws), 5.6),
-                                     sharey=True)
-            axes = np.atleast_1d(axes)
-            for ax, w in zip(axes, ws):
+            has_xy = any("xy" in maps[w] for w in ws)
+            nr = 2 if has_xy else 1
+            fig, axes = plt.subplots(nr, len(ws),
+                                     figsize=(3.1 * len(ws), 5.0 * nr))
+            axes = np.array(axes).reshape(nr, len(ws))
+            for ci, w in enumerate(ws):
                 m = maps[w]
-                I = np.asarray(m["I"])
-                ax.imshow(I, aspect="auto", cmap="inferno", origin="upper",
-                          extent=[0, m["span_um"], m["total_um"], 0])
+                ax = axes[0][ci]
+                ax.imshow(np.asarray(m["I"]), aspect="auto", cmap="inferno",
+                          origin="upper", extent=[0, m["span_um"], m["total_um"], 0])
                 for b in m["boundaries"]:
                     si = "si" in str(b["tag"]).lower()
                     ax.axhline(b["z_um"], color="w", lw=0.9 if si else 0.5,
                                ls="-" if si else ":", alpha=0.9 if si else 0.6)
-                ax.set_title(f"{w} nm", fontsize=10)
+                ax.set_title(f"{w} nm (XZ)", fontsize=10)
                 ax.set_xlabel("x (um)")
-            axes[0].set_ylabel("z from top (um)")
-            fig.suptitle(f"|E|^2 XZ cut - pixel row {p['row']}", fontsize=11)
+                if has_xy and "xy" in m:
+                    ax2 = axes[1][ci]
+                    sp = m["span_um"]
+                    ax2.imshow(np.asarray(m["xy"]["I"]), cmap="inferno",
+                               origin="upper", extent=[0, sp, sp, 0])
+                    npx0 = len(m.get("bayer") or []) or 4
+                    for i in range(npx0 + 1):       # 픽셀/quad 경계
+                        lw = 1.0 if i % 2 == 0 else 0.4
+                        ax2.axhline(i * sp / npx0, color="w", lw=lw, alpha=0.6)
+                        ax2.axvline(i * sp / npx0, color="w", lw=lw, alpha=0.6)
+                    ax2.set_title(f"{w} nm (XY @ Si+{m['xy']['offset_um']}um)",
+                                  fontsize=10)
+                    ax2.set_xlabel("x (um)")
+            axes[0][0].set_ylabel("z from top (um)")
+            fig.suptitle(f"|E|^2 - pixel row {p['row']}", fontsize=11)
             pp = os.path.join(JOBS_DIR, jid + "_efield.png")
             fig.savefig(pp, dpi=120, bbox_inches="tight")
             plt.close(fig)
@@ -1527,7 +1543,9 @@ class Handler(BaseHTTPRequestHandler):
                       "nG": ng if ng % 2 else ng + 1,
                       "downsample": max(1, int(data.get("downsample", 2))),
                       "lateral_n": max(64, int(data.get("lateral_n", 256))),
-                      "nz_per_um": max(8, min(64, int(data.get("nz_per_um", 24))))}
+                      "nz_per_um": max(8, min(64, int(data.get("nz_per_um", 24)))),
+                      "xy_offset_um":
+                          max(0.0, min(3.0, float(data.get("xy_offset_um", 0.05))))}
             except (TypeError, ValueError, AssertionError) as e:
                 self._json({"error": f"파라미터 오류: {e}"}, 400); return
             global LAST_EF_JID
