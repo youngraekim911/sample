@@ -21,6 +21,10 @@ class MaterialResolver:
     # ------------------------------------------------------------- n,k
     def nk(self, name, lam):
         mconf = self.materials.get(name, {}) or {}
+        # ⓪ 혼합 물질 (mix: [[이름, 부피분율], ...]) — 유효매질. 구성 물질이 다시
+        #    폴더/분산/상수 어디서 오든 상관없어 λ 분산이 그대로 따라온다.
+        if mconf.get("mix"):
+            return self._mix_nk(mconf["mix"], lam)
         src = mconf.get("src", name)
         # ① 폴더 우선 (단일 진실원 — embedded 스냅샷보다 항상 최신)
         if self.matlib and self.matlib.has(src):
@@ -47,10 +51,34 @@ class MaterialResolver:
         n, k = self.nk(name, lam)
         return complex(n, k) ** 2
 
+    # ------------------------------------------------------------- 혼합(EMT)
+    def _mix_nk(self, spec, lam):
+        """부피평균 유전율 ε_eff = Σ fᵢ·εᵢ 로부터 (n,k).
+
+        산술(병렬) 평균을 쓰는 이유: RCWA 는 ε 의 푸리에 계수를 그대로 소비하므로
+        (Laurent rule), ∫ε 를 보존하는 산술평균이 해석기 정식화와 일치한다.
+        분율 합이 1 이 아니면 나머지는 마지막 항목이 아니라 오류로 본다(호출측 책임).
+        """
+        e = 0j
+        tot = 0.0
+        for name, f in spec:
+            f = float(f)
+            e += f * self.eps(str(name), lam)
+            tot += f
+        if abs(tot - 1.0) > 1e-6:
+            raise ValueError(f"mix 분율 합이 1 이 아님: {tot:.6f}")
+        n = complex(e) ** 0.5
+        if n.imag < 0:                                   # 흡수 매질 분기 고정
+            n = -n
+        return float(n.real), abs(float(n.imag))
+
     # ------------------------------------------------------------- 출처/범위 (진단용)
     def source(self, name):
         """(출처 문자열, 파장범위(µm) 또는 None) — nk() 와 동일 우선순위."""
         mconf = self.materials.get(name, {}) or {}
+        if mconf.get("mix"):
+            parts = " + ".join(f"{n}@{float(f):.3f}" for n, f in mconf["mix"])
+            return f"유효매질(mix: {parts})", None
         src = mconf.get("src", name)
         if self.matlib and (self.matlib.has(src) or self.matlib.has(name)):
             key = src if self.matlib.has(src) else name

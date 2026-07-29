@@ -76,6 +76,7 @@ class StructureIR:
     materials: dict = field(default_factory=dict)  # {name: {n,k[,src]}}
     dispersion: dict = field(default_factory=dict) # {name: [[lam,n,k],..]}
     layer_tags: list = None                        # 층별 출신 블록 이름 (위->아래, 옵션)
+    dti_emt: dict = None                           # 서브해상도 DTI 유효매질 치환 내역
 
     # ---------------------------------------------------------------- 기본
     @property

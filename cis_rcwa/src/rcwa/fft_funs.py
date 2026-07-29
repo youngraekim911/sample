@@ -90,3 +90,15 @@ def field_ifft(coeffs, m, n, Ny, Nx):
     F = torch.zeros((Ny, Nx), dtype=coeffs.dtype, device=coeffs.device)
     F[n % Ny, m % Nx] = coeffs
     return torch.fft.ifft2(F) * (Nx * Ny)
+
+
+def field_ifft_batch(coeffs, m, n, Ny, Nx):
+    """배치 버전: (B,N) 계수 -> (B,Ny,Nx) 필드.
+
+    z-슬라이스 여러 장을 ifft2 한 번(배치)으로 처리 — 호출 오버헤드 제거.
+    수치적으로 field_ifft 를 B 회 부른 것과 동일.
+    """
+    B = coeffs.shape[0]
+    F = torch.zeros((B, Ny, Nx), dtype=coeffs.dtype, device=coeffs.device)
+    F[:, n % Ny, m % Nx] = coeffs
+    return torch.fft.ifft2(F) * (Nx * Ny)

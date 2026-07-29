@@ -29,7 +29,8 @@ from .ir import StructureIR, Detector
 class BlockContext:
     """가로 격자 + 물질 id 할당 + 블록 간 공유 상태."""
 
-    def __init__(self, pitch_um, n_pixels, lateral_n, bayer=None, cf_array=None):
+    def __init__(self, pitch_um, n_pixels, lateral_n, bayer=None, cf_array=None,
+                 fourier_res_um=0.0):
         self.p = float(pitch_um)
         self.npx = int(n_pixels)
         self.span = self.p * self.npx
@@ -51,6 +52,10 @@ class BlockContext:
         self.dome_sag = None                              # Ml -> Coat/flush
         self.dome_mat = None
         self.coats = []                                   # ConformalCoat 누적
+        # RCWA 가 실제로 표현할 수 있는 최소 횡방향 형상 Λ/(2M+1). 0 = 미지정.
+        self.fourier_res_um = float(fourier_res_um or 0.0)
+        self.extra_materials = {}                         # 블록이 만든 유효매질 정의
+        self.dti_emt = None                               # SiDti -> 진단/로그
 
     def mat_id(self, name):
         if name not in self._idx:
@@ -104,6 +109,91 @@ class SiDtiBlock:
         ol = float(d.get("oxide_liner_um", 0) or 0)       # 구 스키마 호환 (단일 liner)
         return [(d.get("liner", "oxide"), ol)] if ol > 0 else []
 
+    # ------------------------------------------------------------------ 마스크
+    def _wall_masks(self, ctx, W):
+        """벽 폭 W 에 대한 (vAct, hAct, dx, dy, dxc, dyc, oddX, oddY, gx, gy).
+
+        기하(전기 격리)용과 광학(유효매질 확장)용 두 폭에 같은 규칙을 쓰기 위해 분리.
+        """
+        d = self.dti
+        p = ctx.p
+        mode = d.get("mode") or ("2x2_open" if d.get("center_open") else "1x1")
+        per = 2 * p if mode == "2x2" else p
+        dx = np.abs(ctx.X - np.round(ctx.X / per) * per)
+        dy = np.abs(ctx.Y - np.round(ctx.Y / per) * per)
+        vAct, hAct = dx < W / 2, dy < W / 2
+        dxc = dyc = oddX = oddY = None
+        gx = gy = 0.0
+        if mode == "2x2_open":
+            gx = float(d.get("center_gap_x_um", d.get("center_gap_um", 0)) or 0) / 2
+            gy = float(d.get("center_gap_y_um", d.get("center_gap_um", 0)) or 0) / 2
+            bi, bj = np.round(ctx.X / p), np.round(ctx.Y / p)
+            odd = lambda V: (lambda i: np.where(i % 2 != 0, i,
+                             np.where(V > i * p, i + 1, i - 1)))(np.round(V / p)) * p
+            dyc = np.abs(ctx.Y - odd(ctx.Y))
+            dxc = np.abs(ctx.X - odd(ctx.X))
+            oddX = (bi % 2 != 0)                          # intra-quad 수직 경계만 끊김/끝벽
+            oddY = (bj % 2 != 0)
+            vAct = vAct & ~(oddX & (dyc < gy))            # 팔 끊김 -> Si
+            hAct = hAct & ~(oddY & (dxc < gx))
+        return vAct, hAct, dx, dy, dxc, dyc, oddX, oddY, gx, gy
+
+    # -------------------------------------------------------- 서브해상도 판정
+    def _emt_width(self, ctx, W):
+        """서브해상도면 광학 표현에 쓸 확장 폭 W' 를, 아니면 None 을 돌려준다.
+
+        왜 필요한가 — RCWA 는 ε 을 유한 푸리에 차수로만 표현한다. 셀 주기 Λ, 유지
+        차수 ±M 이면 표현 가능한 최소 형상은 Δ=Λ/(2M+1). CIS DTI 는 폭 0.09µm 인데
+        Λ=2.8µm·nG=101(M=5) 이면 Δ≈0.26µm — 트렌치가 Δ 의 1/3 이라 '기하 그대로'
+        넣으면 잘린 고차 성분이 Gibbs 링잉으로 남아, 격리체가 아니라 가짜 회절격자로
+        동작한다(실측: 어두운 채널 R@550 이 DTI OFF 8.3% -> 기하 ON 12.2% 로 되레
+        악화. 같은 구조를 nG=401 로 풀면 7.2% 까지 내려가 '수치 오차'임이 확인됨).
+
+        해법 — 유지 차수 안에서 같은 ε 푸리에 계수를 갖는 등가 형상으로 바꾼다.
+        폭 W·대비 Δε 인 벽의 m 차 계수는 Δε(W/Λ)·sinc(mW/Λ). 폭을 W'=σW 로 넓히고
+        대비를 1/σ 로 희석하면 Δε(W/Λ)·sinc(mσW/Λ) — 유지 차수(mσW/Λ≲1)에서는
+        원본과 같고, 어차피 버려질 고차 성분만 사라진다. 즉 '해상도에 맞춰 번지게'
+        하는 것이 근사가 아니라, 이 해석기가 실제로 푸는 문제의 정확한 표현이다.
+        """
+        res = float(getattr(ctx, "fourier_res_um", 0.0) or 0.0)
+        if res <= 0:
+            return None
+        liners = self._liners()
+        tot_liner = min(sum(t for _, t in liners), W / 2)
+        feats = [W] + [t for _, t in liners if t > 0]
+        if W - 2 * tot_liner > 1e-9:
+            feats.append(W - 2 * tot_liner)
+        if min(feats) >= res:                             # 이미 표현 가능 -> 기하 그대로
+            return None
+        # 확장 폭: 해상도 셀 하나를 채우는 최소 폭. 단 픽셀 피치의 절반은 넘지 않게.
+        W_opt = min(max(res, W), 0.5 * ctx.p)
+        return W_opt if W_opt > W * (1 + 1e-6) else None
+
+    @staticmethod
+    def _emt_mix(ctx, geom_map, si_id, emt_mask, si_name):
+        """확장 마스크를 채울 유효매질 조성 — 셀 전체 ∫ε 를 정확히 보존.
+
+        폭만으로 1D 희석하면 벽 교차점(모서리)이 넓어진 만큼 Δε 총량이 줄어든다
+        (피치 0.7·W 0.09→0.26 에서 -13%). 그래서 분율을 '실제 래스터 면적비'로
+        잡는다: fᵢ = (진짜 트렌치 안 물질 i 픽셀수)/(확장 마스크 픽셀수), 나머지는 Si.
+        모드(1x1/2x2/2x2_open)·팔 끊김·끝벽 같은 위상까지 자동으로 반영된다.
+        """
+        n_emt = int(emt_mask.sum())
+        if n_emt <= 0:
+            return None
+        mix, used = [], 0.0
+        for rid in np.unique(geom_map):
+            if int(rid) == si_id:
+                continue
+            f = float((geom_map == rid).sum()) / n_emt
+            if f > 0:
+                mix.append((ctx.names[int(rid)], f))
+                used += f
+        if not mix or used >= 1.0:                        # 희석 여지 없음 -> 기하 유지
+            return None
+        mix.append((si_name, 1.0 - used))
+        return mix
+
     def build(self, ctx):
         si_id = ctx.mat_id(self.mat)
         ctx.det_band_um = self.th
@@ -121,39 +211,39 @@ class SiDtiBlock:
             ctx.trench = np.zeros_like(ctx.X, dtype=bool)
             return refl + [(ctx.zeros(self.mat), self.th)]
 
-        p = ctx.p
         W = float(d["width_um"])
+        # ① 실제 기하 그대로의 물질 맵 — 검출 제외(전기 격리)와 유효매질 조성의 기준.
+        out, trench = self._geom_map(ctx, W, si_id)
+        ctx.trench = trench                               # 광학 표현이 넓어져도 불변
+
+        # ② 서브해상도면 '푸리에 등가' 확장 벽(단일 유효매질)으로 광학 맵만 교체
+        W_opt = self._emt_width(ctx, W)
+        if W_opt is not None:
+            ev, eh, *_ = self._wall_masks(ctx, W_opt)
+            emt = ev | eh
+            mix = self._emt_mix(ctx, out, si_id, emt, self.mat)
+            if mix:
+                name = f"dti_emt_{int(round(W_opt * 1000))}nm"
+                ctx.extra_materials[name] = {"mix": [[m, float(f)] for m, f in mix]}
+                ctx.dti_emt = {"width_um": W, "optical_width_um": W_opt,
+                               "material": name, "mix": mix}
+                out = np.full(ctx.X.shape, si_id, dtype=np.uint8)
+                out[emt] = ctx.mat_id(name)
+        return refl + [(out, self.th)]
+
+    def _geom_map(self, ctx, W, si_id):
+        """실제 기하대로의 (물질 맵, 트렌치 마스크)."""
+        d = self.dti
         liners = self._liners()
         cum = np.cumsum([t for _, t in liners]) if liners else np.array([])
         tot_liner = min(float(cum[-1]) if len(cum) else 0.0, W / 2)
         mode = d.get("mode") or ("2x2_open" if d.get("center_open") else "1x1")
-        per = 2 * p if mode == "2x2" else p
-        dx = np.abs(ctx.X - np.round(ctx.X / per) * per)
-        dy = np.abs(ctx.Y - np.round(ctx.Y / per) * per)
-        vAct = dx < W / 2
-        hAct = dy < W / 2
-        dyc = dxc = None
-        oddX = oddY = None
-        gx = gy = 0.0
-        if mode == "2x2_open":
-            gx = float(d.get("center_gap_x_um", d.get("center_gap_um", 0)) or 0) / 2
-            gy = float(d.get("center_gap_y_um", d.get("center_gap_um", 0)) or 0) / 2
-            bi = np.round(ctx.X / p)
-            bj = np.round(ctx.Y / p)
-            odd = lambda V: (lambda i: np.where(i % 2 != 0, i,
-                             np.where(V > i * p, i + 1, i - 1)))(np.round(V / p)) * p
-            dyc = np.abs(ctx.Y - odd(ctx.Y))
-            dxc = np.abs(ctx.X - odd(ctx.X))
-            oddX = (bi % 2 != 0)                          # intra-quad 수직 경계만 끊김/끝벽
-            oddY = (bj % 2 != 0)
-            vAct = vAct & ~(oddX & (dyc < gy))            # 팔 끊김 -> Si
-            hAct = hAct & ~(oddY & (dxc < gx))
-        any_t = vAct | hAct
+        vAct, hAct, dx, dy, dxc, dyc, oddX, oddY, gx, gy = self._wall_masks(ctx, W)
         out = np.full(ctx.X.shape, si_id, dtype=np.uint8)
         fill_id = ctx.mat_id(d.get("fill", self.mat))
         core = (vAct & (dx <= W / 2 - tot_liner)) | (hAct & (dy <= W / 2 - tot_liner))
         # 우선순위(교차점 규약): 팔 끝벽 liner > core fill > 벽 liner > fill 기본
-        out[any_t] = fill_id
+        out[vAct | hAct] = fill_id
         lo = 0.0
         for (lname, lth), hi in zip(liners, cum):         # 벽 liner 스택 (벽->안쪽)
             lid = ctx.mat_id(lname)
@@ -170,8 +260,7 @@ class SiDtiBlock:
                 endh = hAct & oddY & (dxc >= gx + lo) & (dxc < gx + hi)
                 out[endv | endh] = lid
                 lo = float(hi)
-        ctx.trench = any_t
-        return refl + [(out, self.th)]
+        return out, (vAct | hAct)
 
 
 # ==========================================================================
@@ -579,7 +668,8 @@ class BlockStack:
             layers=[(m.astype(np.uint8), th) for m, th in reversed(layers)],
             region_materials={int(i): n for n, i in ctx._idx.items()},
             ambient=self.ambient, substrate=sub, detector=det,
-            materials=self.materials, dispersion=self.dispersion,
+            materials={**self.materials, **ctx.extra_materials},
+            dispersion=self.dispersion,
             layer_tags=list(reversed(tags)))
         if self.ambient != "air":
             ir.remap_material("air", self.ambient)
@@ -609,15 +699,21 @@ def blocks_from_wizard_cfg(cfg, men_slices=8, taper_slices=8):
     return blocks
 
 
-def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=8, men_slices=8, taper_slices=8):
-    """yaml v3 -> (블록 조립) -> IR."""
+def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=8, men_slices=8, taper_slices=8,
+                       fourier_res_um=0.0):
+    """yaml v3 -> (블록 조립) -> IR.
+
+    fourier_res_um : RCWA 가 표현 가능한 최소 횡방향 형상(Λ/(2M+1)). 서브해상도
+        구조(DTI 등)를 푸리에 등가 유효매질로 자동 치환하는 데 쓴다. 0 이면 미적용.
+    """
     # 구조 린트 — 누가 바꿔도 치명 실수는 여기서 명확한 메시지로 차단(모든 경로 공통 관문).
     from .lint import assert_wizard_cfg
     assert_wizard_cfg(cfg)
     g = cfg["grid"]
     ctx = BlockContext(pitch_um=g["pixel_pitch_um"], n_pixels=g["n_pixels"],
                        lateral_n=lateral_n, bayer=cfg.get("bayer"),
-                       cf_array=cfg.get("cf_array"))
+                       cf_array=cfg.get("cf_array"),
+                       fourier_res_um=fourier_res_um)
     stack = BlockStack(blocks_from_wizard_cfg(cfg, men_slices, taper_slices),
                        ambient=cfg.get("ambient", "air") or "air",
                        materials=dict(cfg.get("materials", {}) or {}),
@@ -628,7 +724,22 @@ def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=8, men_slices=8, taper_slices=8
                        collect_ld_um=float((cfg.get("collection") or {}).get("ld_um", 0.0)))
     # 후면 반사경은 SiDtiBlock 이 '밴드 아래 패턴 층'으로 삽입 (부분 커버리지 지원).
     # substrate 는 Si 유지 -> Cu 갭 사이로 투과된 빛은 심부 Si 흡수(손실).
-    return stack.to_ir(ctx)
+    ir = stack.to_ir(ctx)
+    ir.dti_emt = ctx.dti_emt                              # 진단/로그용 (없으면 None)
+    return ir
+
+
+def fourier_res_um(span_um, nG, trunc="circular"):
+    """RCWA 가 표현 가능한 최소 횡방향 형상 Λ/(2M+1) (M = 유지 최대 차수).
+
+    solver 와 같은 kbloch.get_G 를 써서 실제 유지 차수를 그대로 읽는다 —
+    truncation 방식(circular/parallelogramic)이 바뀌어도 자동으로 따라간다.
+    """
+    from ..rcwa import kbloch
+    g1, g2 = kbloch.reciprocal([float(span_um), 0.0], [0.0, float(span_um)])
+    m, n, _, _ = kbloch.get_G(int(nG), g1, g2, trunc)
+    M = int(max(int(m.abs().max()), int(n.abs().max())))
+    return float(span_um) / (2 * M + 1)
 
 
 # ==========================================================================

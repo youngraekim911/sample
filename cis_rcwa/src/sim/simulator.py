@@ -91,9 +91,11 @@ class RCWAPlaneWaveSimulator:
     def _auto_model_defaults(cfg):
         """yaml 에 없는 모델링 선택을 프로그램이 자동 판단 (명시값은 항상 우선).
 
-        - dti.optical 미지정: DTI 폭이 서브파장(W<0.15µm)이면 광학 생략(전기격리만).
-          가시광 λ 대비 훨씬 얇은 트렌치는 기하 TIR 이 성립하지 않아 광학적으로
-          유효 산란체가 아니며, 소자 QE 툴 관행도 광학 무시. 넓은 DTI 는 광학 반영.
+        - dti.optical 미지정: 항상 광학 반영. 실제 소자에서 트렌치 경계는 저굴절
+          라이너로 빛을 가둬 crosstalk 를 막는 광학 요소이므로 빼면 현실과 달라진다.
+          문제였던 '서브파장 트렌치를 넣으면 오히려 crosstalk 가 커지는' 현상은 물리가
+          아니라 푸리에 차수 부족(Gibbs 링잉)이었고, 이제 blocks.SiDtiBlock 이 유지
+          차수에 맞는 등가 유효매질로 자동 치환해 해결한다(사용자 설정 불필요).
         - collection 미지정: 소자 QE 기본 표면 dead-layer η(z)=1-r0·exp(-z/ld) 적용.
           순수 광학 QE 를 원하면 yaml 에 collection: {r0: 0} 명시.
         """
@@ -101,8 +103,7 @@ class RCWAPlaneWaveSimulator:
         d = st.get("dti")
         if d and (d.get("mode") or "").lower() not in ("", "none") \
                 and "optical" not in d:
-            W = float(d.get("width_um", 0) or 0)
-            d["optical"] = not (0 < W < 0.15)
+            d["optical"] = True
         if "collection" not in cfg:
             cfg["collection"] = {"r0": 0.35, "ld_um": 0.175}
 
@@ -115,15 +116,23 @@ class RCWAPlaneWaveSimulator:
                 self._auto_model_defaults(cfg)
                 # 블록 조립 경로 — dti.optical / collection 등 신규 기능 전부 반영
                 # (레거시 WizardBuilder 와 기하 동등, 회귀[6] 보장). yaml 경로도 이 경로.
-                from ..structure.blocks import ir_from_wizard_cfg
+                from ..structure.blocks import ir_from_wizard_cfg, fourier_res_um
                 Nlat = int(round(span / (float(lateral_um) * self.ds)))
                 Nlat = min(max(Nlat, 128), 2400)
-                ir = ir_from_wizard_cfg(cfg, Nlat)
+                res = fourier_res_um(span, self.nG, self.trunc)
+                ir = ir_from_wizard_cfg(cfg, Nlat, fourier_res_um=res)
                 opt = ((cfg.get("stack") or {}).get("dti") or {}).get("optical", True)
                 coll = cfg.get("collection") or {}
                 print(f"[builder] wizard v3 (blocks) · lateral {Nlat}×{Nlat} · "
                       f"layers {len(ir.layers)} · dti.optical={opt} · "
                       f"collection={'on' if (coll.get('r0',0) and coll.get('ld_um',0)) else 'off'}")
+                e = ir.dti_emt
+                if e:
+                    print(f"[builder] DTI 서브해상도 자동보정 — 푸리에 해상도 "
+                          f"{res:.3f}µm > 트렌치 {e['width_um']:.3f}µm → 등가 유효매질 "
+                          f"폭 {e['optical_width_um']:.3f}µm "
+                          f"({', '.join(f'{m} {f*100:.1f}%' for m, f in e['mix'])}) "
+                          f"· 검출 제외는 실제 폭 유지")
                 return ir
             # voxel 경로: 3D 복셀 -> IR (레거시 WizardBuilder, dti.optical/collection 미반영)
             from ..structure.wizard_builder import WizardBuilder
@@ -159,6 +168,7 @@ class RCWAPlaneWaveSimulator:
     # ------------------------------------------------------------- 물질 교체
     def remap_material(self, old, new):
         """공간 기하 그대로, 물질 이름만 교체 (다음 run 부터 반영)."""
+        self._solver_cache = None                        # eps 바뀜 -> 조립 캐시 무효
         return self.ir.remap_material(old, new)
 
     # ------------------------------------------------------------- eps 준비
@@ -189,26 +199,34 @@ class RCWAPlaneWaveSimulator:
                 abs(lam - self.ir.eps_lambda_um) > 1e-9:
             print(f"[warn] eps 텐서는 λ={self.ir.eps_lambda_um}µm 스냅샷 — "
                   f"λ={lam} 에서 분산 미반영")
-        eps_inc, eps_trn = self._boundary_eps(lam)
-        eps_lut = self._eps_lut(lam) if self.ir.mode == "region" else None
-
-        solver = RCWASolver(lam, self.ir.span_x, self.ir.span_y, nG=self.nG,
-                            theta=theta, phi=phi, trunc=self.trunc,
-                            device=self.device, dtype=self.dtype, fff=self.fff)
-        solver.setup_incidence(eps_inc, eps_trn)
-        for m2d, th in self.layer_stack:
-            if self.ir.mode == "eps":
-                if (m2d == m2d.flat[0]).all():           # 균일층 -> 해석식
-                    solver.add_layer(th, eps_scalar=complex(m2d.flat[0]))
+        # ── 솔버 캐시: (λ,θ,φ) 동일하면 조립(eig+S-matrix, 편광 무관)을 재사용.
+        #    비편광 QE(TE+TM 2회 run)가 조립을 한 번만 하게 된다 (~2배).
+        key = (round(lam, 12), round(float(theta), 9), round(float(phi), 9))
+        cached = getattr(self, "_solver_cache", None)
+        if cached is not None and cached[0] == key:
+            solver = cached[1]
+        else:
+            self._solver_cache = None                    # 이전 λ 조립 메모리 즉시 해제
+            eps_inc, eps_trn = self._boundary_eps(lam)
+            eps_lut = self._eps_lut(lam) if self.ir.mode == "region" else None
+            solver = RCWASolver(lam, self.ir.span_x, self.ir.span_y, nG=self.nG,
+                                theta=theta, phi=phi, trunc=self.trunc,
+                                device=self.device, dtype=self.dtype, fff=self.fff)
+            solver.setup_incidence(eps_inc, eps_trn)
+            for m2d, th in self.layer_stack:
+                if self.ir.mode == "eps":
+                    if (m2d == m2d.flat[0]).all():       # 균일층 -> 해석식
+                        solver.add_layer(th, eps_scalar=complex(m2d.flat[0]))
+                    else:
+                        solver.add_layer(th, eps_grid=torch.as_tensor(
+                            m2d, dtype=self.dtype, device=self.device))
                 else:
-                    solver.add_layer(th, eps_grid=torch.as_tensor(
-                        m2d, dtype=self.dtype, device=self.device))
-            else:
-                u = np.unique(m2d)
-                if len(u) == 1:                          # 균일층 -> 해석식
-                    solver.add_layer(th, eps_scalar=eps_lut[int(u[0])])
-                else:
-                    solver.add_layer(th, eps_grid=self._eps_grid(m2d, eps_lut))
+                    u = np.unique(m2d)
+                    if len(u) == 1:                      # 균일층 -> 해석식
+                        solver.add_layer(th, eps_scalar=eps_lut[int(u[0])])
+                    else:
+                        solver.add_layer(th, eps_grid=self._eps_grid(m2d, eps_lut))
+            self._solver_cache = (key, solver)
         # 수치 이상 가드: λ 미세 이동 재계산
         #  (a) Wood anomaly: kz=0 차수 -> V0 특이 -> R/T 비유한
         #  (b) 공진점 고유분해 불안정(금속 grid 등): R+T>1 (유니터리티 파괴)
@@ -227,6 +245,7 @@ class RCWAPlaneWaveSimulator:
                     f"λ={lam}µm: R/T 이상(비유한 또는 R+T>1)이 λ 미세이동 "
                     f"{_wood_depth}회 후에도 지속 — 물질 n,k/구조 문제일 수 있음")
             lam_shift = lam * (1 + 5e-4)
+            self._solver_cache = None                   # 이상 조립은 캐시에 남기지 않음
             print(f"[warn] λ={lam}µm 수치 이상(Wood/유니터리티) -> λ={lam_shift:.5f}µm 로 재계산")
             return self.run(lam_shift, theta=theta, phi=phi, pol_te=pol_te,
                             pol_tm=pol_tm, pixel_qe=pixel_qe, _wood_depth=_wood_depth + 1)
@@ -272,27 +291,37 @@ class RCWAPlaneWaveSimulator:
         for li in band_lis:
             z_off[li] = acc
             acc += float(self.layer_stack[li][1])
-        zres, C = solver.absorption_maps_zresolved(self.grid_ny, self.grid_nx, band_lis)
-        pmask = [(pixidx == p) & (~excl) for p in range(npix)]
+        # 창 적분을 order-공간에서 정확 계산(실공간 560² 재구성 제거 — 수치 동일).
+        # windows[0]=전체(=1) 는 층 총흡수(정합 상수 C)용 규약 — 반드시 첫 번째.
+        pix_i = torch.as_tensor(np.ascontiguousarray(pixidx, dtype=np.int64))
+        excl_t = torch.as_tensor(np.ascontiguousarray(excl))
+        ones_w = torch.ones((self.grid_ny, self.grid_nx), dtype=torch.float64)
+        ex_w = excl_t.to(torch.float64)
+        windows = [ones_w, ex_w]
+        for p in range(npix):                            # 픽셀 창 (제외 마스크 제거)
+            windows.append(((pix_i == p) & (~excl_t)).to(torch.float64))
+        zws, C = solver.band_window_absorption(windows, band_lis)
 
-        pix_abs = np.zeros(npix)                         # 수집(collected) 흡수
+        pix_abs = torch.zeros(npix, dtype=torch.float64)  # 수집(collected) 흡수
         trench_abs = 0.0
         A_band = 0.0                                     # 광학 총 밴드 흡수(에너지보존)
         A_coll = 0.0                                     # 수집 총 밴드 흡수
         for li in band_lis:                              # 검출 밴드 층들 (반사경 nB 제외)
-            if li not in zres:
+            if li not in zws:
                 continue
-            zc_list, slices = zres[li]
-            for zc_local, dens_t in zip(zc_list, slices):
-                dens = dens_t.detach().cpu().numpy() * C
-                z_abs = z_off[li] + zc_local             # Si 표면 기준 절대깊이
-                e = 1.0 - r0 * np.exp(-z_abs / ld) if use_coll else 1.0
-                s = float(dens.sum())
-                A_band += s
-                A_coll += s * e
-                for p in range(npix):
-                    pix_abs[p] += dens[pmask[p]].sum() * e
-                trench_abs += dens[excl].sum()
+            zc_list, WA = zws[li]                        # WA: (nz, 2+npix)
+            WA = WA.detach().to("cpu", torch.float64)
+            z_abs = z_off[li] + torch.tensor(zc_list, dtype=torch.float64)
+            e = (1.0 - r0 * torch.exp(-z_abs / ld)) if use_coll \
+                else torch.ones(len(zc_list), dtype=torch.float64)
+            A_band += float(WA[:, 0].sum())
+            A_coll += float(e @ WA[:, 0])
+            trench_abs += float(WA[:, 1].sum())
+            pix_abs += e @ WA[:, 2:]
+        pix_abs = pix_abs.numpy() * C
+        trench_abs *= C
+        A_band *= C
+        A_coll *= C
         if det.deep_is_detector:
             # 심부 흡수: 밴드 바닥 투과 flux 를 픽셀 귀속 (그 깊이엔 구조 없음).
             # 심부는 접합 근처 -> η≈1 (수집손실 없음).

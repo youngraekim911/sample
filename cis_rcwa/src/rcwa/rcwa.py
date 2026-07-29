@@ -108,10 +108,12 @@ class RCWASolver:
         else:
             g = torch.as_tensor(eps_grid, dtype=self.cdt, device=self.device)
             self.layers.append(("patterned", g, float(thickness)))
+        self._assembled = False
         return self
 
     def clear_layers(self):
         self.layers = []
+        self._assembled = False
 
     # -----------------------------------------------------------------
     def _uniform_grid(self, er):
@@ -249,12 +251,14 @@ class RCWASolver:
         return Sref, Strn, Kzr, Kzt
 
     # -----------------------------------------------------------------
-    def solve(self, pol_te=1.0, pol_tm=0.0):
-        """전체 S-matrix 조립 후 R, T, 흡수 계산.
+    def _assemble(self):
+        """편광 무관 부분 전체 — 층 eig + S-matrix 사슬 조립 (한 번만).
 
-        pol_te, pol_tm : 입사 편광 진폭 (TE=s, TM=p).
-        Returns dict: R, T, A, R_orders, T_orders, Kz.
+        TE/TM 은 입사 진폭만 다르고 S-matrix 는 동일하므로, 여기서 만든 결과를
+        solve() 가 편광마다 재사용한다 (비편광 QE 런에서 조립 비용 절반).
         """
+        if getattr(self, "_assembled", False):
+            return
         Sref, Strn, Kzr, Kzt = self._region_smatrices()
         self._modes = []
         self._layerS = []
@@ -278,9 +282,22 @@ class RCWASolver:
             self._layerS.append(SL)
             S = self._star(S, SL)
         self._S_pre_trn = S                       # 투과 계면 필드 복원용 (픽셀별 QE)
-        S = self._star(S, Strn)
-        self.S_global = S
+        self.S_global = self._star(S, Strn)
         self._Sref, self._Strn, self._Kzr, self._Kzt = Sref, Strn, Kzr, Kzt
+        self._cumS = None                         # 누적 S 캐시 (lazy, 편광 무관)
+        self._ERconv = {}                         # 층별 (ER, ERinv) 캐시 (흡수 재구성용)
+        self._winspec = {}                        # 창 스펙트럼 캐시 (편광 무관)
+        self._assembled = True
+
+    def solve(self, pol_te=1.0, pol_tm=0.0):
+        """전체 S-matrix 조립(캐시) 후 R, T, 흡수 계산.
+
+        pol_te, pol_tm : 입사 편광 진폭 (TE=s, TM=p).
+        Returns dict: R, T, A, R_orders, T_orders, Kz.
+        """
+        self._assemble()
+        S = self.S_global
+        Kzr, Kzt = self._Kzr, self._Kzt
 
         N = self.nG
         # 입사 편광 벡터 (order 0)
@@ -332,7 +349,9 @@ class RCWASolver:
     # 필드 복원 / 층·픽셀 흡수 (QE)
     # =================================================================
     def _cumulative_S(self):
-        """elems = [Sref, L1..LM, Strn] 의 좌/우 누적 S-matrix."""
+        """elems = [Sref, L1..LM, Strn] 의 좌/우 누적 S-matrix (편광 무관 -> 캐시)."""
+        if getattr(self, "_cumS", None) is not None:
+            return self._cumS
         elems = [self._Sref] + self._layerS + [self._Strn]
         K = len(elems)
         cumL = [None] * K
@@ -343,7 +362,8 @@ class RCWASolver:
         cumR[K - 1] = elems[K - 1]
         for k in range(K - 2, -1, -1):
             cumR[k] = self._star(elems[k], cumR[k + 1])
-        return elems, cumL, cumR
+        self._cumS = (elems, cumL, cumR)
+        return self._cumS
 
     def _node_amps(self, cumL_k, cumR_k1):
         """node(=elems[k]와 elems[k+1] 사이) gap-basis 전/후진 진폭 a,b."""
@@ -477,25 +497,34 @@ class RCWASolver:
             r = self._layer_abs_slices(i, aE, Ny, Nx, nz_per_um, min_nz)
             if r is None:
                 continue                              # 무손실층: 흡수 없음
-            _zc, slices = r
-            dens = sum(slices)
+            _zc, stack = r
+            dens = stack.sum(0)
             maps[i] = dens
             total += float(dens.sum())
         C = max(0.0, 1.0 - self._R - self._T) / total if total > 1e-300 else 0.0   # 음수 방지(유니터리티 잔차)
         return maps, C
 
     def _layer_abs_slices(self, i, aE, Ny, Nx, nz_per_um=48, min_nz=4):
-        """층 i 를 nz 개 z-슬라이스로 나눈 흡수밀도 raw 맵 리스트 반환.
+        """층 i 를 nz 개 z-슬라이스로 나눈 흡수밀도 raw 맵 반환.
         (모드/필드는 이미 있으므로 추가 eig 없음 — 깊이분해가 사실상 무료)
-        무손실층은 None. 반환: (z_centers[층상단 기준 µm 리스트], [dens(Ny,Nx),..])."""
+        무손실층은 None. 반환: (z_centers[층상단 기준 µm 리스트], dens(nz,Ny,Nx)).
+
+        z-슬라이스는 배치 GEMM + 배치 ifft2 로 한꺼번에 (루프 대비 수 배 빠름,
+        수치 동일). 메모리는 z-청크로 제한.
+        """
         N = self.nG
         W, V, lam, th, kind, data = self._modes[i]
         if kind == "uniform" or (hasattr(data, "dim") and data.dim() == 0):
             data = self._uniform_grid(data)
         if float(data.imag.abs().max()) < 1e-12:
             return None
-        ER = fft_funs.conv_matrix(data, self.m, self.n)
-        ERinv = torch.linalg.inv(ER)
+        cache = getattr(self, "_ERconv", None)
+        if cache is not None and i in cache:               # 편광 간 재사용
+            ERinv = cache[i]
+        else:
+            ERinv = torch.linalg.inv(fft_funs.conv_matrix(data, self.m, self.n))
+            if cache is not None:
+                cache[i] = ERinv
         eps_xy = data
         if eps_xy.shape != (Ny, Nx):
             ii = (torch.arange(Ny, device=data.device) * data.shape[0] // Ny)
@@ -511,24 +540,141 @@ class RCWASolver:
         cp = (ut - X * ub) / den
         cm = (ub - X * ut) / den
         nz = max(min_nz, int(round(th * nz_per_um)))
-        slices, zc = [], []
-        for k in range(nz):
-            zf = (k + 0.5) / nz
-            ep = torch.exp(-lam * self.k0 * (zf * th))
-            em = torch.exp(-lam * self.k0 * ((1 - zf) * th))
-            Et = W @ (ep * cp + em * cm)
-            Ht = V @ (ep * cp - em * cm)
-            ez = ERinv @ (self.Kx @ Ht[N:] - self.Ky @ Ht[:N])
-            Ex = fft_funs.field_ifft(Et[:N], self.m, self.n, Ny, Nx)
-            Ey = fft_funs.field_ifft(Et[N:], self.m, self.n, Ny, Nx)
-            Ez = fft_funs.field_ifft(ez, self.m, self.n, Ny, Nx)
-            slices.append(imeps * (Ex.abs()**2 + Ey.abs()**2 + Ez.abs()**2) * (th / nz))
-            zc.append(zf * th)
-        return zc, slices
+        zf = (torch.arange(nz, dtype=self.rdt, device=W.device) + 0.5) / nz
+        dens = torch.empty((nz, Ny, Nx), dtype=torch.float64, device=W.device)
+        chunk = max(1, int(4e6 // (Ny * Nx)))              # 복소 중간체 메모리 상한
+        for s in range(0, nz, chunk):
+            zc_f = zf[s:s + chunk]                         # (B,)
+            ep = torch.exp(-lam[None, :] * (self.k0 * th) * zc_f[:, None])        # (B,2N)
+            em = torch.exp(-lam[None, :] * (self.k0 * th) * (1 - zc_f)[:, None])
+            Et = (ep * cp[None, :] + em * cm[None, :]) @ W.T                      # (B,2N)
+            Ht = (ep * cp[None, :] - em * cm[None, :]) @ V.T
+            ez = (Ht[:, N:] @ self.Kx.T - Ht[:, :N] @ self.Ky.T) @ ERinv.T        # (B,N)
+            Ex = fft_funs.field_ifft_batch(Et[:, :N], self.m, self.n, Ny, Nx)
+            Ey = fft_funs.field_ifft_batch(Et[:, N:], self.m, self.n, Ny, Nx)
+            Ez = fft_funs.field_ifft_batch(ez, self.m, self.n, Ny, Nx)
+            dens[s:s + chunk] = (Ex.abs()**2 + Ey.abs()**2 + Ez.abs()**2) \
+                * imeps[None, :, :] * (th / nz)
+        return [float(z) * th for z in zf], dens
+
+    # ---------------- 검출 QE 고속 경로: order-공간 창 적분 ----------------
+    def _dg_index(self):
+        """order 차분 (mᵢ−mⱼ, nᵢ−nⱼ) 의 평면 인덱스 (N²,) 와 dg 격자 크기.
+
+        |E|²(x)=Σᵢⱼ cᵢcⱼ* e^{i(gᵢ−gⱼ)x} 는 차분격자(dg) 위의 삼각다항식 —
+        임의 창 w 에 대한 Σₓ w·|E|² 를 dg 계수 × 창 스펙트럼 내적으로 정확 계산.
+        """
+        if getattr(self, "_dgidx", None) is None:
+            mx = int(self.m.abs().max()); my = int(self.n.abs().max())
+            Sx, Sy = 4 * mx + 1, 4 * my + 1
+            DM = (self.m[:, None] - self.m[None, :]) + 2 * mx
+            DN = (self.n[:, None] - self.n[None, :]) + 2 * my
+            self._dgidx = ((DN * Sx + DM).reshape(-1).to(torch.long),
+                           (Sy, Sx), (mx, my))
+        return self._dgidx
+
+    def _window_spectra(self, wmaps, imeps_xy):
+        """창들 × Imε(x,y) 의 fft2 를 dg 격자점에서 샘플 — (nw, ndg) complex.
+
+        Σₓ w(x)Imε(x)|E(x)|² = Σ_dg A[dg]·conj(FFT2[w·Imε][dg])  (실수부).
+        |E|² 대역폭(2·max차수) ≪ 격자수라 앨리어싱 없음 = 실공간 합과 동일값.
+        """
+        _, (Sy, Sx), (mx, my) = self._dg_index()
+        Ny, Nx = imeps_xy.shape
+        dn = (torch.arange(-2 * my, 2 * my + 1, device=imeps_xy.device) % Ny)
+        dm = (torch.arange(-2 * mx, 2 * mx + 1, device=imeps_xy.device) % Nx)
+        out = []
+        for w in wmaps:
+            F = torch.fft.fft2((w * imeps_xy).to(self.cdt))
+            out.append(F[dn[:, None], dm[None, :]].reshape(-1))
+        return torch.stack(out)                              # (nw, ndg)
+
+    def _layer_abs_zcoeffs(self, i, aE, nz_per_um=48, min_nz=4):
+        """층 i z-슬라이스별 |E|²(성분합·Ez 포함) 의 dg 푸리에 계수 (nz, ndg).
+
+        실공간 iFFT 없이 c·c* 자기상관만 — _layer_abs_slices 와 수치 동일한
+        적분을 훨씬 싸게 제공(픽셀 창 적분 전용). 무손실층은 None.
+        """
+        N = self.nG
+        W, V, lam, th, kind, data = self._modes[i]
+        if kind == "uniform" or (hasattr(data, "dim") and data.dim() == 0):
+            data = self._uniform_grid(data)
+        if float(data.imag.abs().max()) < 1e-12:
+            return None
+        cache = getattr(self, "_ERconv", None)
+        if cache is not None and i in cache:
+            ERinv = cache[i]
+        else:
+            ERinv = torch.linalg.inv(fft_funs.conv_matrix(data, self.m, self.n))
+            if cache is not None:
+                cache[i] = ERinv
+        Winv = torch.linalg.inv(W)
+        ut = Winv @ aE[i]
+        ub = Winv @ aE[i + 1]
+        X = torch.exp(-lam * self.k0 * th)
+        den = 1.0 - X * X
+        den = torch.where(den.abs() < 1e-12, den + 1e-12, den)
+        cp = (ut - X * ub) / den
+        cm = (ub - X * ut) / den
+        nz = max(min_nz, int(round(th * nz_per_um)))
+        zf = (torch.arange(nz, dtype=self.rdt, device=W.device) + 0.5) / nz
+        ep = torch.exp(-lam[None, :] * (self.k0 * th) * zf[:, None])         # (nz,2N)
+        em = torch.exp(-lam[None, :] * (self.k0 * th) * (1 - zf)[:, None])
+        Et = (ep * cp[None, :] + em * cm[None, :]) @ W.T                     # (nz,2N)
+        Ht = (ep * cp[None, :] - em * cm[None, :]) @ V.T
+        ez = (Ht[:, N:] @ self.Kx.T - Ht[:, :N] @ self.Ky.T) @ ERinv.T       # (nz,N)
+        idxflat, (Sy, Sx), _ = self._dg_index()
+        idxflat = idxflat.to(W.device)
+        A = torch.zeros((nz, Sy * Sx), dtype=self.cdt, device=W.device)
+        for c in (Et[:, :N], Et[:, N:], ez):
+            O = torch.einsum("zi,zj->zij", c, c.conj()).reshape(nz, -1)
+            A.index_add_(1, idxflat, O)
+        return [float(z) * th for z in zf], A, th, nz, data
+
+    def band_window_absorption(self, windows, band_layers, nz_per_um=48, min_nz=4):
+        """검출 QE 전용 고속 창 적분 — 실공간 재구성 없이 정확 계산.
+
+        windows : list[(Ny,Nx) float64 tensor]  (예: [전체=1, 트렌치, 픽셀창들])
+        반환: ({li: (z_centers, WA (nz,nw) — Σₓ wᵢ·Imε·|E|²·th/nz)}, C)
+        C 는 전 손실층 합 = 1−R−T 로 맞추는 전역 정합 상수 (기존과 동일 정의).
+        """
+        elems, cumL, cumR = self._cumulative_S()
+        node_ab = [self._node_amps(cumL[k], cumR[k + 1])
+                   for k in range(len(elems) - 1)]
+        self._diag_node_ab = node_ab
+        aE = [a + b for a, b in node_ab]
+        band = set(band_layers)
+        wcache = getattr(self, "_winspec", None)
+        if wcache is None:
+            wcache = self._winspec = {}                  # 편광 간 재사용 (λ 종속 aE 무관)
+        out = {}
+        total = 0.0
+        for i in range(len(self._modes)):
+            r = self._layer_abs_zcoeffs(i, aE, nz_per_um, min_nz)
+            if r is None:
+                continue
+            zc, A, th, nz, data = r
+            nw = len(windows) if i in band else 1        # 비밴드 손실층: 전체합만
+            key = (i, nw)
+            if key not in wcache:
+                Ny, Nx = windows[0].shape
+                eps_xy = data
+                if eps_xy.shape != (Ny, Nx):
+                    ii = (torch.arange(Ny, device=data.device) * data.shape[0] // Ny)
+                    jj = (torch.arange(Nx, device=data.device) * data.shape[1] // Nx)
+                    eps_xy = data[ii][:, jj]
+                imeps = eps_xy.imag.to(torch.float64)
+                wcache[key] = self._window_spectra(windows[:nw], imeps)
+            WA = (A @ wcache[key].conj().T).real * (th / nz)   # (nz, nw)
+            total += float(WA[:, 0].sum())
+            if i in band:
+                out[i] = (zc, WA)
+        C = max(0.0, 1.0 - self._R - self._T) / total if total > 1e-300 else 0.0
+        return out, C
 
     def absorption_maps_zresolved(self, Ny, Nx, band_layers, nz_per_um=48, min_nz=4):
         """band_layers(층 인덱스 집합)만 z-분해 흡수를 반환. C 는 전역 정합 상수.
-        Returns: (zres: {i: (z_centers_um[list], [dens(Ny,Nx),..])}, C)."""
+        Returns: (zres: {i: (z_centers_um[list], dens(nz,Ny,Nx))}, C)."""
         elems, cumL, cumR = self._cumulative_S()
         node_ab = [self._node_amps(cumL[k], cumR[k + 1])
                    for k in range(len(elems) - 1)]
@@ -541,10 +687,10 @@ class RCWASolver:
             r = self._layer_abs_slices(i, aE, Ny, Nx, nz_per_um, min_nz)
             if r is None:
                 continue
-            zc, slices = r
-            total += float(sum(s.sum() for s in slices))
+            zc, stack = r
+            total += float(stack.sum())
             if i in band:
-                zres[i] = (zc, slices)
+                zres[i] = (zc, stack)
         C = max(0.0, 1.0 - self._R - self._T) / total if total > 1e-300 else 0.0   # 음수 방지(유니터리티 잔차)
         return zres, C
 
