@@ -1,0 +1,71 @@
+product: hybrid_lens
+ambient: air
+grid: {pixel_pitch_um: 0.7, n_pixels: 4, dxy_um: 0.01, dz_um: 0.01, air_margin_um: 0.20}
+cf_array: tetra
+bayer:
+- [R, R, G, G]
+- [R, R, G, G]
+- [G, G, B, B]
+- [G, G, B, B]
+materials:
+  air: {}
+  si: {}
+  sio2: {}
+  poly: {}
+  al2o3: {}
+  tio2: {}
+  peox: {}
+  hfox: {}
+  tin: {}
+  ti: {}
+  teos: {}
+  cf_red: {}
+  cf_green: {}
+  cf_blue: {}
+  ml: {}
+  ml_arl: {}
+stack:
+  si: {material: si, thickness_um: 3.85}
+  dti:
+    mode: 2x2_open
+    center_open: true
+    width_um: 0.09
+    oxide_liner_um: 0.02
+    liner: sio2
+    fill: poly
+    center_gap_x_um: 0.26
+    center_gap_y_um: 0.26
+  barl:
+  - {material: al2o3, thickness_um: 0.010}
+  - {material: tio2,  thickness_um: 0.036}
+  - {material: peox,  thickness_um: 0.015}
+  - {material: hfox,  thickness_um: 0.010}
+  - {material: al2o3, thickness_um: 0.010}
+  grid:
+    pitch: 2
+    width_um: 0.11
+    top_ratio: 0.7
+    coat_on: true
+    coat_material: al2o3
+    coat_um: 0.01
+    deadzone_um: 0.1
+    stack:
+    - {material: tin,  height_um: 0.006}
+    - {material: ti,   height_um: 0.054}
+    - {material: teos, height_um: 0.330}
+  cf:
+    R: {material: cf_red,   thickness_um: 0.500, curvature_um: 0, scale_x: 0.92, scale_y: 0.92, chamfer_um: 0.05, chamfer_angle: 45}
+    G: {material: cf_green, thickness_um: 0.520, curvature_um: 0, scale_x: 0.95, scale_y: 0.95, chamfer_um: 0.05, chamfer_angle: 45}
+    B: {material: cf_blue,  thickness_um: 0.475, curvature_um: 0, scale_x: 0.90, scale_y: 0.90, chamfer_um: 0.05, chamfer_angle: 45}
+  ml:
+    material: ml
+    planar_um: 0.20
+    hr: 0.55
+    height_um: 0.36
+    sag_height_um: 0.55
+    quads:
+    - - {shape: "2x1", orient: h, scale: 1.11, height_um: 0.43}
+      - {shape: "1x1", scale: 1.14, height_um: 0.38}
+    - - {shape: "1x1", scale: 1.14, height_um: 0.38}
+      - {shape: "2x1", orient: h, scale: 1.11, height_um: 0.43}
+  arl_top: {material: ml_arl, thickness_um: 0.09}
