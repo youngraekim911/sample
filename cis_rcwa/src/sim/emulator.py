@@ -64,11 +64,18 @@ def _rbf_epsilon(X):
 
 
 def _rbf_fit(X, y, eps, kernel, ridge):
-    """단일 타깃 y 에 대한 RBF 가중치 (평균제거 + ridge 안정화)."""
+    """단일 타깃 y 에 대한 RBF 가중치 (평균제거 + 최소자승 안정화).
+
+    주의(중요): multiquadric·thinplate 은 '조건부' 양정치 커널이라 Φ 에 음의
+    고유값이 존재한다(21점 예: 20개). 여기에 큰 ridge(1e-3)를 더하면 고유값이
+    0 근처로 밀려 해가 폭발한다 — 보간기인데 in-sample R² 가 -13 까지 떨어졌던
+    실제 원인. ridge 는 '아주 작게'만 쓰고, 안정화는 SVD 최소자승(lstsq)이
+    담당한다(rank 결손·악조건에서도 최소노름 해를 준다).
+    """
     mu = float(np.mean(y))
     Phi = _rbf_phi(_pairwise(X, X), eps, kernel)
-    A = Phi + ridge * np.eye(len(X))
-    w = np.linalg.solve(A, np.asarray(y, float) - mu)
+    A = Phi + float(ridge) * np.eye(len(X))
+    w, *_ = np.linalg.lstsq(A, np.asarray(y, float) - mu, rcond=None)
     return w, mu
 
 
@@ -168,7 +175,7 @@ def _mean_metric(m):
 
 # ---------------------------------------------------------------- 공개 API
 def fit_emulator(doe_result, model="auto", cv_folds=5,
-                 rbf_kernel="multiquadric", ridge=1e-3, base_cfg=None):
+                 rbf_kernel="multiquadric", ridge=1e-8, base_cfg=None):
     """DOE 결과 -> 넓은 공간 에뮬레이터(JSON dict) + 교차검증 지표.
 
     model: "quadratic"|"cubic"|"rbf"|"auto"(CV R²로 자동선택).
