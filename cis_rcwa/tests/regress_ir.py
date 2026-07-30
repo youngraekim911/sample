@@ -22,10 +22,11 @@ from src.structure.ir import StructureIR, Detector
 
 TMP = os.environ.get("TMPDIR", "/tmp")
 CONF = "tests/data/regress_v50.yaml"   # v50 기준 구조 고정 (conf 는 소자 사양따라 변함)
-EXPECT_G = 0.7717            # 예시 플레이스홀더 물질(data/materials/*.txt) + ml_slices=8 +
+EXPECT_G = 0.7293            # 예시 플레이스홀더 물질(data/materials/*.txt) + ml_slices=8 +
                             # yaml 경로 auto 모델(dti.optical 자동=on + 서브해상도 EMT 확장
-                            # + collection 기본). nG=101 값 — 수렴 참값 78.03(nG401,
-                            # EMT=GEOM 일치) 대비 0.9pp 이내. (구 규칙 optical=off 땐 0.6050)
+                            # + collection 기본 η0=0.945·r0=0.35(이 fixture 는 barl 이
+                            # 플레이스홀더명이라 '패시베이션 없음'으로 판정)).
+                            # 이력: 0.6050(optical=off) → 0.7717(EMT 도입) → ×0.945(η0).
                             # 폴더 물질/슬라이스/auto 규칙 바꾸면 이 값도 갱신.
 
 

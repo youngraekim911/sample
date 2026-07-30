@@ -47,11 +47,17 @@ class Detector:
     exclude_mask: np.ndarray = None
     deep_is_detector: bool = True
     n_below_band: int = 0                              # 밴드 아래 비검출 층 수(후면 반사경 등)
-    # 캐리어 수집효율 η(z) (광학 QE -> 소자 QE). 광입사 Si 표면(밴드 상단)의
-    # dead-layer/표면재결합 모델: η(z) = 1 - r0·exp(-z/Ld), z=밴드상단 깊이.
-    # r0=0(기본) -> η≡1 -> 순수 광학 QE(하위호환). r0>0 -> 단파장(얕은흡수) 억제.
-    collect_r0: float = 0.0                            # 표면 재결합 계수 0~1 (η(0)=1-r0)
-    collect_ld_um: float = 0.0                         # 수집 감쇠 길이 (µm)
+    # 캐리어 수집효율 η(z) (광학 QE -> 소자 QE):
+    #     η(z) = η0 · (1 − r0·exp(−z/Ld)),   z = 광입사 Si 표면(밴드 상단) 기준 깊이
+    #   η0  : 깊이 무관 손실. DTI 측벽 재결합은 트렌치가 Si 전 깊이를 관통하므로
+    #         모든 깊이에 균일하게 작용한다(+벌크 재결합). 실측 적합 η0≈0.945.
+    #   r0  : 표면(후면) dead-layer 재결합 세기. η(0)=η0(1−r0). Al2O3/HfOx 패시베이션이
+    #         있으면 거의 사라진다(실측 적합 r0≈0.02~0.05).
+    #   Ld  : 표면항이 미치는 깊이.
+    # η0=1, r0=0 -> η≡1 -> 순수 광학 QE (하위호환).
+    collect_eta0: float = 1.0                          # 깊이무관 수집효율 0~1
+    collect_r0: float = 0.0                            # 표면 재결합 계수 0~1
+    collect_ld_um: float = 0.0                         # 표면항 감쇠 길이 (µm)
 
     @property
     def n_pixels(self):
@@ -155,6 +161,7 @@ class StructureIR:
                           "pixel_labels": d.pixel_labels,
                           "deep_is_detector": d.deep_is_detector,
                           "n_below_band": d.n_below_band,
+                          "collect_eta0": d.collect_eta0,
                           "collect_r0": d.collect_r0,
                           "collect_ld_um": d.collect_ld_um,
                           "has_pixel_map": d.pixel_map is not None,
@@ -184,6 +191,7 @@ class StructureIR:
                            pixel_labels=dm["pixel_labels"],
                            deep_is_detector=dm.get("deep_is_detector", True),
                            n_below_band=dm.get("n_below_band", 0),
+                           collect_eta0=dm.get("collect_eta0", 1.0),
                            collect_r0=dm.get("collect_r0", 0.0),
                            collect_ld_um=dm.get("collect_ld_um", 0.0),
                            pixel_map=z["pixel_map"] if dm["has_pixel_map"] else None,

@@ -572,7 +572,8 @@ class BlockStack:
     """블록 조립 -> StructureIR. blocks 는 아래(Si)->위(공기) 순."""
 
     def __init__(self, blocks, ambient="air", materials=None, dispersion=None,
-                 ml_slices=8, collect_deep=False, collect_r0=0.0, collect_ld_um=0.0):
+                 ml_slices=8, collect_deep=False, collect_r0=0.0, collect_ld_um=0.0,
+                 collect_eta0=1.0):
         self.blocks = blocks
         self.ambient = ambient
         self.materials = materials or {}
@@ -582,6 +583,7 @@ class BlockStack:
         #   True=밴드+심부 전체 Si 흡수 (반무한 수집 가정)
         self.collect_deep = collect_deep
         # 캐리어 수집효율 η(z)=1-r0·exp(-z/Ld) (광학 QE -> 소자 QE). r0=0 이면 순수광학.
+        self.collect_eta0 = float(1.0 if collect_eta0 is None else collect_eta0)
         self.collect_r0 = float(collect_r0 or 0.0)
         self.collect_ld_um = float(collect_ld_um or 0.0)
         self.ml_slices = ml_slices
@@ -659,6 +661,7 @@ class BlockStack:
                            exclude_mask=ctx.trench,
                            deep_is_detector=self.collect_deep,
                            n_below_band=ctx.det_below,
+                           collect_eta0=self.collect_eta0,
                            collect_r0=self.collect_r0,
                            collect_ld_um=self.collect_ld_um)
         sub = substrate or next((b.mat for b in self.blocks
@@ -721,7 +724,8 @@ def ir_from_wizard_cfg(cfg, lateral_n, ml_slices=8, men_slices=8, taper_slices=8
                        ml_slices=ml_slices,
                        collect_deep=bool(cfg.get("collect_deep_substrate", False)),
                        collect_r0=float((cfg.get("collection") or {}).get("r0", 0.0)),
-                       collect_ld_um=float((cfg.get("collection") or {}).get("ld_um", 0.0)))
+                       collect_ld_um=float((cfg.get("collection") or {}).get("ld_um", 0.0)),
+                       collect_eta0=float((cfg.get("collection") or {}).get("eta0", 1.0)))
     # 후면 반사경은 SiDtiBlock 이 '밴드 아래 패턴 층'으로 삽입 (부분 커버리지 지원).
     # substrate 는 Si 유지 -> Cu 갭 사이로 투과된 빛은 심부 Si 흡수(손실).
     ir = stack.to_ir(ctx)

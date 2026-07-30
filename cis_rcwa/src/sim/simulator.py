@@ -31,6 +31,31 @@ from ..materials.library import MaterialLibrary
 from ..materials.resolver import MaterialResolver
 
 
+# ---------------------------------------------------------------- 수집효율 기본값
+# η(z) = η0·(1 − r0·exp(−z/ld)) — 실측 QE(hybrid lens 제품, 400~700nm 19점)로 역산.
+#   η0=0.945 : 깊이 무관 손실. DTI 가 Si 전 깊이를 관통하므로 측벽 재결합이 모든
+#              깊이에 균일 작용(+벌크). on-band 상대오차 최소점이 뚜렷하다
+#              (η0=1.00 → 2.26% / 0.945 → 1.10% / 0.90 → 3.47%).
+#   r0       : 후면 표면 dead-layer. Al2O3/HfOx 고정전하 패시베이션이 있으면 표면
+#              재결합이 억제되어 거의 0 (실측 적합 0.02~0.05). 패시베이션이 없으면
+#              구형 공정 관행값 0.35 유지 (해당 조건 실측 데이터 없음 — 기존 동작 보존).
+#   ld       : 표면항 도달 깊이. r0 가 작아 결과 민감도는 낮다(0.05~0.5µm 차이 미미).
+ETA0_DEFAULT = 0.945
+R0_PASSIVATED = 0.05
+R0_BARE = 0.35
+# Si 후면에 접해 고정전하 패시베이션을 만드는 대표 물질 (이름 부분일치)
+_PASSIVATION_MATS = ("al2o3", "hfox", "hfo2", "hafn", "ta2o5", "zro2")
+
+
+def _si_backside_passivated(stack):
+    """Si 광입사면(=BARL 최하층, 아래->위 순서의 첫 층)이 패시베이션막인가."""
+    barl = stack.get("barl") or []
+    if not barl:
+        return False
+    first = str((barl[0] or {}).get("material", "")).lower()
+    return any(m in first for m in _PASSIVATION_MATS)
+
+
 class RCWAPlaneWaveSimulator:
     def __init__(self, config, nG=101, downsample=2, trunc="circular",
                  device=None, dtype=torch.complex128, materials_dir=None,
@@ -96,8 +121,11 @@ class RCWAPlaneWaveSimulator:
           문제였던 '서브파장 트렌치를 넣으면 오히려 crosstalk 가 커지는' 현상은 물리가
           아니라 푸리에 차수 부족(Gibbs 링잉)이었고, 이제 blocks.SiDtiBlock 이 유지
           차수에 맞는 등가 유효매질로 자동 치환해 해결한다(사용자 설정 불필요).
-        - collection 미지정: 소자 QE 기본 표면 dead-layer η(z)=1-r0·exp(-z/ld) 적용.
-          순수 광학 QE 를 원하면 yaml 에 collection: {r0: 0} 명시.
+        - collection 미지정: 소자 QE 수집효율 η(z)=η0·(1−r0·exp(−z/ld)) 자동 설정.
+          η0 는 깊이 무관 손실(DTI 측벽 재결합 + 벌크), r0 는 후면 표면 dead-layer.
+          후면(=Si 에 접한 BARL 첫 층)이 Al2O3/HfOx 같은 고정전하 패시베이션이면
+          표면 재결합이 억제되므로 r0 를 작게 잡는다. 실측 정합값 — 아래 참조.
+          순수 광학 QE 를 원하면 yaml 에 collection: {eta0: 1, r0: 0} 명시.
         """
         st = cfg.get("stack") or {}
         d = st.get("dti")
@@ -105,7 +133,10 @@ class RCWAPlaneWaveSimulator:
                 and "optical" not in d:
             d["optical"] = True
         if "collection" not in cfg:
-            cfg["collection"] = {"r0": 0.35, "ld_um": 0.175}
+            pas = _si_backside_passivated(st)
+            cfg["collection"] = {"eta0": ETA0_DEFAULT,
+                                 "r0": R0_PASSIVATED if pas else R0_BARE,
+                                 "ld_um": 0.3 if pas else 0.175}
 
     def _ir_from_yaml(self, cfg, base_dir, mesh, lateral_um):
         stack = cfg.get("stack") or {}
@@ -125,7 +156,9 @@ class RCWAPlaneWaveSimulator:
                 coll = cfg.get("collection") or {}
                 print(f"[builder] wizard v3 (blocks) · lateral {Nlat}×{Nlat} · "
                       f"layers {len(ir.layers)} · dti.optical={opt} · "
-                      f"collection={'on' if (coll.get('r0',0) and coll.get('ld_um',0)) else 'off'}")
+                      f"collection η0={float(coll.get('eta0',1.0)):.3f} "
+                      f"r0={float(coll.get('r0',0.0)):.2f}"
+                      f"{' (후면 패시베이션 감지)' if float(coll.get('r0',1)) <= R0_PASSIVATED else ''}")
                 e = ir.dti_emt
                 if e:
                     print(f"[builder] DTI 서브해상도 자동보정 — 푸리에 해상도 "
@@ -280,9 +313,12 @@ class RCWAPlaneWaveSimulator:
         excl = det.exclude_mask if det.exclude_mask is not None else \
             np.zeros_like(pixidx, dtype=bool)
 
-        # 캐리어 수집효율 η(z): 광입사 Si 표면(밴드 상단)의 dead-layer 모델.
-        # r0=0(기본) -> η≡1 -> 순수 광학 QE. r0>0 -> 얕은흡수(단파장) 수집손실.
+        # 캐리어 수집효율 η(z) = η0·(1 − r0·exp(−z/ld)), z = Si 표면 기준 절대깊이.
+        #   η0 : 깊이 무관 손실(DTI 측벽 재결합 + 벌크) — 트렌치가 Si 전 깊이를
+        #        관통하므로 모든 깊이에 균일 작용.
+        #   r0 : 후면 표면 dead-layer. 패시베이션(Al2O3/HfOx)이 있으면 거의 0.
         # 밴드층은 z-분해 흡수(층 내부 슬라이스)로 절대깊이별 η 적용 — 추가 eig 없음.
+        eta0 = float(getattr(det, "collect_eta0", 1.0) or 1.0)
         r0 = float(getattr(det, "collect_r0", 0.0) or 0.0)
         ld = float(getattr(det, "collect_ld_um", 0.0) or 0.0)
         use_coll = r0 > 0.0 and ld > 0.0
@@ -312,8 +348,8 @@ class RCWAPlaneWaveSimulator:
             zc_list, WA = zws[li]                        # WA: (nz, 2+npix)
             WA = WA.detach().to("cpu", torch.float64)
             z_abs = z_off[li] + torch.tensor(zc_list, dtype=torch.float64)
-            e = (1.0 - r0 * torch.exp(-z_abs / ld)) if use_coll \
-                else torch.ones(len(zc_list), dtype=torch.float64)
+            e = eta0 * ((1.0 - r0 * torch.exp(-z_abs / ld)) if use_coll
+                        else torch.ones(len(zc_list), dtype=torch.float64))
             A_band += float(WA[:, 0].sum())
             A_coll += float(e @ WA[:, 0])
             trench_abs += float(WA[:, 1].sum())
@@ -324,19 +360,21 @@ class RCWAPlaneWaveSimulator:
         A_coll *= C
         if det.deep_is_detector:
             # 심부 흡수: 밴드 바닥 투과 flux 를 픽셀 귀속 (그 깊이엔 구조 없음).
-            # 심부는 접합 근처 -> η≈1 (수집손실 없음).
+            # 표면 dead-layer 는 안 닿지만(z 큼), 깊이 무관 손실 η0 는 그대로 적용.
             Sz = solver.transmitted_flux_map(self.grid_ny, self.grid_nx)
             Sz = Sz.detach().cpu().numpy()
             for p in range(npix):
-                pix_abs[p] += Sz[pixidx == p].sum() / ngrid
-            A_coll += Sz.sum() / ngrid
+                pix_abs[p] += eta0 * Sz[pixidx == p].sum() / ngrid
+            A_coll += eta0 * Sz.sum() / ngrid
         # 픽셀 면적 정규화 (pixel_map 분할 면적 기준 — 비정방 픽셀도 지원)
         area = np.array([max(1, (pixidx == p).sum()) for p in range(npix)]) / ngrid
         qe_pix = [float(v / a) for v, a in zip(pix_abs, area)]
         qe_lab = {L: float(np.mean([q for q, l in zip(qe_pix, labels) if l == L]))
                   for L in dict.fromkeys(labels)}
         qe_opt = float(A_band + T_deep)                  # 광학 QE (에너지보존)
-        qe_total = float(A_coll + T_deep)                # 수집(소자) QE = device-QE 관례
+        # A_coll 은 위에서 심부 flux(η0 가중)까지 이미 더했다 — 여기서 T_deep 을 또
+        # 더하면 심부가 두 번 세어진다(deep_is_detector=True 일 때만 발현하던 버그).
+        qe_total = float(A_coll)                         # 수집(소자) QE = device-QE 관례
         return {"QE": qe_total,
                 "QE_optical": qe_opt,                    # 순수 광학 흡수 (수집전)
                 "A_stack": float(1.0 - o["R"] - qe_opt),  # R+QE_optical+A_stack=1 항등
