@@ -339,6 +339,48 @@ class RCWAPlaneWaveSimulator:
             out.update(self._detector_qe(solver, o))
         return out
 
+    # ------------------------------------------------------- 대역폭 평균 QE
+    def run_band(self, wavelength, bandwidth_nm, n_sub=5, **kw):
+        """실측기 대역폭을 반영한 QE — 중심 λ ±(bandwidth/2) 를 평균.
+
+        왜 필요한가 — QE 측정기는 단색이 아니라 유한한 대역(보통 반치폭 10~20nm)
+        으로 잰다. CF 밴드에지처럼 k 가 파장에 급변하는 구간에서는 단색 계산과
+        대역평균이 크게 갈린다. 실측:
+
+            cf_green k  490nm 0.036 -> 510nm 0.010  (20nm 에 3.6배)
+            QE_G@500    단색 75.5%  /  ±10nm 평균 70.4%  /  실측 70.5%
+            QE_G@550    단색 69.0%  /  ±10nm 평균 69.1%  /  실측 68.9%
+              (550nm 는 k 가 평평해 차이 없음 — 그래서 550 만 맞고 500 이 어긋났다)
+
+        즉 '시뮬이 틀린' 게 아니라 '단색 계산을 대역측정과 비교한' 것이 문제였다.
+        실측과 대조할 때는 이 함수를 쓸 것.
+
+        bandwidth_nm : 측정 대역 전폭(FWHM 근사). 0 이면 run() 과 동일.
+        n_sub        : 대역 내 샘플 수 (홀수 권장 — 중심 포함). 균등 가중 평균.
+        나머지 인자는 run() 과 동일. 반환 dict 도 run() 과 같은 키 (수치는 평균).
+        """
+        lam0 = float(wavelength)
+        bw = float(bandwidth_nm or 0.0) / 1000.0          # nm -> µm
+        n = max(1, int(n_sub))
+        if bw <= 0 or n == 1:
+            return self.run(lam0, **kw)
+        offs = np.linspace(-bw / 2.0, bw / 2.0, n)
+        outs = [self.run(lam0 + d, **kw) for d in offs]
+        avg = {"wavelength": lam0, "bandwidth_nm": float(bandwidth_nm),
+               "n_sub": n, "nG": outs[0]["nG"], "n_layers": outs[0]["n_layers"]}
+        for k in ("R", "QE", "A_stack", "QE_optical", "QE_recomb",
+                  "QE_trench", "QE_deep"):
+            vals = [o[k] for o in outs if k in o]
+            if vals:
+                avg[k] = float(np.mean(vals))
+        if "QE_rgb" in outs[0]:
+            avg["QE_rgb"] = {c: float(np.mean([o["QE_rgb"][c] for o in outs]))
+                             for c in outs[0]["QE_rgb"]}
+        if "QE_pixels" in outs[0]:
+            avg["QE_pixels"] = [float(v) for v in
+                                np.mean([o["QE_pixels"] for o in outs], axis=0)]
+        return avg
+
     # ------------------------------------------------------------- QE 집계
     def _detector_qe(self, solver, o):
         """IR.detector 규약으로 픽셀/라벨별 광학 QE 집계 (구조 지식 불필요).
