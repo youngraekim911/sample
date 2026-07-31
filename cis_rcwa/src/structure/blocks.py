@@ -84,23 +84,38 @@ class SiDtiBlock:
         self.dti = dti
         self.back_reflector = back_reflector          # Si 하부 metal routing 반사경
 
-    def _reflector_layer(self, ctx):
-        """후면 반사경 층 (Si 밴드 아래). Cu 가 면적비율 coverage 만 덮고 나머지는
-        filler(=Si)라 심부로 투과(손실). coverage=1 이면 solid 거울. 반환 (map, th)."""
+    def _reflector_layers(self, ctx):
+        """후면 반사경 (Si 밴드 아래) — [(map, th)] 아래->위 순서로 1~2 층.
+
+        실제 BSI 는 Si 아래에 곧바로 금속이 붙어 있지 않고 BEOL 유전체(ILD)가
+        일정 두께 끼어 있다. 금속을 Si 바닥에 직접 붙이면 Si-금속 계면이 강한
+        Fabry-Perot 공진을 만들어, 장파장에서 QE 가 파장에 따라 튀는 비물리적
+        결과가 나온다(실측 예: 680nm 가 660nm 보다 높아짐). spacer_um 으로 그
+        간격을 넣으면 공진이 실제 구조에 맞게 자리잡는다.
+
+          spacer_um       : Si 바닥 ~ 금속 사이 유전체 두께 (기본 0 = 직접 접촉)
+          spacer_material : 그 유전체 (기본 sio2)
+          coverage        : 금속 면적비 (1=solid 거울, <1 은 나머지가 Si -> 심부 투과)
+          routing_pitch_um: 금속 패턴 주기 (기본 픽셀 피치)
+        """
         br = self.back_reflector or {}
         cov = min(max(float(br.get("coverage", 1.0)), 0.0), 1.0)
-        th = float(br.get("thickness_um", 0.15))       # Cu 두께 (>~0.1µm 이면 불투명)
+        th = float(br.get("thickness_um", 0.15))       # 금속 두께 (>~0.1µm 이면 불투명)
         metal = br.get("material", "cu")
         rp = float(br.get("routing_pitch_um", 0) or ctx.p)   # 라우팅 피치(기본 픽셀피치)
         out = ctx.zeros(self.mat)                      # 갭 = Si (심부로 투과)
         if cov >= 0.999:
             out[:] = ctx.mat_id(metal)
         elif cov > 0:
-            side = float(np.sqrt(cov))                 # 정사각 Cu 패치 변비율 (면적=cov)
+            side = float(np.sqrt(cov))                 # 정사각 금속 패치 변비율 (면적=cov)
             fx = (ctx.X / rp) % 1.0
             fy = (ctx.Y / rp) % 1.0
             out[(fx < side) & (fy < side)] = ctx.mat_id(metal)
-        return (out, th)
+        layers = [(out, th)]                           # 아래->위 (금속이 더 아래)
+        sp = float(br.get("spacer_um", 0) or 0)
+        if sp > 0:
+            layers.append((ctx.zeros(br.get("spacer_material", "sio2")), sp))
+        return layers
 
     def _liners(self):
         d = self.dti or {}
@@ -199,7 +214,7 @@ class SiDtiBlock:
         ctx.det_band_um = self.th
         ctx.det_n_layers = 1
         br = self.back_reflector or {}
-        refl = ([self._reflector_layer(ctx)]                  # 밴드 아래(=맨 아래) 반사경
+        refl = (self._reflector_layers(ctx)                   # 밴드 아래(=맨 아래) 반사경
                 if br.get("enabled") and float(br.get("coverage", 1.0)) > 0 else [])
         if refl:
             ctx.det_below = len(refl)
