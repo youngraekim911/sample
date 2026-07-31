@@ -63,11 +63,17 @@ class MaterialLibrary:
         return float(lam.min()), float(lam.max())
 
     def nk(self, name, lam_um):
-        """이름/파장(um) -> (n,k). 범위 밖은 경계값 clamp (np.interp 기본)."""
+        """이름/파장(um) -> (n,k). 범위 밖은 경계값 clamp (np.interp 기본).
+
+        k 는 |k| 로 반환한다. 측정 데이터가 n−ik 규약으로 적혀 음수 k 를 담고
+        있는 경우가 흔한데(TiN/Ti 등 금속), 그대로 쓰면 이득 매질이 되어
+        에너지 보존이 깨지고 R+T>1 로 발산한다. resolver 의 다른 경로들도
+        동일하게 |k| 를 쓰므로 여기서만 예외가 되지 않게 맞춘다.
+        """
         if name not in self.tables:
             raise KeyError(f"material '{name}' not in {self.folder}/")
         lam, n, k = self.tables[name]
-        return float(np.interp(lam_um, lam, n)), float(np.interp(lam_um, lam, k))
+        return float(np.interp(lam_um, lam, n)), abs(float(np.interp(lam_um, lam, k)))
 
     def eps(self, name, lam_um):
         n, k = self.nk(name, lam_um)
