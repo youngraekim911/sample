@@ -140,6 +140,10 @@ class RCWAPlaneWaveSimulator:
         self.n_si_layers = det.n_layers if det else 0
         self.n_below_band = det.n_below_band if det else 0   # 밴드 아래 비검출 층(반사경)
         self.si_band_um = det.band_um if det else 0.0
+        # 측정 대역폭 — yaml 의 measurement.bandwidth_nm 을 _ir_from_yaml 이 심어둔다.
+        # 0 이면 단색(기존 동작). run_qe() 가 이 값을 보고 자동으로 대역평균한다.
+        self.qe_bandwidth_nm = float(getattr(self, "_qe_bw", 0.0) or 0.0)
+        self.qe_band_nsub = int(getattr(self, "_qe_nsub", 3) or 3)
 
     # ------------------------------------------------------------- yaml -> IR
     @staticmethod
@@ -192,6 +196,9 @@ class RCWAPlaneWaveSimulator:
             span = float(g["pixel_pitch_um"]) * int(g["n_pixels"])
             if mesh == "auto":
                 self._auto_model_defaults(cfg)
+                meas = cfg.get("measurement") or {}
+                self._qe_bw = float(meas.get("bandwidth_nm", 0) or 0)
+                self._qe_nsub = int(meas.get("n_sub", 3) or 3)
                 # 블록 조립 경로 — dti.optical / collection 등 신규 기능 전부 반영
                 # (레거시 WizardBuilder 와 기하 동등, 회귀[6] 보장). yaml 경로도 이 경로.
                 from ..structure.blocks import ir_from_wizard_cfg, fourier_res_um
@@ -340,6 +347,21 @@ class RCWAPlaneWaveSimulator:
         return out
 
     # ------------------------------------------------------- 대역폭 평균 QE
+    def run_qe(self, wavelength, **kw):
+        """실측 비교용 표준 진입점 — yaml 의 measurement.bandwidth_nm 을 자동 반영.
+
+        bandwidth_nm 이 0(기본)이면 run() 과 완전히 동일하다. 값이 있으면
+        run_band() 로 대역평균한다. 스펙트럼/DOE 등 모든 경로가 이걸 쓰면
+        '단색 계산을 대역측정과 비교'하는 실수가 구조적으로 막힌다.
+
+            measurement: {bandwidth_nm: 20, n_sub: 3}   # yaml 에 한 줄
+        """
+        bw = float(getattr(self, "qe_bandwidth_nm", 0.0) or 0.0)
+        if bw <= 0:
+            return self.run(wavelength, **kw)
+        return self.run_band(wavelength, bw,
+                             n_sub=int(getattr(self, "qe_band_nsub", 3) or 3), **kw)
+
     def run_band(self, wavelength, bandwidth_nm, n_sub=5, **kw):
         """실측기 대역폭을 반영한 QE — 중심 λ ±(bandwidth/2) 를 평균.
 

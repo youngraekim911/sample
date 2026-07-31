@@ -26,8 +26,9 @@ def sweep(config, lam0, lam1, nlam, nG, downsample, theta, phi, device):
     for lam in lams:
         t0 = time.time()
         # 비편광 근사: TE/TM 평균
-        o_te = sim.run(lam, theta=theta, phi=phi, pol_te=1.0, pol_tm=0.0)
-        o_tm = sim.run(lam, theta=theta, phi=phi, pol_te=0.0, pol_tm=1.0)
+        # run_qe: yaml 의 measurement.bandwidth_nm 이 있으면 자동 대역평균
+        o_te = sim.run_qe(lam, theta=theta, phi=phi, pol_te=1.0, pol_tm=0.0)
+        o_tm = sim.run_qe(lam, theta=theta, phi=phi, pol_te=0.0, pol_tm=1.0)
         R = 0.5 * (o_te["R"] + o_tm["R"])
         QE = 0.5 * (o_te["QE"] + o_tm["QE"])
         A = 0.5 * (o_te["A_stack"] + o_tm["A_stack"])
