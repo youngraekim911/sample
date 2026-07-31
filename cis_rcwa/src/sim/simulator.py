@@ -47,6 +47,24 @@ R0_BARE = 0.35
 _PASSIVATION_MATS = ("al2o3", "hfox", "hfo2", "hafn", "ta2o5", "zro2")
 
 
+def _is_legacy_auto_collection(coll):
+    """구버전 코드가 자동으로 채워 넣던 collection 블록인가 (사람이 고른 값이 아님).
+
+    구버전: cfg["collection"] = {"r0": 0.35, "ld_um": 0.175}  — eta0 개념 자체가 없었다.
+    이 서명과 정확히 일치하면 마이그레이션 대상. eta0 가 하나라도 적혀 있으면
+    신버전 사용자가 의도한 값이므로 건드리지 않는다.
+    """
+    if "eta0" in coll:
+        return False
+    if set(coll) != {"r0", "ld_um"}:
+        return False
+    try:
+        return abs(float(coll["r0"]) - 0.35) < 1e-9 and \
+               abs(float(coll["ld_um"]) - 0.175) < 1e-9
+    except (TypeError, ValueError):
+        return False
+
+
 def _si_backside_passivated(stack):
     """Si 광입사면(=BARL 최하층, 아래->위 순서의 첫 층)이 패시베이션막인가."""
     barl = stack.get("barl") or []
@@ -126,17 +144,34 @@ class RCWAPlaneWaveSimulator:
           후면(=Si 에 접한 BARL 첫 층)이 Al2O3/HfOx 같은 고정전하 패시베이션이면
           표면 재결합이 억제되므로 r0 를 작게 잡는다. 실측 정합값 — 아래 참조.
           순수 광학 QE 를 원하면 yaml 에 collection: {eta0: 1, r0: 0} 명시.
+
+          채우기는 '키 단위'다 — collection 블록이 있어도 빠진 키는 자동값으로
+          메운다. 구버전 yaml 은 {r0, ld_um} 만 갖고 있어, 블록 전체를 명시로
+          보면 eta0 가 조용히 1.0 이 되어 수정 전과 같은 값이 나온다(실제로 겪은
+          함정). 명시한 키는 그대로 존중된다.
+
+          추가로, 구버전이 '자동으로 채워 넣던' 값 {r0:0.35, ld_um:0.175} 이
+          그대로 남아 있으면 사람이 고른 값이 아니라 기계가 넣은 잔재이므로
+          새 자동값으로 교체한다(마이그레이션). 일부러 그 값을 쓰려면 eta0 를
+          함께 적으면 된다 — 그러면 명시로 취급된다.
         """
         st = cfg.get("stack") or {}
         d = st.get("dti")
         if d and (d.get("mode") or "").lower() not in ("", "none") \
                 and "optical" not in d:
             d["optical"] = True
-        if "collection" not in cfg:
-            pas = _si_backside_passivated(st)
-            cfg["collection"] = {"eta0": ETA0_DEFAULT,
-                                 "r0": R0_PASSIVATED if pas else R0_BARE,
-                                 "ld_um": 0.3 if pas else 0.175}
+        coll = cfg.get("collection")
+        if not isinstance(coll, dict):
+            coll = {}
+        if coll and _is_legacy_auto_collection(coll):
+            print("[migrate] collection 이 구버전 자동값 {r0:0.35, ld_um:0.175} "
+                  "그대로라 새 자동값으로 교체합니다 (사용자 지정으로 보지 않음)")
+            coll = {}
+        pas = _si_backside_passivated(st)
+        coll.setdefault("eta0", ETA0_DEFAULT)
+        coll.setdefault("r0", R0_PASSIVATED if pas else R0_BARE)
+        coll.setdefault("ld_um", 0.3 if pas else 0.175)
+        cfg["collection"] = coll
 
     def _ir_from_yaml(self, cfg, base_dir, mesh, lateral_um):
         stack = cfg.get("stack") or {}
