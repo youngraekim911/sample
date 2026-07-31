@@ -87,20 +87,20 @@ class SiDtiBlock:
     def _reflector_layers(self, ctx):
         """후면 반사경 (Si 밴드 아래) — [(map, th)] 아래->위 순서로 1~2 층.
 
-        실제 BSI 는 Si 아래에 곧바로 금속이 붙어 있지 않고 BEOL 유전체(ILD)가
+        실제 BSI 는 Si 아래에 곧바로 금속이 붙어 있지 않고 BEOL 유전체(IMD)가
         일정 두께 끼어 있다. 금속을 Si 바닥에 직접 붙이면 Si-금속 계면이 강한
         Fabry-Perot 공진을 만들어, 장파장에서 QE 가 파장에 따라 튀는 비물리적
         결과가 나온다(실측 예: 680nm 가 660nm 보다 높아짐). spacer_um 으로 그
         간격을 넣으면 공진이 실제 구조에 맞게 자리잡는다.
 
-          spacer_um       : Si 바닥 ~ 금속 사이 유전체 두께 (기본 0 = 직접 접촉)
+          spacer_um       : Si 바닥 ~ 금속(M1) 사이 IMD 두께 (기본 0 = 직접 접촉)
           spacer_material : 그 유전체 (기본 sio2)
           coverage        : 금속 면적비 (1=solid 거울, <1 은 나머지가 Si -> 심부 투과)
           routing_pitch_um: 금속 패턴 주기 (기본 픽셀 피치)
         """
         br = self.back_reflector or {}
         cov = min(max(float(br.get("coverage", 1.0)), 0.0), 1.0)
-        th = float(br.get("thickness_um", 0.15))       # 금속 두께 (>~0.1µm 이면 불투명)
+        th = float(br.get("thickness_um", 0.15))       # 금속 두께 (1500A=0.15µm 이면 불투명)
         metal = br.get("material", "cu")
         rp = float(br.get("routing_pitch_um", 0) or ctx.p)   # 라우팅 피치(기본 픽셀피치)
         out = ctx.zeros(self.mat)                      # 갭 = Si (심부로 투과)
