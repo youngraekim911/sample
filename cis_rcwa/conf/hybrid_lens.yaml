@@ -1,12 +1,43 @@
+# hybrid lens 제품 구조 — 실측 QE 정합본
+#
+# 물질 n,k 는 전부 제품 실측값 (data/materials/*.txt).
+#
+# [실측으로 정한 값 — 실제 스펙 확인되면 교체할 것]
+#   back_reflector.coverage 0.2   : M1 이 픽셀 면적의 몇 %를 덮는지. 실측 QE 로 역산.
+#                                   1.0(통짜 거울)은 어두운 채널을 2배로 키워 배제됨.
+#   back_reflector.spacer_um 0.6  : Si 바닥 ~ M1 사이 IMD 두께. 공진이 사라지는 값.
+#   measurement.bandwidth_nm 20   : QE 측정기 대역폭(반치폭). ±10nm 에서 R/G 오차가
+#                                   동시에 최소(±15nm 는 다시 악화) — 단조 노브가 아님.
+#   * 확인된 값: 금속=Cu, 두께=1500A(0.15µm), 유전체=IMD
+#
+# [검증] nG=101, downsample=1, 실측 28점 대비 평균 절대오차 2.61%p
+#        (BRL·대역폭 미적용 시 3.40%p)
 product: hybrid_lens
 ambient: air
-grid: {pixel_pitch_um: 0.7, n_pixels: 4, dxy_um: 0.01, dz_um: 0.01, air_margin_um: 0.20}
+grid:
+  pixel_pitch_um: 0.7
+  n_pixels: 4
+  dxy_um: 0.01
+  dz_um: 0.01
+  air_margin_um: 0.2
 cf_array: tetra
 bayer:
-- [R, R, G, G]
-- [R, R, G, G]
-- [G, G, B, B]
-- [G, G, B, B]
+- - R
+  - R
+  - G
+  - G
+- - R
+  - R
+  - G
+  - G
+- - G
+  - G
+  - B
+  - B
+- - G
+  - G
+  - B
+  - B
 materials:
   air: {}
   si: {}
@@ -25,7 +56,16 @@ materials:
   ml: {}
   ml_arl: {}
 stack:
-  si: {material: si, thickness_um: 3.85}
+  si:
+    material: si
+    thickness_um: 3.85
+    back_reflector:
+      enabled: true
+      coverage: 0.2
+      material: cu
+      thickness_um: 0.15
+      spacer_um: 0.6
+      spacer_material: sio2
   dti:
     mode: 2x2_open
     center_open: true
@@ -36,11 +76,16 @@ stack:
     center_gap_x_um: 0.26
     center_gap_y_um: 0.26
   barl:
-  - {material: al2o3, thickness_um: 0.010}
-  - {material: tio2,  thickness_um: 0.036}
-  - {material: peox,  thickness_um: 0.015}
-  - {material: hfox,  thickness_um: 0.010}
-  - {material: al2o3, thickness_um: 0.010}
+  - material: al2o3
+    thickness_um: 0.01
+  - material: tio2
+    thickness_um: 0.036
+  - material: peox
+    thickness_um: 0.015
+  - material: hfox
+    thickness_um: 0.01
+  - material: al2o3
+    thickness_um: 0.01
   grid:
     pitch: 2
     width_um: 0.11
@@ -50,22 +95,61 @@ stack:
     coat_um: 0.01
     deadzone_um: 0.1
     stack:
-    - {material: tin,  height_um: 0.006}
-    - {material: ti,   height_um: 0.054}
-    - {material: teos, height_um: 0.330}
+    - material: tin
+      height_um: 0.006
+    - material: ti
+      height_um: 0.054
+    - material: teos
+      height_um: 0.33
   cf:
-    R: {material: cf_red,   thickness_um: 0.500, curvature_um: 0, scale_x: 0.92, scale_y: 0.92, chamfer_um: 0.05, chamfer_angle: 45}
-    G: {material: cf_green, thickness_um: 0.520, curvature_um: 0, scale_x: 0.95, scale_y: 0.95, chamfer_um: 0.05, chamfer_angle: 45}
-    B: {material: cf_blue,  thickness_um: 0.475, curvature_um: 0, scale_x: 0.90, scale_y: 0.90, chamfer_um: 0.05, chamfer_angle: 45}
+    R:
+      material: cf_red
+      thickness_um: 0.5
+      curvature_um: 0
+      scale_x: 0.92
+      scale_y: 0.92
+      chamfer_um: 0.05
+      chamfer_angle: 45
+    G:
+      material: cf_green
+      thickness_um: 0.52
+      curvature_um: 0
+      scale_x: 0.95
+      scale_y: 0.95
+      chamfer_um: 0.05
+      chamfer_angle: 45
+    B:
+      material: cf_blue
+      thickness_um: 0.475
+      curvature_um: 0
+      scale_x: 0.9
+      scale_y: 0.9
+      chamfer_um: 0.05
+      chamfer_angle: 45
   ml:
     material: ml
-    planar_um: 0.20
+    planar_um: 0.2
     hr: 0.55
     height_um: 0.36
     sag_height_um: 0.55
     quads:
-    - - {shape: "2x1", orient: h, scale: 1.11, height_um: 0.43}
-      - {shape: "1x1", scale: 1.14, height_um: 0.38}
-    - - {shape: "1x1", scale: 1.14, height_um: 0.38}
-      - {shape: "2x1", orient: h, scale: 1.11, height_um: 0.43}
-  arl_top: {material: ml_arl, thickness_um: 0.09}
+    - - shape: 2x1
+        orient: h
+        scale: 1.11
+        height_um: 0.43
+      - shape: 1x1
+        scale: 1.14
+        height_um: 0.38
+    - - shape: 1x1
+        scale: 1.14
+        height_um: 0.38
+      - shape: 2x1
+        orient: h
+        scale: 1.11
+        height_um: 0.43
+  arl_top:
+    material: ml_arl
+    thickness_um: 0.09
+measurement:
+  bandwidth_nm: 20
+  n_sub: 3
