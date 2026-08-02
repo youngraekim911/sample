@@ -5,10 +5,10 @@
 # [실측으로 정한 값 — 실제 스펙 확인되면 교체할 것]
 #   back_reflector.coverage 0.2   : M1 이 픽셀 면적의 몇 %를 덮는지. 실측 QE 로 역산.
 #                                   1.0(통짜 거울)은 어두운 채널을 2배로 키워 배제됨.
-#   back_reflector.spacer_um 0.6  : Si 바닥 ~ M1 사이 IMD 두께. 공진이 사라지는 값.
+#   back_reflector.spacer_um 0.6  : Si 바닥 ~ M1 사이 ILD 두께. 공진이 사라지는 값.
 #   measurement.bandwidth_nm 20   : QE 측정기 대역폭(반치폭). ±10nm 에서 R/G 오차가
 #                                   동시에 최소(±15nm 는 다시 악화) — 단조 노브가 아님.
-#   * 확인된 값: 금속=Cu, 두께=1500A(0.15µm), 유전체=IMD
+#   * 확인된 값: 금속=Cu, 두께=1500A(0.15µm), 유전체=ILD
 #
 # [검증] nG=101, downsample=1, 실측 28점 대비 평균 절대오차 2.61%p
 #        (BRL·대역폭 미적용 시 3.40%p)
