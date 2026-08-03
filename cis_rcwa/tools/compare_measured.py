@@ -45,11 +45,9 @@ print("=" * 66)
 print("  λ(nm)     R 시뮬/실측        G 시뮬/실측        B 시뮬/실측")
 print("  " + "-" * 62)
 errs, bright, dark = [], [], []
-# run_spectrum: 대역평균의 부분 파장을 이웃 중심끼리 재사용 (파장마다 run_qe 를
-# 부르는 것과 값은 동일, solve 수만 감소)
-nms = sorted(MEASURED)
-outs = sim.run_spectrum([nm / 1000.0 for nm in nms])
-for nm, (o1, o2) in zip(nms, outs):
+for nm in sorted(MEASURED):
+    o1 = sim.run_qe(nm / 1000.0, pol_te=1.0, pol_tm=0.0)
+    o2 = sim.run_qe(nm / 1000.0, pol_te=0.0, pol_tm=1.0)
     q = {c: 50 * (o1["QE_rgb"][c] + o2["QE_rgb"][c]) for c in "RGB"}
     line = f"   {nm}  "
     for c in "RGB":

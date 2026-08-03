@@ -71,6 +71,19 @@ else:
     if dti.get("mode"):
         check("DTI 광학 ON", dti.get("optical") is not False,
               f"optical={dti.get('optical')}")
+    # ── Green 보정 2종이 이 구조에 실제로 걸리는가 ──
+    # 둘 다 yaml 에만 적히므로, 위저드가 만든 yaml 처럼 measurement/materials 가
+    # 비어 있으면 조용히 빠진다. G peak 이 80% 근처로 솟는 전형적 원인.
+    meas = cfg.get("measurement") or {}
+    bw = float(meas.get("bandwidth_nm", 0) or 0)
+    print(f"      측정 대역폭 = {bw:.0f}nm "
+          f"{'(단색 — yaml 에 measurement 블록 없음)' if bw <= 0 else ''}")
+    check("측정 대역폭 적용됨", bw > 0,
+          "yaml 에 measurement: {bandwidth_nm: 20, n_sub: 3} 추가 필요")
+    kf = ((cfg.get("materials") or {}).get("cf_green") or {}).get("k_floor")
+    print(f"      cf_green k 바닥 = {kf if kf else '없음'}")
+    check("cf_green k 바닥 적용됨", bool(kf),
+          "yaml 에 materials: {cf_green: {k_floor: 0.0105}} 추가 필요")
 
 # ── 4) 물질 데이터 확인 ────────────────────────────────────────────────
 print("\n[4] 물질 데이터 — cf_green 400nm k")

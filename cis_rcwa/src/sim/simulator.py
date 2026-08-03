@@ -55,13 +55,6 @@ from ..materials.resolver import MaterialResolver
 ETA0_DEFAULT = 1.0
 R0_PASSIVATED = 0.0
 R0_BARE = 0.35
-# QE 측정기 대역폭 기본값 — 측정기는 단색이 아니라 반치폭 10~20nm 로 잰다.
-# CF 밴드에지처럼 k 가 급변하는 구간에서 단색 계산과 대역평균은 5%p 넘게 갈린다
-# (G@500: 단색 76.0 / ±10nm 70.1 / 실측 70.4). 그래서 yaml 에 없으면 자동으로 켠다.
-# 순수 단색을 원하면 yaml 에 measurement: {bandwidth_nm: 0} 을 명시.
-# 비용은 run_spectrum() 이 이웃 중심의 겹치는 부분 파장을 재사용해 흡수한다.
-QE_BANDWIDTH_NM_DEFAULT = 20.0
-QE_BAND_NSUB_DEFAULT = 3
 # Si 후면에 접해 고정전하 패시베이션을 만드는 대표 물질 (이름 부분일치)
 _PASSIVATION_MATS = ("al2o3", "hfox", "hfo2", "hafn", "ta2o5", "zro2")
 
@@ -195,15 +188,6 @@ class RCWAPlaneWaveSimulator:
         coll.setdefault("r0", R0_PASSIVATED if pas else R0_BARE)
         coll.setdefault("ld_um", 0.3 if pas else 0.175)
         cfg["collection"] = coll
-        # 측정 대역폭도 자동 — yaml 에 없으면 기본값. 예전엔 conf/hybrid_lens.yaml
-        # 에만 적혀 있어서, 위저드가 만든 yaml(measurement 블록 없음)로 돌리면
-        # 조용히 단색이 되어 밴드에지가 5%p 넘게 어긋났다.
-        meas = cfg.get("measurement")
-        if not isinstance(meas, dict):
-            meas = {}
-        meas.setdefault("bandwidth_nm", QE_BANDWIDTH_NM_DEFAULT)
-        meas.setdefault("n_sub", QE_BAND_NSUB_DEFAULT)
-        cfg["measurement"] = meas
 
     def _ir_from_yaml(self, cfg, base_dir, mesh, lateral_um):
         stack = cfg.get("stack") or {}
@@ -404,13 +388,8 @@ class RCWAPlaneWaveSimulator:
             return self.run(lam0, **kw)
         offs = np.linspace(-bw / 2.0, bw / 2.0, n)
         outs = [self.run(lam0 + d, **kw) for d in offs]
-        return self._avg_outputs(outs, lam0, bandwidth_nm, n)
-
-    @staticmethod
-    def _avg_outputs(outs, lam0, bandwidth_nm, n):
-        """부분 파장 결과들의 균등 가중 평균 — 반환 dict 는 run() 과 같은 키."""
-        avg = {"wavelength": float(lam0), "bandwidth_nm": float(bandwidth_nm),
-               "n_sub": int(n), "nG": outs[0]["nG"], "n_layers": outs[0]["n_layers"]}
+        avg = {"wavelength": lam0, "bandwidth_nm": float(bandwidth_nm),
+               "n_sub": n, "nG": outs[0]["nG"], "n_layers": outs[0]["n_layers"]}
         for k in ("R", "QE", "A_stack", "QE_optical", "QE_recomb",
                   "QE_trench", "QE_deep"):
             vals = [o[k] for o in outs if k in o]
@@ -423,74 +402,6 @@ class RCWAPlaneWaveSimulator:
             avg["QE_pixels"] = [float(v) for v in
                                 np.mean([o["QE_pixels"] for o in outs], axis=0)]
         return avg
-
-    # --------------------------------------------------- 스펙트럼 (부분파장 재사용)
-    def run_spectrum(self, waves, pols=((1.0, 0.0), (0.0, 1.0)),
-                     progress=None, on_center=None, cancel=None, **kw):
-        """여러 파장 QE 를 한 번에 — 대역평균의 부분 파장을 중심 간에 재사용.
-
-        왜 있는가 — run_qe() 를 파장마다 부르면 대역평균이 중심당 n_sub 회 solve 라
-        스펙트럼 비용이 그대로 3배가 된다. 그런데 이웃 중심들의 부분 파장은 서로
-        겹친다. 중심 20nm 간격 · 대역 20nm(±10) 이면 부분 파장이 10nm 격자를 이뤄
-        절반이 공유되고, 중심 10nm 간격이면 거의 전부가 공유된다.
-
-        그래서 부분 파장을 전부 모아 중복 제거하고 딱 한 번씩만 푼 뒤 평균한다.
-        결과는 run_qe() 를 파장마다 부른 것과 비트 단위로 같다(같은 solve, 같은 평균).
-
-            중심 16점 (400~700nm, 20nm 간격), 대역 20nm
-              파장마다 run_qe : 16 × 3 = 48 solve
-              run_spectrum    : 33 solve            (1.45배 절감)
-            중심 31점 (10nm 간격)
-              파장마다 run_qe : 93 solve
-              run_spectrum    : 33 solve            (2.8배 절감)
-
-        편광은 한 파장 안에서 연달아 푼다 — 솔버 캐시가 (λ,θ,φ) 키라 두 번째
-        편광은 조립(eig+S-matrix)을 재사용한다. 편광별로 스펙트럼을 따로 돌리면
-        이 재사용이 깨지므로 그렇게 하지 말 것.
-
-        중심 결과는 '준비되는 대로' on_center 로 흘려보낸다 — 부분 파장을 오름차순
-        으로 풀기 때문에, 중심 하나에 필요한 부분 파장이 다 모이는 즉시 확정된다.
-        그래서 스펙트럼을 한 점씩 그려주는 UI 도 그대로 동작한다.
-
-        pols : [(pol_te, pol_tm), ...] — 기본 TE/TM (무편광은 호출측에서 평균)
-        progress(done, total, lam_um)  : 고유 파장 단위 진행 콜백 (선택)
-        on_center(i, wave, outs)       : 중심 i 확정 시 콜백 (선택)
-        cancel() -> True 면 중단하고 None 반환
-        반환: waves 순서의 리스트, 각 원소는 pols 순서의 결과 dict 리스트
-        """
-        waves = [float(w) for w in waves]
-        pols = [tuple(p) for p in pols]
-        bw = float(getattr(self, "qe_bandwidth_nm", 0.0) or 0.0)
-        n = max(1, int(getattr(self, "qe_band_nsub", 3) or 3))
-        if bw <= 0 or n == 1:
-            offs, n = [0.0], 1
-        else:
-            offs = list(np.linspace(-bw / 2000.0, bw / 2000.0, n))   # nm -> µm
-        key = lambda x: round(x, 7)                  # 0.1pm — 부동소수 오차 흡수
-        wkeys = [[key(w + d) for d in offs] for w in waves]
-        need = sorted({k for ks in wkeys for k in ks})
-        cache, total = {}, len(need)
-        out = [None] * len(waves)
-        pending = list(range(len(waves)))
-        for i, lam in enumerate(need):
-            if cancel and cancel():
-                return None
-            cache[lam] = [self.run(lam, pol_te=a, pol_tm=b, **kw) for a, b in pols]
-            if progress:
-                progress(i + 1, total, lam)
-            still = []
-            for ci in pending:                       # 준비된 중심을 즉시 확정
-                if all(k in cache for k in wkeys[ci]):
-                    out[ci] = (cache[wkeys[ci][0]] if n == 1 else
-                               [self._avg_outputs([cache[k][j] for k in wkeys[ci]],
-                                                  waves[ci], bw, n)
-                                for j in range(len(pols))])
-                    if on_center:
-                        on_center(ci, waves[ci], out[ci])
-                else:
-                    still.append(ci)
-            pending = still
-        return out
 
     # ------------------------------------------------------------- QE 집계
     def _detector_qe(self, solver, o):
