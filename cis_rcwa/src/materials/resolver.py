@@ -43,8 +43,26 @@ class MaterialResolver:
         실재한다는 신호다. 통과대역 밖(k>바닥)은 실측값이 그대로 쓰인다.
         """
         n, k = self._nk_raw(name, lam)
-        kf = (self.materials.get(name, {}) or {}).get("k_floor")
-        return (n, max(k, abs(float(kf)))) if kf else (n, k)
+        kf = self._k_floor(name)
+        return (n, max(k, kf)) if kf else (n, k)
+
+    def _k_floor(self, name):
+        """k 하한 — yaml materials[이름].k_floor 우선, 없으면 물질 파일의 '#! k_floor'.
+
+        바닥은 '그 물질의 성질'이므로 기본 거처는 물질 파일이다. 그래야 위저드가
+        만든 yaml 처럼 materials 블록이 비어 있는 구조로 돌려도 따라간다.
+        (예전엔 conf/hybrid_lens.yaml 에만 적어둬서, 위저드 경로로 돌리면 보정이
+        조용히 빠지고 Green 봉우리가 그대로 나오는 함정이 있었다.)
+        yaml 에 명시하면 그 값이 이긴다 — 0 을 적으면 바닥을 끄는 뜻.
+        """
+        mconf = self.materials.get(name, {}) or {}
+        if "k_floor" in mconf:
+            return abs(float(mconf["k_floor"] or 0.0))
+        src = mconf.get("src", name)
+        if self.matlib:
+            return (self.matlib.k_floor(src) if self.matlib.has(src)
+                    else self.matlib.k_floor(name))
+        return None
 
     def _nk_raw(self, name, lam):
         mconf = self.materials.get(name, {}) or {}
@@ -103,8 +121,8 @@ class MaterialResolver:
     def source(self, name):
         """(출처 문자열, 파장범위(µm) 또는 None) — nk() 와 동일 우선순위."""
         s, rng = self._source_raw(name)
-        kf = (self.materials.get(name, {}) or {}).get("k_floor")
-        return (f"{s} + k바닥 {float(kf):.4f}", rng) if kf else (s, rng)
+        kf = self._k_floor(name)
+        return (f"{s} + k바닥 {kf:.4f}", rng) if kf else (s, rng)
 
     def _source_raw(self, name):
         mconf = self.materials.get(name, {}) or {}

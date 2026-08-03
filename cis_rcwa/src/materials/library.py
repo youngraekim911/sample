@@ -6,6 +6,11 @@ txt 형식 (열):  wavelength  n  k
   - 파장 단위 자동 감지: 최대값 > 100 이면 nm 로 보고 um 로 변환
   - 물질마다 step/range 가 달라도 각자 보간 -> 어떤 wavelength 든 커버
 
+지시자 (선택):  #! 키 값        ← '#' 으로 시작하므로 측정행에는 영향 없음
+  #! k_floor 0.0105    이 물질의 k 하한. 물질에 딸린 성질이라 파일에 두면
+                       어느 yaml(위저드 생성본 포함)로 돌려도 따라간다.
+                       yaml 의 materials[이름].k_floor 가 있으면 그쪽이 우선.
+
 usage:
     lib = MaterialLibrary("materials")
     n, k = lib.nk("si", 0.55)      # um
@@ -20,16 +25,26 @@ class MaterialLibrary:
     def __init__(self, folder="materials"):
         self.folder = folder
         self.tables = {}                 # name -> (lam_um[np], n[np], k[np])
+        self.meta = {}                   # name -> {"k_floor": float, ...}  (#! 지시자)
         self.load()
 
     def load(self):
         self.tables.clear()
+        self.meta.clear()
         for path in glob.glob(os.path.join(self.folder, "*.txt")):
             name = os.path.splitext(os.path.basename(path))[0]
             rows = []
             with open(path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
+                    if line.startswith("#!"):        # 지시자 — '#! 키 값'
+                        d = line[2:].split()
+                        if len(d) >= 2 and d[0] == "k_floor":
+                            try:
+                                self.meta.setdefault(name, {})["k_floor"] = abs(float(d[1]))
+                            except ValueError:
+                                pass
+                        continue
                     if not line or line.startswith("#"):
                         continue
                     parts = line.replace(",", " ").split()
@@ -54,6 +69,10 @@ class MaterialLibrary:
 
     def has(self, name):
         return name in self.tables
+
+    def k_floor(self, name):
+        """파일에 '#! k_floor' 로 적힌 k 하한 (없으면 None)."""
+        return self.meta.get(name, {}).get("k_floor")
 
     def lam_range(self, name):
         """테이블 λ 커버 범위 (um) — 진단용."""
