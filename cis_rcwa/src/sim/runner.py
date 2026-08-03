@@ -22,19 +22,23 @@ def sweep(config, lam0, lam1, nlam, nG, downsample, theta, phi, device):
     print(f"[sim] device={sim.device} grid={sim.grid_ny}x{sim.grid_nx} "
           f"layers={len(sim.layer_stack)} nG~{nG}")
     lams = np.linspace(lam0, lam1, nlam)
+    # run_spectrum: 대역평균의 부분 파장을 이웃 중심끼리 재사용 (파장마다 run_qe
+    # 를 부르는 것과 결과는 같고 solve 수만 줄어든다). 비편광 근사 = TE/TM 평균.
+    t0 = time.time()
+    if sim.qe_bandwidth_nm > 0:
+        print(f"[sim] 측정 대역 {sim.qe_bandwidth_nm:.0f}nm 평균 "
+              f"(n_sub={sim.qe_band_nsub}) — 부분 파장 재사용")
+    outs = sim.run_spectrum(
+        lams, theta=theta, phi=phi,
+        progress=lambda d, t, lam: print(
+            f"  [{d}/{t}] λ={lam*1000:6.1f}nm  ({time.time()-t0:.1f}s)", flush=True))
     rows = []
-    for lam in lams:
-        t0 = time.time()
-        # 비편광 근사: TE/TM 평균
-        # run_qe: yaml 의 measurement.bandwidth_nm 이 있으면 자동 대역평균
-        o_te = sim.run_qe(lam, theta=theta, phi=phi, pol_te=1.0, pol_tm=0.0)
-        o_tm = sim.run_qe(lam, theta=theta, phi=phi, pol_te=0.0, pol_tm=1.0)
+    for lam, (o_te, o_tm) in zip(lams, outs):
         R = 0.5 * (o_te["R"] + o_tm["R"])
         QE = 0.5 * (o_te["QE"] + o_tm["QE"])
         A = 0.5 * (o_te["A_stack"] + o_tm["A_stack"])
         rows.append((lam, R, QE, A))
-        print(f"  λ={lam*1000:5.0f}nm  R={R:.3f}  QE(Si)={QE:.3f}  "
-              f"A_stack={A:.3f}  ({time.time()-t0:.1f}s)")
+        print(f"  λ={lam*1000:5.0f}nm  R={R:.3f}  QE(Si)={QE:.3f}  A_stack={A:.3f}")
     return sim, np.array(rows)
 
 

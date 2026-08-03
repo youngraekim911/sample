@@ -287,19 +287,13 @@ def _run_job(jid, cfg_path, p):
         sim = RCWAPlaneWaveSimulator(cfg_path, nG=p["nG"], downsample=p["downsample"])
         job["note"] = (f"device={sim.device} · grid {sim.grid_ny}×{sim.grid_nx} · "
                        f"layers {len(sim.layer_stack)} · nG {sim.nG if hasattr(sim,'nG') else p['nG']}")
-        for i, lam in enumerate(lams):
-            if job.get("cancel"):
-                job["state"] = "cancelled"
-                return
-            t0 = time.time()
-            o_te = sim.run_qe(float(lam), theta=p["theta"], phi=p.get("phi", 0.0),
-                           pol_te=1.0, pol_tm=0.0)
-            if job.get("cancel"):                        # 편광 사이에도 반응 (체감 지연 ↓)
-                job["state"] = "cancelled"
-                return
-            o_tm = sim.run_qe(float(lam), theta=p["theta"], phi=p.get("phi", 0.0),
-                           pol_te=0.0, pol_tm=1.0)
-            w = 1.0 if p.get("pol") == "sum" else 0.5    # 평균(비편광 표준) | 합산(참조 호환, x2)
+        # run_spectrum: 대역평균의 부분 파장을 이웃 중심끼리 재사용해 solve 수를 줄인다.
+        # 중심은 준비되는 대로 on_center 로 흘러나오므로 한 점씩 그리는 UI 는 그대로.
+        w = 1.0 if p.get("pol") == "sum" else 0.5    # 평균(비편광 표준) | 합산(참조 호환, x2)
+        t0 = [time.time()]
+
+        def _center(i, lam, outs):
+            o_te, o_tm = outs
             R = w * (o_te["R"] + o_tm["R"])
             QE = w * (o_te["QE"] + o_tm["QE"])
             A = w * (o_te["A_stack"] + o_tm["A_stack"])
@@ -313,8 +307,23 @@ def _run_job(jid, cfg_path, p):
                 note_rgb = f"  R/G/B={row[4]:.3f}/{row[5]:.3f}/{row[6]:.3f}"
                 note_rgb += f"  (전체 Si흡수, 심부 {w*(o_te.get('QE_deep',0)+o_tm.get('QE_deep',0)):.3f} 포함)"
             job["rows"].append(row)
-            job["progress"] = (i + 1) / len(lams)
-            job["note"] = f"λ={lam*1000:.0f}nm{note_rgb}  ({time.time()-t0:.1f}s/λ, TE+TM)"
+            job["note"] = f"λ={lam*1000:.0f}nm{note_rgb}"
+
+        def _prog(done, total, lam):
+            job["progress"] = done / max(1, total)
+            dt = time.time() - t0[0]
+            job["note"] = (f"{done}/{total} solve · λ={lam*1000:.0f}nm "
+                           f"({dt/max(1,done):.1f}s/solve)")
+
+        got = sim.run_spectrum(
+            [float(x) for x in lams], theta=p["theta"], phi=p.get("phi", 0.0),
+            progress=_prog, on_center=_center,
+            cancel=lambda: bool(job.get("cancel")))
+        if got is None:
+            job["state"] = "cancelled"
+            return
+        job["rows"].sort(key=lambda r: r[0])              # 중심 확정 순서 -> λ 순서
+        job["progress"] = 1.0
         # csv 저장
         csv_path = os.path.join(JOBS_DIR, jid + "_qe.csv")
         with open(csv_path, "w", encoding="utf-8") as f:
