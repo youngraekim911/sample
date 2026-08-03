@@ -1,22 +1,9 @@
-# hybrid lens 제품 구조 — 순수 예측 구성 (역산값 0개)
+# hybrid lens — 정합 검증용 구성 (역산값 4개 포함)  ※ 예측용 아님
 #
-# 입력은 표준 파이프라인 그대로: 구조 스펙 + 6000A thin-film 실측 n,k.
-# QE 를 보고 되돌려 넣은 값이 없다. 예측/DOE/surrogate 는 이 파일을 쓸 것.
-#
-# [입력값 출처]
-#   물질 n,k        : 전부 제품 실측 (data/materials/*.txt, 6000A 평막)
-#   BRL             : Cu(확인) / 1500A(확인) / spacer 2400A(확인) / sio2
-#   coverage 0.2    : 사용자 추정치 ("통짜는 아니고 0.2 정도") — GDS 면적비로 교체 요망
-#   bandwidth 20nm  : 측정기 반치폭 추정 — 장비 사양서로 교체 요망 (소자 모델 아님,
-#                     측정기 모델. 실측과 비교할 때만 작용)
-#
-# [이 구성의 정직한 예측 오차 — nG=101, ds=1, 실측 28점]
-#   전체 2.83%p. G peak 78.7 (실측 74.3, +4.4).
-#   +4.4 의 원인은 소거·코드감사로 '평막 n,k 가 못 담는 통과대역 소광' 으로
-#   특정됨 (docs/Green원인분석_쿠폰측정.md). 적분구 측정이 오면 입력이 좋아져서
-#   (피팅 없이) 정확도가 올라간다.
-#
-# [정합 검증용 구성은 conf/hybrid_lens_calibrated.yaml — 예측에 쓰지 말 것]
+# 실측 QE 로 되돌려 넣은 값(cf_green 소자 소광 / coverage 0.25 / ILD n_eff 1.75 /
+# bandwidth 20)이 들어 있다. 실측 28점 2.30%p 재현용이며, 신제품 예측이나
+# DOE/surrogate 의 기본으로 쓰면 안 된다 — 기본은 conf/hybrid_lens.yaml.
+# 각 값의 정체와 교체(졸업) 조건: docs/최종구성_v131.md, docs/새제품_적용_가이드.md
 product: hybrid_lens
 ambient: air
 grid:
@@ -56,21 +43,26 @@ materials:
   ti: {}
   teos: {}
   cf_red: {}
-  cf_green: {}
+  # 소자 유효 n,k — 통과대역 소광을 실측 QE 로 역산 (적분구 측정 시 그 값으로 교체).
+  # 근거/경위: docs/Green원인분석_쿠폰측정.md, 파일 헤더 참조.
+  cf_green: {src: cf_green_device}
   cf_blue: {}
   ml: {}
   ml_arl: {}
+  # BRL spacer 유효매질 — ILD 는 순수 SiO2 가 아니라 질화막(식각정지층) 포함.
+  # n_eff 1.46/1.60/1.75/1.90 비교에서 1.75 가 R 장파장 최적 + 혼합비로 타당.
+  ild_eff: {n: 1.75, k: 0.0}
 stack:
   si:
     material: si
     thickness_um: 3.85
     back_reflector:
       enabled: true
-      coverage: 0.2
+      coverage: 0.25
       material: cu
       thickness_um: 0.15
       spacer_um: 0.24
-      spacer_material: sio2
+      spacer_material: ild_eff
   dti:
     mode: 2x2_open
     center_open: true
