@@ -278,6 +278,50 @@ class RCWAPlaneWaveSimulator:
         return float(n_a) ** 2, self.res.eps(self.ir.substrate, lam)
 
     # ------------------------------------------------------------- 실행
+    # ------------------------------------------------------- Wood anomaly 회피
+    def _wood_free_lambda(self, lam, theta=0.0, phi=0.0, tol=2e-3):
+        """회절차수가 정확히 스침(kz≈0)이 되는 λ 를 피해 아주 조금 밀어준다.
+
+        왜 필요한가 — 상부 매질에서 차수 (m,n) 의 kz 가 0 이 되면 V0 가 특이해져
+        해가 발산하거나(잡힘) '에너지는 보존되는데 값만 틀린' 가짜 공진이 된다.
+        후자는 R+T≤1 검사를 통과해 조용히 지나간다. 실제로 겪은 예:
+
+            피치 0.7µm × 4 = Λ 2.8µm,  λ=560nm  ->  Λ/λ = 5.0000  (정확히 정수)
+            nG=101 에서 TM 편광 R 이 1.7% -> 56.7% 로 튀고 QE_G 가 70.9(550)
+            -> 34.7(560) -> 58.5(570) 로 혼자 반토막. 그 한 점이 수집효율
+            적합을 통째로 망가뜨렸다(η0 0.95 -> 1.00).
+
+        이 구조에서는 λ = Λ/정수 = 2800/m nm 이 전부 해당된다:
+            m=4 -> 700nm,  m=5 -> 560nm,  m=6 -> 466.7nm,  m=7 -> 400nm
+        즉 실측 파장표의 400/560/700 이 셋 다 정확히 특이점 위에 있었다.
+
+        스침 조건은 층 구조와 무관하게 격자·파장·입사각·상부굴절률만으로 정해지므로
+        solve 이전에 해석적으로 판정한다(추가 계산 비용 없음). tol 은 kz/k0 기준.
+        """
+        try:
+            from ..rcwa import kbloch
+            g1, g2 = kbloch.reciprocal([float(self.ir.span_x), 0.0],
+                                       [0.0, float(self.ir.span_y)])
+            m, n, Gx, Gy = kbloch.get_G(int(self.nG), g1, g2, self.trunc)
+        except Exception:
+            return lam
+        namb = float(np.real(np.sqrt(complex(self._ambient_eps(lam)))))
+        for _ in range(4):                              # 밀어도 또 걸리면 반복
+            k0 = 2 * np.pi / lam
+            st = namb * np.sin(np.deg2rad(float(theta)))
+            kx = k0 * st * np.cos(np.deg2rad(float(phi))) + Gx.numpy()
+            ky = k0 * st * np.sin(np.deg2rad(float(phi))) + Gy.numpy()
+            kz2 = (namb * k0) ** 2 - kx ** 2 - ky ** 2
+            if np.min(np.abs(kz2)) / (k0 * k0) > tol:
+                return lam
+            lam *= 1 + 3e-3                             # +0.3% (560nm -> 561.7nm)
+        return lam
+
+    def _ambient_eps(self, lam):
+        if self.ir.mode == "eps":
+            return self.ir.ambient_eps
+        return self.res.eps(self.ir.ambient, lam)
+
     def run(self, wavelength, theta=0.0, phi=0.0, pol_te=1.0, pol_tm=0.0,
             pixel_qe=True, _wood_depth=0):
         """단일 파장 RCWA -> R, QE(검출기 흡수), A_stack (+픽셀/라벨별 QE)."""
@@ -286,6 +330,7 @@ class RCWAPlaneWaveSimulator:
                 abs(lam - self.ir.eps_lambda_um) > 1e-9:
             print(f"[warn] eps 텐서는 λ={self.ir.eps_lambda_um}µm 스냅샷 — "
                   f"λ={lam} 에서 분산 미반영")
+        lam = self._wood_free_lambda(lam, theta, phi)   # 해석적 Wood 회피 (solve 전)
         # ── 솔버 캐시: (λ,θ,φ) 동일하면 조립(eig+S-matrix, 편광 무관)을 재사용.
         #    비편광 QE(TE+TM 2회 run)가 조립을 한 번만 하게 된다 (~2배).
         key = (round(lam, 12), round(float(theta), 9), round(float(phi), 9))
@@ -314,6 +359,7 @@ class RCWAPlaneWaveSimulator:
                     else:
                         solver.add_layer(th, eps_grid=self._eps_grid(m2d, eps_lut))
             self._solver_cache = (key, solver)
+        # (해석적 가드는 solve 이전에 이미 적용됨 — _wood_free_lambda 참조)
         # 수치 이상 가드: λ 미세 이동 재계산
         #  (a) Wood anomaly: kz=0 차수 -> V0 특이 -> R/T 비유한
         #  (b) 공진점 고유분해 불안정(금속 grid 등): R+T>1 (유니터리티 파괴)
@@ -327,15 +373,43 @@ class RCWAPlaneWaveSimulator:
         except Exception:
             bad = True
         if bad:
-            if _wood_depth >= 3:                        # 재귀 무한루프 가드
+            # λ 를 조금 밀어 재계산하되, '밀어낸 값이 정상인지' 를 반드시 확인한다.
+            #
+            # 왜 확인이 필요한가 — 에너지 검사(R,T 유한 · R+T≤1)만으로는 공진에서
+            # 빠져나왔는지 알 수 없다. 실제로 겪은 예: nG=101, λ=560nm 에서 가드가
+            # 발동해 0.56028µm 로 밀었는데, 그 값도 R=29.3% (양옆은 1.7%) 인 채로
+            # 에너지 검사는 통과해 그대로 반환됐다. QE_G 가 550nm 70.9 -> 560nm 35.0
+            # -> 580nm 52.8 로 혼자 반토막 나고, 그 한 점이 수집효율 적합을 통째로
+            # 망가뜨렸다(η0 0.95 -> 1.00). 밀어낸 폭 0.05% = 0.28nm 는 공진을
+            # 벗어나기에 너무 작았다.
+            #
+            # 그래서 λ 를 양옆으로 같은 폭만큼 밀어 두 점을 풀고, 둘이 서로
+            # 일치할 때만 받아들인다. 공진은 λ 에서 측도 0 의 첨점이라, 폭을
+            # 넓히면 양쪽이 같은 값으로 수렴한다. 일치하지 않으면 폭을 넓힌다.
+            if _wood_depth >= 1:                        # 재귀 무한루프 가드
                 raise RuntimeError(
-                    f"λ={lam}µm: R/T 이상(비유한 또는 R+T>1)이 λ 미세이동 "
-                    f"{_wood_depth}회 후에도 지속 — 물질 n,k/구조 문제일 수 있음")
-            lam_shift = lam * (1 + 5e-4)
+                    f"λ={lam}µm: R/T 이상이 λ 양방향 이동 후에도 지속 — "
+                    f"물질 n,k/구조 문제일 수 있음")
             self._solver_cache = None                   # 이상 조립은 캐시에 남기지 않음
-            print(f"[warn] λ={lam}µm 수치 이상(Wood/유니터리티) -> λ={lam_shift:.5f}µm 로 재계산")
-            return self.run(lam_shift, theta=theta, phi=phi, pol_te=pol_te,
-                            pol_tm=pol_tm, pixel_qe=pixel_qe, _wood_depth=_wood_depth + 1)
+            for d in (2e-3, 6e-3, 1.5e-2):              # ±0.2% -> ±0.6% -> ±1.5%
+                try:
+                    lo = self.run(lam * (1 - d), theta=theta, phi=phi,
+                                  pol_te=pol_te, pol_tm=pol_tm, pixel_qe=pixel_qe,
+                                  _wood_depth=_wood_depth + 1)
+                    hi = self.run(lam * (1 + d), theta=theta, phi=phi,
+                                  pol_te=pol_te, pol_tm=pol_tm, pixel_qe=pixel_qe,
+                                  _wood_depth=_wood_depth + 1)
+                except RuntimeError:
+                    continue
+                if abs(lo["R"] - hi["R"]) <= 0.02:      # 양옆이 일치 = 공진 밖
+                    print(f"[warn] λ={lam}µm 수치 이상(Wood/유니터리티) -> "
+                          f"λ±{d*100:.1f}% 두 점이 일치(R {lo['R']:.4f}/{hi['R']:.4f}) "
+                          f"-> λ={lam*(1+d):.5f}µm 값 사용")
+                    return hi
+                self._solver_cache = None
+            raise RuntimeError(
+                f"λ={lam}µm: 공진에서 벗어나지 못했습니다 (±1.5% 까지 양옆 불일치). "
+                f"nG 를 바꿔 재실행하세요 — 이 파장은 그 nG 에서 불안정합니다.")
         out = {"wavelength": lam, "R": o["R"], "QE": o["T"],
                "A_stack": o["A"], "nG": solver.nG, "n_layers": len(self.layer_stack)}
 
