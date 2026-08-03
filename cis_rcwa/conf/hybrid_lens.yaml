@@ -8,7 +8,10 @@
 #                                   -> 실제 M1 레이아웃 면적비로 교체 요망.
 #   back_reflector.spacer_um 0.24 : Si 표면 ~ M1 바닥 = 2400A (확인됨).
 #                                   그중 gate oxide 가 1300A. 역산값 아님.
-#   * 확인된 값: 금속=Cu, 두께=1500A(0.15µm), 유전체=ILD
+#   measurement.bandwidth_nm      : QE 측정기 반치폭. 기기 스펙 — 확인 요망.
+#   materials.cf_green.src        : 소자 유효 n,k (평막 측정이 못 보는 측면산란분).
+#                                   적분구 측정값 있으면 그걸로 교체.
+#   * 확인된 값: 금속=Cu, 두께=1500A(0.15µm), 유전체=ILD, spacer=2400A
 #
 # [검증] nG=101, downsample=1, 실측 28점 대비 평균 절대오차 2.61%p
 #        (BRL·대역폭 미적용 시 3.40%p)
@@ -51,7 +54,9 @@ materials:
   ti: {}
   teos: {}
   cf_red: {}
-  cf_green: {}
+  # 소자 유효 n,k — n 은 원본 그대로, k 만 통과대역을 실측 QE 로 역산.
+  # 근거는 data/materials/cf_green_device.txt 헤더 참조.
+  cf_green: {src: cf_green_device}
   cf_blue: {}
   ml: {}
   ml_arl: {}
@@ -150,3 +155,6 @@ stack:
   arl_top:
     material: ml_arl
     thickness_um: 0.09
+measurement:
+  bandwidth_nm: 20
+  n_sub: 3
