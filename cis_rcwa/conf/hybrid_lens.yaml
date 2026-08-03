@@ -3,9 +3,11 @@
 # 물질 n,k 는 전부 제품 실측값 (data/materials/*.txt).
 #
 # [실측으로 정한 값 — 실제 스펙 확인되면 교체할 것]
-#   back_reflector.coverage 0.2   : M1 이 픽셀 면적의 몇 %를 덮는지. 실측 QE 로 역산.
-#                                   1.0(통짜 거울)은 어두운 채널을 2배로 키워 배제됨.
-#   back_reflector.spacer_um 0.6  : Si 바닥 ~ M1 사이 ILD 두께. 공진이 사라지는 값.
+#   back_reflector.coverage 1.0   : M1 면적비. spacer 를 실측값(0.24)으로 바꾸자
+#                                   1.0 이 최적이 됨 (R 오차 2.59, 0.2 는 4.91).
+#                                   -> 실제 M1 레이아웃 면적비로 교체 요망.
+#   back_reflector.spacer_um 0.24 : Si 표면 ~ M1 바닥 = 2400A (확인됨).
+#                                   그중 gate oxide 가 1300A. 역산값 아님.
 #   * 확인된 값: 금속=Cu, 두께=1500A(0.15µm), 유전체=ILD
 #
 # [검증] nG=101, downsample=1, 실측 28점 대비 평균 절대오차 2.61%p
@@ -59,10 +61,10 @@ stack:
     thickness_um: 3.85
     back_reflector:
       enabled: true
-      coverage: 0.2
+      coverage: 1.0
       material: cu
       thickness_um: 0.15
-      spacer_um: 0.6
+      spacer_um: 0.24
       spacer_material: sio2
   dti:
     mode: 2x2_open
