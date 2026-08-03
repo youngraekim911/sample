@@ -3,16 +3,17 @@
 # 물질 n,k 는 전부 제품 실측값 (data/materials/*.txt).
 #
 # [실측으로 정한 값 — 실제 스펙 확인되면 교체할 것]
-#   back_reflector.coverage 0.2   : M1 면적비 — 역산값. 실제 레이아웃으로 교체 요망.
-#                                   1.0 은 R 장파장은 좋아지나(700: 36->45) 어두운
-#                                   채널이 터진다(G@700 25->35, B@700 12->19).
+#   back_reflector.coverage 0.25  : M1 면적비 — 역산값. 실제 레이아웃으로 교체 요망.
+#   spacer_material ild_eff n=1.75: ILD 유효굴절률 — 역산값(1.46~1.90 비교 최적).
+#                                   실제 ILD 스택(산화/질화 두께비)으로 교체 요망.
+#   materials.cf_green.src        : 소자 유효 소광 — 역산값. 적분구 측정으로 교체 요망.
 #   back_reflector.spacer_um 0.24 : Si 표면 ~ M1 바닥 = 2400A (확인됨).
 #                                   그중 gate oxide 가 1300A. 역산값 아님.
 #   measurement.bandwidth_nm      : QE 측정기 반치폭. 기기 스펙 — 확인 요망.
 #   * 확인된 값: 금속=Cu, 두께=1500A(0.15µm), 유전체=ILD, spacer=2400A
 #
-# [검증] nG=101, downsample=1, 실측 28점 대비 평균 절대오차 2.57%p
-#        Green peak 74.4 (실측 74.3). 상세: docs/현재상태_및_수정필요항목.md
+# [검증] nG=101, ds=2 기준 실측 28점 평균 절대오차 2.34%p (R 2.28 / G 1.51 / B 3.73)
+#        Green peak 74.6 (실측 74.3). 상세: docs/현재상태_및_수정필요항목.md
 product: hybrid_lens
 ambient: air
 grid:
@@ -52,21 +53,26 @@ materials:
   ti: {}
   teos: {}
   cf_red: {}
-  cf_green: {}
+  # 소자 유효 n,k — 통과대역 소광을 실측 QE 로 역산 (적분구 측정 시 그 값으로 교체).
+  # 근거/경위: docs/Green원인분석_쿠폰측정.md, 파일 헤더 참조.
+  cf_green: {src: cf_green_device}
   cf_blue: {}
   ml: {}
   ml_arl: {}
+  # BRL spacer 유효매질 — ILD 는 순수 SiO2 가 아니라 질화막(식각정지층) 포함.
+  # n_eff 1.46/1.60/1.75/1.90 비교에서 1.75 가 R 장파장 최적 + 혼합비로 타당.
+  ild_eff: {n: 1.75, k: 0.0}
 stack:
   si:
     material: si
     thickness_um: 3.85
     back_reflector:
       enabled: true
-      coverage: 0.2
+      coverage: 0.25
       material: cu
       thickness_um: 0.15
       spacer_um: 0.24
-      spacer_material: sio2
+      spacer_material: ild_eff
   dti:
     mode: 2x2_open
     center_open: true
