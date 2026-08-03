@@ -8,6 +8,9 @@
      폴더가 있으면 무시되어, 폴더 txt 를 바꾸면 재실행 시 반영됨)
   ③ materials 상수 {n,k}
 k 는 전 경로에서 |k| (음수 k 파일 방어). 파장 단위 nm/µm 자동 감지(>100 → nm).
+
+추가로 materials[name].k_floor 가 있으면 어느 경로로 왔든 k = max(k, k_floor).
+컬러필터 통과대역처럼 k 가 0.01 아래로 내려가는 구간에서 쓴다 — 아래 참조.
 """
 import numpy as np
 
@@ -20,6 +23,30 @@ class MaterialResolver:
 
     # ------------------------------------------------------------- n,k
     def nk(self, name, lam):
+        """물질 이름 -> (n, k) @ λ(µm). k_floor 가 있으면 마지막에 바닥을 적용.
+
+        k_floor 가 왜 필요한가 — 안료계 컬러필터의 통과대역에서 실측 k 는 0.006
+        수준까지 내려가는데, 이 영역의 소광은 두 가지가 섞여 있다.
+          ① 색소 흡수 (n,k 측정이 잡는 것)
+          ② 안료 입자 산란 (투과 기반 k 추출이 못 잡음 — 정반사 성분에서 빠져나간
+             빛은 '흡수'로도 '투과'로도 안 세어짐)
+        ②는 파장 의존이 완만해서 통과대역 바닥처럼 보인다. k 를 그대로 쓰면 필터가
+        실제보다 투명해져 QE 봉우리가 솟는다(실측 예: G@520 +4.1%p).
+
+        검증 — 필요한 Δk 를 네 파장에서 서로 독립으로 역산하면 한 값에 모인다:
+            λ    현재k    필요k
+            520  0.0070   0.0112
+            540  0.0060   0.0103
+            550  0.0075   0.0102
+            560  0.0090   0.0100     -> 바닥 0.0105 하나로 전부 설명 (±7%)
+        파장마다 제각각이면 노브를 억지로 맞춘 것이지만, 한 점에 모이면 바닥이
+        실재한다는 신호다. 통과대역 밖(k>바닥)은 실측값이 그대로 쓰인다.
+        """
+        n, k = self._nk_raw(name, lam)
+        kf = (self.materials.get(name, {}) or {}).get("k_floor")
+        return (n, max(k, abs(float(kf)))) if kf else (n, k)
+
+    def _nk_raw(self, name, lam):
         mconf = self.materials.get(name, {}) or {}
         # ⓪ 혼합 물질 (mix: [[이름, 부피분율], ...]) — 유효매질. 구성 물질이 다시
         #    폴더/분산/상수 어디서 오든 상관없어 λ 분산이 그대로 따라온다.
@@ -75,6 +102,11 @@ class MaterialResolver:
     # ------------------------------------------------------------- 출처/범위 (진단용)
     def source(self, name):
         """(출처 문자열, 파장범위(µm) 또는 None) — nk() 와 동일 우선순위."""
+        s, rng = self._source_raw(name)
+        kf = (self.materials.get(name, {}) or {}).get("k_floor")
+        return (f"{s} + k바닥 {float(kf):.4f}", rng) if kf else (s, rng)
+
+    def _source_raw(self, name):
         mconf = self.materials.get(name, {}) or {}
         if mconf.get("mix"):
             parts = " + ".join(f"{n}@{float(f):.3f}" for n, f in mconf["mix"])
