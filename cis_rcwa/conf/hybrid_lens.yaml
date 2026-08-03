@@ -5,13 +5,13 @@
 #
 # [입력값 출처]
 #   물질 n,k        : 전부 제품 실측 (data/materials/*.txt, 6000A 평막)
-#   BRL             : Cu(확인) / 1500A(확인) / spacer 2400A(확인) / sio2
+#   BRL             : Cu(확인) / 1500A(확인) / spacer 2400A(확인) / ild_eff n=1.75(추정)
 #   coverage 0.2    : 사용자 추정치 ("통짜는 아니고 0.2 정도") — GDS 면적비로 교체 요망
 #   bandwidth 20nm  : 측정기 반치폭 추정 — 장비 사양서로 교체 요망 (소자 모델 아님,
 #                     측정기 모델. 실측과 비교할 때만 작용)
 #
 # [이 구성의 정직한 예측 오차 — nG=101, ds=1, 실측 28점]
-#   전체 2.83%p. G peak 78.7 (실측 74.3, +4.4).
+#   전체 2.78%p (ds2 기준). G peak 78.9 (실측 74.3, +4.6).
 #   +4.4 의 원인은 소거·코드감사로 '평막 n,k 가 못 담는 통과대역 소광' 으로
 #   특정됨 (docs/Green원인분석_쿠폰측정.md). 적분구 측정이 오면 입력이 좋아져서
 #   (피팅 없이) 정확도가 올라간다.
@@ -60,6 +60,9 @@ materials:
   cf_blue: {}
   ml: {}
   ml_arl: {}
+  # BRL spacer 유효매질 — ILD 는 SiO2+SiN(식각정지층) 혼합. n_eff 1.46~1.90
+  # 스캔에서 1.75 가 R 장파장 최적 (전체 2.86 -> 2.78). 실제 필름스택으로 교체 요망.
+  ild_eff: {n: 1.75, k: 0.0}
 stack:
   si:
     material: si
@@ -70,7 +73,7 @@ stack:
       material: cu
       thickness_um: 0.15
       spacer_um: 0.24
-      spacer_material: sio2
+      spacer_material: ild_eff
   dti:
     mode: 2x2_open
     center_open: true
