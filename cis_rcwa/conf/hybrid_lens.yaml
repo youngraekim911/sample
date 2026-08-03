@@ -61,7 +61,7 @@ stack:
     thickness_um: 3.85
     back_reflector:
       enabled: true
-      coverage: 1.0
+      coverage: 0.2
       material: cu
       thickness_um: 0.15
       spacer_um: 0.24
