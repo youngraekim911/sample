@@ -86,8 +86,8 @@ class MaterialLibrary:
         lam, n, k = self.tables[name]
         kk = abs(float(np.interp(lam_um, lam, k)))
         kf = self.floors.get(name)
-        if kf:                            # 산란 바닥 (scatter_kfloor.txt) — _load_floors 참조
-            kk = max(kk, kf)
+        if kf:                            # 산란 바닥 — λ^-1.5 산란 법칙 (scatter_model 참조)
+            kk = max(kk, scatter_model.floor_at(kf, lam_um))
         return float(np.interp(lam_um, lam, n)), kk
 
     def eps(self, name, lam_um):

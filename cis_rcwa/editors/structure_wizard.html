@@ -540,7 +540,8 @@
       material n,k 파일과 구조 yaml 은 <b>순수 입력</b>으로 유지됩니다. 평막 투과 n,k 측정은
       안료 입자 산란광이 검출기로 들어가 '투과'로 집계되어 산란 소광을 원리적으로 못 잡는데,
       소자(서브µm 픽셀)에서는 그 산란이 옆 픽셀 손실이 됩니다. 이 측정↔소자 괴리를
-      소프트웨어가 로딩 시 <b>k = max(측정 k, 바닥)</b> 으로 보정합니다.<br>
+      소프트웨어가 로딩 시 <b>k = max(측정 k, k530·(530nm/λ)<sup>1.5</sup>)</b> 산란
+      법칙으로 보정합니다 (아래 값 = k530, 530nm 기준 산란 소광).<br>
       값 0 = 끔 · 빈칸 = 코드 기본값 사용 · <b>다음 실행부터</b> 반영 ·
       적분구(haze) 실측이 오면 그 값으로 교체하세요.</p>
     <table id="scRows" style="border-collapse:collapse;font-size:13px"></table>
@@ -1350,7 +1351,7 @@ async function scOpen(){
   const dft=(st&&st.defaults)||{}, ovr=(st&&st.overrides)||{};
   el("scRows").innerHTML =
     "<tr><th style='text-align:left;padding:4px 14px 4px 0'>물질</th>"+
-    "<th style='padding:4px 14px'>기본값(코드)</th><th style='padding:4px 0'>적용값 (k 바닥)</th></tr>"+
+    "<th style='padding:4px 14px'>기본값(코드)</th><th style='padding:4px 0'>적용값 (k530)</th></tr>"+
     SC_MATS.map(m=>{
       const dv=(dft[m]!=null)?dft[m]:null;
       const cur=(ovr[m]!=null)?ovr[m]:"";

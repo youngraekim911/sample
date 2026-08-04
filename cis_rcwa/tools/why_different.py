@@ -55,7 +55,7 @@ try:
     ovr = _sc.load_overrides()
     chk("scatter_model 모듈 존재", True)
     fl = eff.get("cf_green")
-    chk("cf_green 실효 바닥 = 0.0105", fl is not None and abs(fl - 0.0105) < 5e-4,
+    chk("cf_green k530 = 0.0108 (λ^-1.5 산란 법칙)", fl is not None and abs(fl - 0.0108) < 5e-4,
         f"현재 {fl}" + (f"  (UI 재정의 {ovr} 적용 중 — ⚙ 에서 확인)" if ovr else
                         "  (기본값)"))
 except ImportError as _e:
@@ -86,7 +86,7 @@ try:
         sim = S.RCWAPlaneWaveSimulator(conf, nG=nG, downsample=ds)
     print(f"      출처   {sim.res.source('cf_green')[0]}")
     kk = sim.res.nk("cf_green", 0.52)[1]
-    chk("cf_green k@520 = 0.0105 (산란 바닥)", abs(kk - 0.0105) < 5e-4,
+    chk("cf_green k@520 = 0.0111 (산란 법칙 @520)", abs(kk - 0.01111) < 5e-4,
         f"현재 {kk:.5f}   (0.0070 이면 바닥이 안 걸린 것)")
     print(f"      측정 대역폭 {sim.qe_bandwidth_nm:.0f}nm  ·  "
           f"층 {len(sim.layer_stack)}  ·  격자 {sim.grid_ny}×{sim.grid_nx}")
@@ -98,7 +98,7 @@ except Exception as e:
 print("\n[5] 실측정 — G@520 (실측 74.3)")
 # 이 저장소에서 실제로 측정한 값. 보정 적용 / 미적용 두 벌.
 # 산란 바닥(scatter_kfloor.txt) 적용 상태 — conf/hybrid_lens.yaml 기준
-EXPECT = {(101, 2): 76.31, (101, 1): 76.11}
+EXPECT = {(101, 2): 75.69, (101, 1): 75.53}
 # 바닥 파일을 지운 상태(원본 평막 n,k 그대로)의 참고값
 NO_FIX = {(101, 1): 79.47, (151, 1): 80.36, (201, 1): 81.53, (301, 1): 81.20}
 if sim is not None:
