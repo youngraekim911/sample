@@ -1,22 +1,21 @@
-# hybrid lens — 허용노브 최적 구성 (n,k 역산 0개, 전체 2.54%p)
+# hybrid lens — 허용노브 최적 구성 (n,k 역산 0개, 전체 2.63%p)
 #
-# 기본(hybrid_lens.yaml, 2.78%p)에서 딱 2개만 다름 — 둘 다 n,k 아님:
-#   1) BARL TiO2: 0.036 -> 0.028 um  (스펙 360A 대비 -80A)
-#      ** 실제 증착 두께 확인 요망 ** — BARL 은 증착 공정 산포가 +-10% 수준이라
-#      실두께가 스펙과 다를 수 있음. 실측 두께가 오면 그 값으로 교체.
-#   2) coverage: 0.2 -> 0.35 (M1 면적비 추정 상향 — GDS 면적비로 교체 요망)
+# ** BARL 은 전 층 스펙 그대로 (TiO2 360A 포함 — 사용자 확인: 스펙 고정) **
 #
-# [성적 — nG=101, 실측 28점]
-#   전체 2.54%p (R 2.70 / G 1.86 / B 3.40)   G peak 77.2 (실측 74.3)
-#   ds=1 재검증 동일: 2.54%p (밝음 2.39 / 어둠 2.77) — 해상도 수렴 확인
-#   기본 2.78 대비: R 장파장 대폭 개선(TiO2 얇음 = AR 중심 단파장 이동 + coverage↑),
-#   B 는 -0.2 소폭 손해. G peak 는 여전히 +2.9 (원인은 CF 통과대역 소광 —
-#   docs/Green원인분석_쿠폰측정.md, 적분구 측정 대기).
+# 기본(hybrid_lens.yaml, 2.78%p)에서 다른 것은 단 1개:
+#   coverage: 0.2 -> 0.25 (M1 면적비 추정 상향 — GDS 면적비로 교체 요망)
+#   * calibrated 구성이 독립적으로 채택한 값과 동일(0.25) — 교차 부합
 #
-# 주변 미세탐색 결과 (전체 오차): t0.026 2.61 / t0.028 2.54 / t0.030 2.52 /
-#   t0.032 2.56, cov0.30 2.56 / cov0.35 2.54 / cov0.40 2.54 — 2.52~2.56 평탄역.
-#   t0.030(2.52)과 차이 0.02 는 의미 없고 G peak 는 t0.028 이 더 낮아(77.2 vs
-#   77.8) 이 점을 선택.
+# [성적 — nG=101, ds=2, 실측 28점]
+#   전체 2.63%p (R 2.29 / G 2.24 / B 3.74)   G peak 78.9 (실측 74.3)
+#   coverage 곡선: 0.20→2.78 / 0.25→2.63(최소) / 0.30→2.66 / 0.50→3.08
+#   ds=1 재검증: 2.58%p (밝음 2.44 / 어둠 2.79) — 해상도 수렴 확인
+#
+# [참고 — TiO2 를 280A 로 낮추면 2.54 까지 가능했으나 스펙(360A) 고정 지시로 기각.
+#   그 이득은 BARL AR 중심 이동에 의한 R 장파장 개선분이었음]
+#
+# G peak +4.6 의 원인은 CF 통과대역 소광 (docs/Green원인분석_쿠폰측정.md,
+# 적분구 측정 대기). B 는 단색 기준 450/500 일치 (docs/Blue_DTI_검증.md).
 product: hybrid_lens
 ambient: air
 grid:
@@ -67,7 +66,7 @@ stack:
     thickness_um: 3.85
     back_reflector:
       enabled: true
-      coverage: 0.35
+      coverage: 0.25
       material: cu
       thickness_um: 0.15
       spacer_um: 0.24
@@ -85,7 +84,7 @@ stack:
   - material: al2o3
     thickness_um: 0.01
   - material: tio2
-    thickness_um: 0.028
+    thickness_um: 0.036
   - material: peox
     thickness_um: 0.015
   - material: hfox
