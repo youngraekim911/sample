@@ -47,22 +47,19 @@ chk("_wood_free_lambda 존재", "_wood_free_lambda" in src_txt,
     "없으면 560nm 가 34.7 로 꺼져 G 곡선이 망가짐")
 print(f"      import 경로 {S.__file__}")
 
-# ── 2) 데이터: 산란 바닥 사이드카 (물질 폴더) ───────────────────────────
-print("\n[2] 데이터 — 안료 산란 바닥 (data/materials/scatter_kfloor.txt)")
-p = "data/materials/scatter_kfloor.txt"
-has = os.path.exists(p)
-chk(f"{p} 존재", has, "없으면 산란 바닥 미적용 -> Green 80%")
-if has:
-    fl = None
-    for ln in open(p, encoding="utf-8"):
-        f = ln.split()
-        if len(f) >= 2 and f[0] == "cf_green":
-            try:
-                fl = float(f[1])
-            except ValueError:
-                pass
-    chk("cf_green 바닥 = 0.0105", fl is not None and abs(fl - 0.0105) < 5e-4,
-        f"현재 {fl}  (없으면 등재 누락)")
+# ── 2) 코드: 산란 바닥 (소프트웨어 보정 — src/materials/scatter_model.py) ──
+print("\n[2] 코드 — 안료 산란 바닥 (scatter_model, UI ⚙ 설정 연동)")
+try:
+    from src.materials import scatter_model as _sc
+    eff = _sc.get_floors()
+    ovr = _sc.load_overrides()
+    chk("scatter_model 모듈 존재", True)
+    fl = eff.get("cf_green")
+    chk("cf_green 실효 바닥 = 0.0105", fl is not None and abs(fl - 0.0105) < 5e-4,
+        f"현재 {fl}" + (f"  (UI 재정의 {ovr} 적용 중 — ⚙ 에서 확인)" if ovr else
+                        "  (기본값)"))
+except ImportError as _e:
+    chk("scatter_model 모듈 존재", False, f"{_e} — 패키지를 통째로 다시 푸세요")
 
 # ── 3) 설정: yaml 이 그 파일을 가리키나 + 측정 대역폭 ────────────────────
 print(f"\n[3] 설정 — {conf}")
@@ -121,8 +118,8 @@ if sim is not None:
         print(f"      참고: 산란 바닥이 '안' 걸린 상태의 값은 이 조건에서 {nf:.1f} 입니다")
     if g > 78:
         print("\n      >> 79~81 은 산란 바닥이 아예 안 걸린 값입니다.")
-        print("         nG 를 올려서 나는 차이가 아닙니다 — [2] 의 사이드카")
-        print("         파일이 있으면 그런 값이 나오지 않습니다.")
+        print("         nG 를 올려서 나는 차이가 아닙니다 — [2] 의 산란 바닥이")
+        print("         걸려 있으면 그런 값이 나오지 않습니다.")
         print("         위 [1]~[4] 의 [ X ] 항목이 원인입니다.")
 
 print("\n" + "-" * 72)
@@ -142,7 +139,8 @@ if fails:
     print("""
  조치
    [1] 실패 -> src/sim/simulator.py 가 교체 안 됨. 패키지를 통째로 다시 푸세요.
-   [2] 실패 -> data/materials/scatter_kfloor.txt 를 복사해 넣으세요.
+   [2] 실패 -> src/materials/scatter_model.py 가 없거나, UI ⚙ 설정에서
+                바닥이 바뀐 상태입니다. 위저드 우측 상단 ⚙ -> '기본값 복원'.
    [3] 실패 -> 쓰시는 yaml 에 아래 블록을 넣으세요:
 
          measurement:

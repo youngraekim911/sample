@@ -44,6 +44,10 @@ ROOT = ASSET_ROOT                              # 하위호환(html 등 읽기자
 JOBS_DIR = os.path.join(APP_DIR, "out", "jobs")   # 쓰기 — exe 옆
 DEFAULT_CACHE_DIR = os.path.join(APP_DIR, "out", "surrogate_cache")   # 기본 DB 폴더
 
+# 소프트웨어 보정(안료 산란 바닥) 설정 파일 — exe 옆 out/ 에 저장 (UI ⚙ 연동)
+from ..materials import scatter_model as _scatter_model                # noqa: E402
+_scatter_model.set_settings_path(os.path.join(APP_DIR, "out", "scatter_settings.json"))
+
 
 def _cache_dir():
     """활성 surrogate DB 폴더 — 환경변수/포인터파일(사용자 지정)로 바꿀 수 있음."""
@@ -1144,6 +1148,10 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/materials":
             # data/materials 폴더를 매번 새로 읽어 반환 (위저드가 열릴 때/run 직전 갱신용)
             self._json(_read_materials_folder())
+        elif u.path == "/api/scatter":
+            # 소프트웨어 보정(안료 산란 바닥) 상태 — UI 설정 패널용
+            from ..materials import scatter_model
+            self._json(scatter_model.get_state())
         elif u.path == "/api/qe/status":
             jid = (parse_qs(u.query).get("job") or [""])[0]
             job = JOBS.get(jid)
@@ -1310,6 +1318,16 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             self._json({"error": "bad json"}, 400); return
+        if u.path == "/api/scatter":
+            # 소프트웨어 보정(안료 산란 바닥) 저장 — {"k_floor": {"cf_green": 0.0105, ...}}
+            # 값 0 = 그 물질 바닥 끔. 다음 QE 실행부터 반영 (시뮬레이터가 로딩 시 적용).
+            try:
+                from ..materials import scatter_model
+                scatter_model.save_overrides(data.get("k_floor") or {})
+                self._json(scatter_model.get_state())
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}"}, 500)
+            return
         if u.path == "/api/attribute":
             # A. 에너지 귀속 — 한 파장 QE 가 왜 그 값인지 (빛이 어디로 갔나). 동기.
             try:
