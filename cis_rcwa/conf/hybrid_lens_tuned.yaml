@@ -1,0 +1,160 @@
+# hybrid lens — 허용노브 최적 구성 (n,k 역산 0개, 전체 2.54%p)
+#
+# 기본(hybrid_lens.yaml, 2.78%p)에서 딱 2개만 다름 — 둘 다 n,k 아님:
+#   1) BARL TiO2: 0.036 -> 0.028 um  (스펙 360A 대비 -80A)
+#      ** 실제 증착 두께 확인 요망 ** — BARL 은 증착 공정 산포가 +-10% 수준이라
+#      실두께가 스펙과 다를 수 있음. 실측 두께가 오면 그 값으로 교체.
+#   2) coverage: 0.2 -> 0.35 (M1 면적비 추정 상향 — GDS 면적비로 교체 요망)
+#
+# [성적 — nG=101, ds=2, 실측 28점]
+#   전체 2.54%p (R 2.70 / G 1.86 / B 3.40)   G peak 77.2 (실측 74.3)
+#   기본 2.78 대비: R 장파장 대폭 개선(TiO2 얇음 = AR 중심 단파장 이동 + coverage↑),
+#   B 는 -0.2 소폭 손해. G peak 는 여전히 +2.9 (원인은 CF 통과대역 소광 —
+#   docs/Green원인분석_쿠폰측정.md, 적분구 측정 대기).
+#
+# 주변 미세탐색 결과 (전체 오차): t0.026 2.61 / t0.028 2.54 / t0.030 2.52 /
+#   t0.032 2.56, cov0.30 2.56 / cov0.35 2.54 / cov0.40 2.54 — 2.52~2.56 평탄역.
+#   t0.030(2.52)과 차이 0.02 는 의미 없고 G peak 는 t0.028 이 더 낮아(77.2 vs
+#   77.8) 이 점을 선택.
+product: hybrid_lens
+ambient: air
+grid:
+  pixel_pitch_um: 0.7
+  n_pixels: 4
+  dxy_um: 0.01
+  dz_um: 0.01
+  air_margin_um: 0.2
+cf_array: tetra
+bayer:
+- - R
+  - R
+  - G
+  - G
+- - R
+  - R
+  - G
+  - G
+- - G
+  - G
+  - B
+  - B
+- - G
+  - G
+  - B
+  - B
+materials:
+  air: {}
+  si: {}
+  sio2: {}
+  poly: {}
+  al2o3: {}
+  tio2: {}
+  peox: {}
+  hfox: {}
+  tin: {}
+  ti: {}
+  teos: {}
+  cf_red: {}
+  cf_green: {}
+  cf_blue: {}
+  ml: {}
+  ml_arl: {}
+  ild_eff: {n: 1.75, k: 0.0}
+stack:
+  si:
+    material: si
+    thickness_um: 3.85
+    back_reflector:
+      enabled: true
+      coverage: 0.35
+      material: cu
+      thickness_um: 0.15
+      spacer_um: 0.24
+      spacer_material: ild_eff
+  dti:
+    mode: 2x2_open
+    center_open: true
+    width_um: 0.09
+    oxide_liner_um: 0.02
+    liner: sio2
+    fill: poly
+    center_gap_x_um: 0.26
+    center_gap_y_um: 0.26
+  barl:
+  - material: al2o3
+    thickness_um: 0.01
+  - material: tio2
+    thickness_um: 0.028
+  - material: peox
+    thickness_um: 0.015
+  - material: hfox
+    thickness_um: 0.01
+  - material: al2o3
+    thickness_um: 0.01
+  grid:
+    pitch: 2
+    width_um: 0.11
+    top_ratio: 0.7
+    coat_on: true
+    coat_material: al2o3
+    coat_um: 0.01
+    deadzone_um: 0.1
+    stack:
+    - material: tin
+      height_um: 0.006
+    - material: ti
+      height_um: 0.054
+    - material: teos
+      height_um: 0.33
+  cf:
+    R:
+      material: cf_red
+      thickness_um: 0.5
+      curvature_um: 0
+      scale_x: 0.92
+      scale_y: 0.92
+      chamfer_um: 0.05
+      chamfer_angle: 45
+    G:
+      material: cf_green
+      thickness_um: 0.52
+      curvature_um: 0
+      scale_x: 0.95
+      scale_y: 0.95
+      chamfer_um: 0.05
+      chamfer_angle: 45
+    B:
+      material: cf_blue
+      thickness_um: 0.475
+      curvature_um: 0
+      scale_x: 0.9
+      scale_y: 0.9
+      chamfer_um: 0.05
+      chamfer_angle: 45
+  ml:
+    material: ml
+    planar_um: 0.2
+    hr: 0.55
+    height_um: 0.36
+    sag_height_um: 0.55
+    quads:
+    - - shape: 2x1
+        orient: h
+        scale: 1.11
+        height_um: 0.43
+      - shape: 1x1
+        scale: 1.14
+        height_um: 0.38
+    - - shape: 1x1
+        scale: 1.14
+        height_um: 0.38
+      - shape: 2x1
+        orient: h
+        scale: 1.11
+        height_um: 0.43
+  arl_top:
+    material: ml_arl
+    thickness_um: 0.09
+measurement:
+  bandwidth_nm: 20
+  n_sub: 3
