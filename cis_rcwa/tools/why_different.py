@@ -47,19 +47,22 @@ chk("_wood_free_lambda 존재", "_wood_free_lambda" in src_txt,
     "없으면 560nm 가 34.7 로 꺼져 G 곡선이 망가짐")
 print(f"      import 경로 {S.__file__}")
 
-# ── 2) 데이터: 소자 유효 n,k 파일 ───────────────────────────────────────
-print("\n[2] 데이터 — cf_green 소자 유효 n,k 파일")
-p = "data/materials/cf_green_device.txt"
+# ── 2) 데이터: 산란 바닥 사이드카 (물질 폴더) ───────────────────────────
+print("\n[2] 데이터 — 안료 산란 바닥 (data/materials/scatter_kfloor.txt)")
+p = "data/materials/scatter_kfloor.txt"
 has = os.path.exists(p)
-chk(f"{p} 존재", has, "없으면 원본으로 조용히 폴백 -> Green 80%")
+chk(f"{p} 존재", has, "없으면 산란 바닥 미적용 -> Green 80%")
 if has:
-    k520 = None
+    fl = None
     for ln in open(p, encoding="utf-8"):
         f = ln.split()
-        if len(f) >= 3 and f[0].startswith("520"):
-            k520 = float(f[2])
-    chk("k@520 = 0.0131 (소자값)", k520 is not None and abs(k520 - 0.01307) < 5e-4,
-        f"현재 {k520}  (원본 평막값은 0.0070)")
+        if len(f) >= 2 and f[0] == "cf_green":
+            try:
+                fl = float(f[1])
+            except ValueError:
+                pass
+    chk("cf_green 바닥 = 0.0105", fl is not None and abs(fl - 0.0105) < 5e-4,
+        f"현재 {fl}  (없으면 등재 누락)")
 
 # ── 3) 설정: yaml 이 그 파일을 가리키나 + 측정 대역폭 ────────────────────
 print(f"\n[3] 설정 — {conf}")
@@ -68,10 +71,6 @@ if not os.path.exists(conf):
 else:
     from src.config.loader import load_config                    # noqa: E402
     cfg = load_config(conf)
-    m = (cfg.get("materials") or {}).get("cf_green") or {}
-    chk("materials.cf_green.src = cf_green_device",
-        m.get("src") == "cf_green_device",
-        f"현재 {m or '{}'}   -> 없으면 원본 평막 n,k 를 씀")
     meas = cfg.get("measurement") or {}
     bw = float(meas.get("bandwidth_nm", 0) or 0)
     chk("measurement.bandwidth_nm > 0", bw > 0,
@@ -90,8 +89,8 @@ try:
         sim = S.RCWAPlaneWaveSimulator(conf, nG=nG, downsample=ds)
     print(f"      출처   {sim.res.source('cf_green')[0]}")
     kk = sim.res.nk("cf_green", 0.52)[1]
-    chk("cf_green k@520 = 0.0131", abs(kk - 0.01307) < 5e-4,
-        f"현재 {kk:.5f}   (0.0070 이면 보정이 안 걸린 것)")
+    chk("cf_green k@520 = 0.0105 (산란 바닥)", abs(kk - 0.0105) < 5e-4,
+        f"현재 {kk:.5f}   (0.0070 이면 바닥이 안 걸린 것)")
     print(f"      측정 대역폭 {sim.qe_bandwidth_nm:.0f}nm  ·  "
           f"층 {len(sim.layer_stack)}  ·  격자 {sim.grid_ny}×{sim.grid_nx}")
 except Exception as e:
@@ -101,8 +100,9 @@ except Exception as e:
 # ── 5) 실제 계산: G@520 을 직접 재서 기대값과 대조 ───────────────────────
 print("\n[5] 실측정 — G@520 (실측 74.3)")
 # 이 저장소에서 실제로 측정한 값. 보정 적용 / 미적용 두 벌.
-EXPECT = {(51, 2): 61.75, (101, 2): 74.49, (101, 1): 74.38,
-          (151, 1): 75.02, (201, 1): 76.00}
+# 산란 바닥(scatter_kfloor.txt) 적용 상태 — conf/hybrid_lens.yaml 기준
+EXPECT = {(101, 2): 76.31, (101, 1): 76.11}
+# 바닥 파일을 지운 상태(원본 평막 n,k 그대로)의 참고값
 NO_FIX = {(101, 1): 79.47, (151, 1): 80.36, (201, 1): 81.53, (301, 1): 81.20}
 if sim is not None:
     o1 = sim.run_qe(0.52, pol_te=1.0, pol_tm=0.0)
@@ -118,17 +118,17 @@ if sim is not None:
               f"nG=101/ds=1 로 다시 돌려보세요)")
     nf = NO_FIX.get((nG, ds))
     if nf is not None:
-        print(f"      참고: 보정이 '안' 걸린 상태의 값은 이 조건에서 {nf:.1f} 입니다")
+        print(f"      참고: 산란 바닥이 '안' 걸린 상태의 값은 이 조건에서 {nf:.1f} 입니다")
     if g > 78:
-        print("\n      >> 80% 대는 보정이 아예 안 걸린 값입니다.")
-        print("         nG 를 올려서 나는 차이가 아닙니다 — 보정을 넣으면")
-        print("         nG=201 에서도 76.0 이지 81 이 나오지 않습니다.")
+        print("\n      >> 79~81 은 산란 바닥이 아예 안 걸린 값입니다.")
+        print("         nG 를 올려서 나는 차이가 아닙니다 — [2] 의 사이드카")
+        print("         파일이 있으면 그런 값이 나오지 않습니다.")
         print("         위 [1]~[4] 의 [ X ] 항목이 원인입니다.")
 
 print("\n" + "-" * 72)
 print(" 조건별 기대값 (이 저장소 실측)          G@520   실측 74.3")
 print("-" * 72)
-print(f" {'nG':>5} {'ds':>3} | {'보정 적용':>10} {'보정 없음':>10}")
+print(f" {'nG':>5} {'ds':>3} | {'바닥 적용':>10} {'바닥 없음':>10}")
 for k in sorted(set(EXPECT) | set(NO_FIX)):
     e = EXPECT.get(k); n_ = NO_FIX.get(k)
     print(f" {k[0]:5d} {k[1]:3d} | {('%10.2f' % e) if e else '        --'} "
@@ -142,11 +142,8 @@ if fails:
     print("""
  조치
    [1] 실패 -> src/sim/simulator.py 가 교체 안 됨. 패키지를 통째로 다시 푸세요.
-   [2] 실패 -> data/materials/cf_green_device.txt 를 복사해 넣으세요.
-   [3] 실패 -> 쓰시는 yaml 에 아래 두 블록을 넣으세요:
-
-         materials:
-           cf_green: {src: cf_green_device}
+   [2] 실패 -> data/materials/scatter_kfloor.txt 를 복사해 넣으세요.
+   [3] 실패 -> 쓰시는 yaml 에 아래 블록을 넣으세요:
 
          measurement:
            bandwidth_nm: 20

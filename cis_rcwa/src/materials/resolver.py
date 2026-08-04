@@ -114,7 +114,9 @@ class MaterialResolver:
         src = mconf.get("src", name)
         if self.matlib and (self.matlib.has(src) or self.matlib.has(name)):
             key = src if self.matlib.has(src) else name
-            return "materials 폴더", self.matlib.lam_range(key)
+            fl = getattr(self.matlib, "k_floor", lambda _n: None)(key)
+            tag = "materials 폴더" + (f" + 산란바닥 {fl:.4f}" if fl else "")
+            return tag, self.matlib.lam_range(key)
         disp = self.dispersion.get(name)
         if disp is not None:
             arr = np.array(disp, dtype=float)

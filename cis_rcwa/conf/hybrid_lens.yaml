@@ -1,22 +1,23 @@
-# hybrid lens 제품 구조 — 순수 예측 구성 (역산값 0개)
+# hybrid lens 제품 구조 — 순수 예측 구성 (구조 스펙 그대로)
 #
-# 입력은 표준 파이프라인 그대로: 구조 스펙 + 6000A thin-film 실측 n,k.
-# QE 를 보고 되돌려 넣은 값이 없다. 예측/DOE/surrogate 는 이 파일을 쓸 것.
+# 입력은 표준 파이프라인 그대로: 구조 스펙 + 실측 n,k + 물질 폴더의 산란 바닥.
+# QE 를 보고 이 파일에 되돌려 넣은 값이 없다. 예측/DOE/surrogate 는 이 파일을 쓸 것.
 #
 # [입력값 출처]
 #   물질 n,k        : 전부 제품 실측 (data/materials/*.txt, 6000A 평막)
+#   산란 바닥       : data/materials/scatter_kfloor.txt — 평막 측정이 못 잡는
+#                     안료 산란(물질의 성질). 구조와 무관하게 자동 적용.
+#                     적분구(haze) 실측이 오면 그 파일 값을 교체
 #   BRL             : Cu(확인) / 1500A(확인) / spacer 2400A(확인) / ild_eff n=1.75(추정)
 #   coverage 0.2    : 사용자 추정치 ("통짜는 아니고 0.2 정도") — GDS 면적비로 교체 요망
 #   bandwidth 20nm  : 측정기 반치폭 추정 — 장비 사양서로 교체 요망 (소자 모델 아님,
 #                     측정기 모델. 실측과 비교할 때만 작용)
 #
-# [이 구성의 정직한 예측 오차 — nG=101, ds=1, 실측 28점]
-#   전체 2.78%p (ds2 기준). G peak 78.9 (실측 74.3, +4.6).
-#   +4.4 의 원인은 소거·코드감사로 '평막 n,k 가 못 담는 통과대역 소광' 으로
-#   특정됨 (docs/Green원인분석_쿠폰측정.md). 적분구 측정이 오면 입력이 좋아져서
-#   (피팅 없이) 정확도가 올라간다.
+# [이 구성의 예측 오차 — nG=101, ds=2, 실측 28점]
+#   전체 2.45%p. G peak 76.3 (실측 74.3, +2.0). 산란 바닥 반영 전에는 2.78 / 79.0.
+#   운영(권장) 구성은 conf/hybrid_lens_tuned.yaml (coverage 0.25, 2.28%p).
 #
-# [정합 검증용 구성은 conf/hybrid_lens_calibrated.yaml — 예측에 쓰지 말 것]
+# [정합 검증용 구성은 conf/hybrid_lens_calibrated.yaml — 기록용]
 product: hybrid_lens
 ambient: air
 grid:
