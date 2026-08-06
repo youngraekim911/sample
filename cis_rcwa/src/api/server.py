@@ -733,6 +733,22 @@ def _run_image_job(jid, cfg_path, p):
         mean = np.nanmean(np.stack([images[int(w)] for w in waves]), axis=0)
         diff = _same_color_diff(units, labels, waves,
                                 float(p.get("diff_threshold_pct", 30.0)))
+        # ── 픽셀별 diff 맵 — 단위셀 픽셀(npx×npx) 각각의 field-diff 맵.
+        #    diff% = (픽셀QE − 동채널(quad) 평균)/평균 ×100, 파장별 + 평균.
+        from ..sim.octant import per_pixel_diff_image
+        pix_maps = {}
+        ch_grid = None
+        for w in list(waves) + ["mean"]:
+            src = mean if w == "mean" else images[int(w)]
+            pd, ch_grid = per_pixel_diff_image(src, labels)
+            npx = len(ch_grid)
+            pix_maps[str(w) if w == "mean" else str(int(w))] = \
+                [[[[None if not np.isfinite(v) else round(float(v), 3)
+                    for v in rw] for rw in pd[r][c]]
+                  for c in range(npx)] for r in range(npx)]
+        pixel_diff = {"maps": pix_maps, "channels": ch_grid,
+                      "note": "diff% = (픽셀QE − 동채널 quad 평균)/평균 ×100 · "
+                              "maps[λ][r][c] = 픽셀(r,c)의 field 맵(rows×cols)"}
 
         def j2(a):                                  # NaN -> None (JS JSON 호환)
             return [[(None if not np.isfinite(v) else round(float(v), 5))
@@ -748,7 +764,7 @@ def _run_image_job(jid, cfg_path, p):
                                        "rgb": units[(x, y)]["rgb"]}
                           for (x, y) in units},
                "images": {str(int(w)): j2(images[int(w)]) for w in waves},
-               "mean": j2(mean), "diff": diff}
+               "mean": j2(mean), "diff": diff, "pixel_diff": pixel_diff}
         jp = os.path.join(JOBS_DIR, jid + "_image.json")
         with open(jp, "w", encoding="utf-8") as f:
             json.dump(res, f, ensure_ascii=False)

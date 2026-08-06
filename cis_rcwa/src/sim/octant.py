@@ -119,6 +119,43 @@ def unit_color_diff(arr, labels):
     return out
 
 
+def per_pixel_diff_image(img, labels):
+    """조립된 센서 QE 이미지 → 단위셀 픽셀 하나하나의 field-diff 맵.
+
+    사용자 요구: 4×4 단위셀이면 픽셀 16개 각각에 대해 "센서 전체(field)에서
+    그 픽셀의 동컬러 대비 편차 맵"이 나와야 한다 (Gr/Gb 통계 하나로 뭉개지
+    말 것). 물리: field 위치의 주광선이 렌즈 중심 쪽으로 기울어 초점 스팟이
+    동컬러 2×2 그룹의 중심이 아니라 센서중심 쪽 코너로 치우침 → 그룹 내
+    코너별 신호 차이 (예: 우상단 field 에서 좌하 > 우하=좌상 > 우상).
+
+    입력  img   : assemble_image() 결과 (H,W)=(npx·rows, npx·cols).
+                  타일(I,J)=field, 타일 안 (r,c)=단위셀 픽셀 — 그래서
+                  픽셀 (r,c) 의 field 맵은 단순 스트라이드 img[r::npx, c::npx].
+          labels: npx×npx CFA 라벨 (assemble 과 동일한 것)
+    diff% = (QE_rc − μ_ch) / μ_ch × 100,
+            μ_ch = 그 field 타일에서 같은 채널(refine_channels: R/Gr/Gb/B —
+            tetra 는 동컬러 2×2 quad) 픽셀들의 평균. NaN 타일은 NaN 유지.
+    반환: (diff[npx,npx,rows,cols], 채널격자 npx×npx list)
+    """
+    A = np.asarray(img, float)
+    L = refine_channels(labels)
+    npx = L.shape[0]
+    rows, cols = A.shape[0] // npx, A.shape[1] // npx
+    sub = np.empty((npx, npx, rows, cols))
+    for r in range(npx):
+        for c in range(npx):
+            sub[r, c] = A[r::npx, c::npx]
+    out = np.full_like(sub, np.nan)
+    for ch in {str(v) for v in L.flat}:
+        idx = [(int(r), int(c)) for r, c in np.argwhere(L == ch)]
+        mu = np.nanmean(np.stack([sub[r, c] for r, c in idx]), axis=0)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            for r, c in idx:
+                out[r, c] = np.where(np.abs(mu) > 1e-12,
+                                     (sub[r, c] - mu) / mu * 100.0, np.nan)
+    return out, [[str(v) for v in row] for row in L]
+
+
 # ------------------------------------------------------------- 필드 격자
 def make_xy_fields_set(field_step=0.1, region="octant", x_max=0.8, y_max=0.6):
     """정규화 필드 좌표 (x,y) 목록. octant=1옥탄트(x≥y≥0)만, full=전체.

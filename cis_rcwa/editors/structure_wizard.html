@@ -424,7 +424,7 @@
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
           <span class="hint" id="imgSummary"></span>
           <div class="spacer" style="flex:1"></div>
-          <label class="hint">보기 <select id="imgViewSel"><option value="qe" selected>QE 맵</option><option value="diff">동컬러 diff 맵</option></select></label>
+          <label class="hint">보기 <select id="imgViewSel"><option value="qe" selected>QE 맵</option><option value="diff">동컬러 diff 맵</option><option value="pix">픽셀별 diff 모자이크</option></select></label>
           <label class="hint">λ <select id="imgWlSel" style="min-width:100px"></select></label>
           <a class="btn ghost" id="imgDlPng" download="qe_image.png">⤓ PNG</a>
           <a class="btn ghost" id="imgDlNpz" download="qe_image.npz">⤓ NPZ</a>
@@ -2644,8 +2644,50 @@ function imgDrawDiff(){
   el("imgScale").textContent=`동컬러 diff 맵 · 셀=측정 위치(최악 컬러 표시) · 초록 0% → 빨강 ${thr}%(기준) 이상`
     +` · ${sel==="mean"?"각 컬러 on-band 전체 λ":"λ "+sel+"nm (on-band 컬러만)"} · 최악 ${worstCell.toFixed(1)}%`;
 }
+// ── 픽셀별 diff 모자이크 — 단위셀 픽셀(4×4=16개) 각각의 field-diff 맵을
+//    단위셀 배열 그대로 4×4 로 배열. 소맵 하나 = 센서 전체(field) 좌표,
+//    색 = 그 픽셀의 동채널(quad) 평균 대비 편차%. 물리: 주광선이 렌즈중심
+//    쪽으로 기울어 스팟이 그룹의 센서중심쪽 코너로 치우침 → 코너별 차이.
+function imgPixColor(t){ // t∈[-1,1] → 파랑-흰-빨강 (diverging)
+  const L=(a,b,f)=>[a[0]+(b[0]-a[0])*f,a[1]+(b[1]-a[1])*f,a[2]+(b[2]-a[2])*f];
+  const b=[33,102,172], w=[247,247,247], r=[178,24,43];
+  return t<0? L(w,b,Math.min(1,-t)) : L(w,r,Math.min(1,t)); }
+function imgDrawPixMosaic(){
+  const r=IMG.res, P=r&&r.pixel_diff; if(!P||!P.maps) return;
+  const sel=el("imgWlSel").value, M=P.maps[sel]||P.maps["mean"]; if(!M) return;
+  const npx=M.length, rows=M[0][0].length, cols=M[0][0][0].length;
+  let amax=0;                                            // 대칭 스케일
+  for(let a=0;a<npx;a++)for(let b=0;b<npx;b++)for(const rw of M[a][b])
+    for(const v of rw) if(v!=null&&Math.abs(v)>amax) amax=Math.abs(v);
+  if(!(amax>0)) amax=1e-9;
+  const cv=el("imgCv"), ctx=cv.getContext("2d");
+  ctx.clearRect(0,0,cv.width,cv.height);
+  const CC={R:"#d62728",Gr:"#2ca02c",Gb:"#1f9e63",G:"#2ca02c",B:"#1f77b4"};
+  const gap=8, head=16;
+  const tw=(cv.width-gap*(npx+1))/npx, th=(cv.height-gap*(npx+1)-head*npx)/npx;
+  const sc=Math.min(tw/cols, th/rows);
+  for(let a=0;a<npx;a++)for(let b=0;b<npx;b++){
+    const X0=gap+b*(tw+gap), Y0=gap+a*(th+head+gap)+head;
+    const dw=cols*sc, dh=rows*sc, ox=X0+(tw-dw)/2, oy=Y0+(th-dh)/2;
+    for(let i=0;i<rows;i++)for(let j=0;j<cols;j++){
+      const v=M[a][b][i][j];
+      if(v==null){ ctx.fillStyle="rgba(128,128,128,.25)"; }
+      else{ const c=imgPixColor(v/amax);
+        ctx.fillStyle=`rgb(${c[0]|0},${c[1]|0},${c[2]|0})`; }
+      ctx.fillRect(ox+j*sc, oy+i*sc, Math.ceil(sc), Math.ceil(sc)); }
+    const ch=(P.channels&&P.channels[a]&&P.channels[a][b])||"";
+    ctx.strokeStyle=CC[ch]||"#888"; ctx.lineWidth=2.5;
+    ctx.strokeRect(ox-1.5, oy-1.5, dw+3, dh+3);
+    ctx.fillStyle=CC[ch]||"#888"; ctx.font="600 11px var(--mono,monospace)";
+    ctx.textAlign="center"; ctx.textBaseline="alphabetic";
+    ctx.fillText(`(${a},${b}) ${ch}`, X0+tw/2, Y0-4); }
+  el("imgScale").textContent=`픽셀별 diff 모자이크 · 소맵=센서 전체 field(${cols}×${rows})`
+    +` · 파랑 −${amax.toFixed(1)}% ~ 빨강 +${amax.toFixed(1)}% (동채널 quad 평균 대비)`
+    +` · ${sel==="mean"?"파장 평균":"λ "+sel+"nm"}`;
+}
 function imgDraw(){
   const r=IMG.res; if(!r) return;
+  if(el("imgViewSel").value==="pix"){ imgDrawPixMosaic(); return; }
   if(el("imgViewSel").value==="diff"){ imgDrawDiff(); return; }
   const sel=el("imgWlSel").value;
   const A=(sel==="mean")? r.mean : r.images[sel];
